@@ -1119,23 +1119,30 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // feedback for the press; the file landing has its own sound now.
                 _shutterTick.tryEmit(Unit)
 
-                // **Hold the composition.** Grabbed before the capture starts, so the viewfinder stops on
-                // what you framed instead of carrying on live while the camera thinks. A panel-sized bitmap
-                // copy, a couple of milliseconds.
-                // **Filtered, if the photograph will be.** `previewFrame` hands back the *unfiltered* surface
-                // — the live filter is a `RenderEffect` on the view, which never reaches the bitmap. Holding
-                // that over a filtered viewfinder would show a plain picture and then save a Game Boy one,
-                // which is the same class of dishonesty as the Purikura preview showing one thing and saving
-                // another. So the same shader runs over the held frame, at panel size, where it is a few
-                // milliseconds.
-                _held.value = engine.previewFrame()?.let { panel ->
-                    val look = filter.value
-                    if (look.agsl == null) {
-                        panel
-                    } else {
-                        runCatching {
-                            ShaderRuntime.applyToBitmap(panel, look, Random.nextFloat() * 1000f)
-                        }.getOrDefault(panel)
+                // **Hold the composition, but not when the flash is on.** A flash exposure takes long
+                // enough that the preview frame grabbed here — before the flash has even fired — is a
+                // plainly wrong picture: the scene is dark, the flash hasn't lit it, and the frozen
+                // panel sits there misleading you for however long the capture takes. Without flash
+                // the held frame is roughly what the photograph will look like; with it the preview
+                // is the wrong moment entirely, so the viewfinder stays live and the flash itself
+                // is the freeze-frame the user sees.
+                if (prefs.flash.value == FlashMode.Off) {
+                    // **Filtered, if the photograph will be.** `previewFrame` hands back the
+                    // *unfiltered* surface — the live filter is a `RenderEffect` on the view, which
+                    // never reaches the bitmap. Holding that over a filtered viewfinder would show a
+                    // plain picture and then save a Game Boy one, which is the same class of
+                    // dishonesty as the Purikura preview showing one thing and saving another. So the
+                    // same shader runs over the held frame, at panel size, where it is a few
+                    // milliseconds.
+                    _held.value = engine.previewFrame()?.let { panel ->
+                        val look = filter.value
+                        if (look.agsl == null) {
+                            panel
+                        } else {
+                            runCatching {
+                                ShaderRuntime.applyToBitmap(panel, look, Random.nextFloat() * 1000f)
+                            }.getOrDefault(panel)
+                        }
                     }
                 }
                 val startedAt = System.nanoTime()

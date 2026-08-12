@@ -124,6 +124,15 @@ fun RollScreen(
     val gridState = rememberLazyGridState()
     WheelScroll(gridState, active = active, reverse = true)
 
+    // **Jump to the newest photograph whenever the roll comes into view.** Without this the grid
+    // stays wherever it was last scrolled to — often a day or a week ago — because the pager keeps
+    // it composed while the camera is showing. Scrolling to item 0 with reverseLayout puts the
+    // newest frame at the bottom, right against the viewfinder, which is where a camera's roll
+    // belongs.
+    LaunchedEffect(active) {
+        if (active && entries.isNotEmpty()) gridState.scrollToItem(0)
+    }
+
     // **The thumbnails turn, the grid does not.** Turning the whole screen meant the header, the
     // scroll direction and every control moved the moment you tilted the phone, which is not what a
     // gallery does. So the layout stays put in the phone's own frame and each frame's contents come
