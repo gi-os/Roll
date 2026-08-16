@@ -337,18 +337,17 @@ fun CameraScreen(
     }
     val heldDial = remember(bindings) { vm.prefs.dialFor(Binding.WheelPressTurn) }
 
-    // **The dial lock.** The wheel is shared with the rest of the phone and turns in a pocket, so it
-    // boots locked and a click unlocks it. `unlockWith` is the control that would — found rather than
-    // assumed, because the lock is remappable and a note naming the wrong key is worse than no note.
-    // Nothing bound to it at all switches the lock off entirely; see `Controls.dialLive`.
+    // **The dial lock.** The wheel is shared with the rest of the phone and turns in a pocket, so
+    // with the setting on the dial boots asleep and a click on the wheel wakes it. The setting is
+    // the master switch and it is off until it is asked for — see `Prefs.dialLock` for why that is
+    // not a detail. Nothing is looked up per binding any more: while the setting is on the click is
+    // claimed by `Controls.pressNow`, so there is no mapping in which the dial can be locked with
+    // nothing able to open it.
     val dialLocked by vm.dialLocked.collectAsState()
-    val unlockWith = remember(bindings) {
-        listOf(Binding.WheelClick, Binding.VolumeUp, Binding.VolumeDown)
-            .firstOrNull { vm.prefs.pressFor(it) == PressAction.DialLock }
-    }
+    val dialLockOn by vm.prefs.dialLock.collectAsState()
     val dialLive = Controls.dialLive(
         locked = dialLocked,
-        unlockable = unlockWith != null,
+        lockOn = dialLockOn,
         stripOpen = openStrip != null,
     )
 
@@ -374,7 +373,7 @@ fun CameraScreen(
             // Every locked turn, and it does not stack: the notice is one line of state that
             // replaces itself, so holding the wheel over keeps it up rather than queueing a
             // second copy behind the first.
-            unlockWith?.let { vm.sayDialLocked(it) }
+            vm.sayDialLocked()
         }
     }
     // **Press-and-turn ignores the lock.** You cannot make this gesture in a pocket — it needs the

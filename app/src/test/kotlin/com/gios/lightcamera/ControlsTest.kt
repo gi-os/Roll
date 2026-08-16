@@ -21,75 +21,82 @@ class ControlsTest {
         assertEquals(PressAction.Shutter.name, Binding.VolumeDown.default)
         assertEquals(DialAction.Filter.name, Binding.WheelTurn.default)
         assertEquals(DialAction.Exposure.name, Binding.WheelPressTurn.default)
-        // Was Torch until v2.49. The dial boots locked, so the click has to be the thing that
-        // unlocks it or the wheel would never turn anything out of the box.
-        assertEquals(PressAction.DialLock.name, Binding.WheelClick.default)
+        // Torch, again. v2.49 moved this to the dial lock so a locked dial had something to
+        // open it; v2.50 made the lock a setting that claims the click while it is on, so the
+        // binding underneath went back to what it always was.
+        assertEquals(PressAction.Torch.name, Binding.WheelClick.default)
     }
 
     /* ---------------- the dial lock ---------------- */
 
     @Test
-    fun `the dial is dead while it is locked and something can unlock it`() {
-        assertFalse(Controls.dialLive(locked = true, unlockable = true, stripOpen = false))
-        assertTrue(Controls.dialLive(locked = false, unlockable = true, stripOpen = false))
+    fun `the dial is dead while it is locked and the setting is on`() {
+        assertFalse(Controls.dialLive(locked = true, lockOn = true, stripOpen = false))
+        assertTrue(Controls.dialLive(locked = false, lockOn = true, stripOpen = false))
     }
 
     /**
-     * The trap this avoids: the dial boots locked, so a mapping with nothing pointed at the lock
-     * would be a wheel that never turns anything again — and settings is reached through the mode
-     * picker, which is reached with the wheel. Unbinding the lock switches the feature off instead.
+     * **The v2.49 fault, as a test.** The lock was unconditional and its only way out was a
+     * hardware key; on a phone where LightControl has claimed the wheel system-wide that key never
+     * arrives, so the dial was locked with nothing on the device able to open it — and settings is
+     * reached through the mode picker, which is reached with the wheel.
+     *
+     * With the setting off there is no lock at all, so an update can never take somebody's dial
+     * away and the way back is a row you tap rather than a key that may not exist.
      */
     @Test
-    fun `a mapping with no way to unlock has no lock`() {
-        assertTrue(Controls.dialLive(locked = true, unlockable = false, stripOpen = false))
+    fun `with the setting off the dial always turns`() {
+        assertTrue(Controls.dialLive(locked = true, lockOn = false, stripOpen = false))
+        assertTrue(Controls.dialLive(locked = false, lockOn = false, stripOpen = false))
     }
 
     /** A strip is a value you opened in order to set. Locking it would be locking the wrong turn. */
     @Test
     fun `an open strip takes the wheel whatever the lock says`() {
-        assertTrue(Controls.dialLive(locked = true, unlockable = true, stripOpen = true))
+        assertTrue(Controls.dialLive(locked = true, lockOn = true, stripOpen = true))
     }
 
     @Test
-    fun `the lock can live on any press, and the default puts it on the click`() {
-        assertTrue(
-            Controls.dialUnlockable(
-                volumeUp = PressAction.Shutter,
-                volumeDown = PressAction.Shutter,
-                wheelClick = PressAction.DialLock,
+    fun `the wheel click is claimed by the lock only while the setting is on`() {
+        assertEquals(
+            PressAction.DialLock,
+            Controls.pressNow(
+                Binding.WheelClick, PressAction.Torch,
+                clipPlaying = false, dialLockOn = true,
             ),
         )
-        assertTrue(
-            Controls.dialUnlockable(
-                volumeUp = PressAction.DialLock,
-                volumeDown = PressAction.Shutter,
-                wheelClick = PressAction.Torch,
+        // Off, and the click is the torch again on the very next press — no relaunch, and the
+        // binding underneath was never touched.
+        assertEquals(
+            PressAction.Torch,
+            Controls.pressNow(
+                Binding.WheelClick, PressAction.Torch,
+                clipPlaying = false, dialLockOn = false,
             ),
         )
-        assertFalse(
-            Controls.dialUnlockable(
-                volumeUp = PressAction.Shutter,
-                volumeDown = PressAction.Shutter,
-                wheelClick = PressAction.Torch,
+    }
+
+    /** The lock takes the click and nothing else, however loudly it is switched on. */
+    @Test
+    fun `the lock never claims a volume key`() {
+        assertEquals(
+            PressAction.Shutter,
+            Controls.pressNow(
+                Binding.VolumeUp, PressAction.Shutter,
+                clipPlaying = false, dialLockOn = true,
             ),
         )
     }
 
     /**
-     * The lock must never be able to cost somebody the shutter. It is a separate rule from
-     * [Controls.shutterSafe] and they have to agree: binding the lock over the last shutter is
-     * refused exactly as any other action would be.
+     * The lock is not offered in the key picker, which is what stops it being put on the last
+     * shutter or taken off the click and stranding a locked dial.
      */
     @Test
-    fun `the lock cannot take the last shutter`() {
-        assertFalse(
-            Controls.shutterSafe(
-                volumeUp = PressAction.DialLock,
-                volumeDown = PressAction.Torch,
-                wheelClick = PressAction.DialLock,
-                cameraKeyWorks = false,
-            ),
-        )
+    fun `the lock is not a bindable action`() {
+        assertFalse(PressAction.DialLock in PressAction.assignable)
+        assertTrue(PressAction.Torch in PressAction.assignable)
+        assertEquals(PressAction.entries.size - 1, PressAction.assignable.size)
     }
 
     @Test

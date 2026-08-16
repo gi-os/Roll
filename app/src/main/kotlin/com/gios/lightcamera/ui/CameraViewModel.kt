@@ -521,17 +521,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * place the two can differ, and it is here rather than in [Prefs] because whether a clip is
      * playing is state, not a preference.
      */
-    fun pressFor(binding: Binding): PressAction =
-        Controls.pressNow(binding, prefs.pressFor(binding), clipPlaying)
+    fun pressFor(binding: Binding): PressAction = Controls.pressNow(
+        binding,
+        prefs.pressFor(binding),
+        clipPlaying,
+        // Read at the moment of the press, so turning the setting off hands the wheel click back
+        // to the torch on the very next click rather than at the next launch.
+        dialLockOn = prefs.dialLock.value,
+    )
 
     /**
-     * Whether the dial is locked, which it is at every launch.
+     * Whether the dial is asleep, which it is at every launch while the setting is on.
      *
-     * **Deliberately not a preference.** "Always boot on a locked dial" is the whole of the request:
-     * the wheel is shared with the rest of the phone and turns in a pocket, so the safe state is the
-     * one you start in, and remembering that you unlocked it yesterday would hand the pocket back
-     * the filter dial. It lives exactly as long as the process does — the same span the filter
-     * itself is held for, and for the same reason.
+     * **The state is not remembered; the setting is.** "Always boot on a locked dial" is the whole
+     * of the request — the wheel is shared with the rest of the phone and turns in a pocket, so the
+     * safe state is the one you start in, and remembering that you unlocked it yesterday would hand
+     * the pocket back the filter dial. Whether the lock exists at all is `Prefs.dialLock`, and that
+     * one is remembered, because it is a choice rather than a state.
      */
     private val _dialLocked = MutableStateFlow(true)
     val dialLocked: StateFlow<Boolean> = _dialLocked.asStateFlow()
@@ -549,13 +555,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Said when a locked dial is turned, naming the control that would unlock it.
+     * Said when a locked dial is turned.
      *
-     * Named rather than described, because the lock is remappable: telling somebody to click the
-     * wheel when they have moved the lock to a volume key is worse than saying nothing.
+     * **Names the way out that cannot fail as well as the quick one.** The click is the quick one,
+     * and on a phone where something else has claimed the wheel system-wide it may never arrive —
+     * which in v2.49 left the dial locked with nothing able to open it. Settings is reached by
+     * touch, so it always works, and it belongs in the one line the person is actually reading at
+     * the moment the dial refuses to move.
      */
-    fun sayDialLocked(unlockWith: Binding) {
-        showNotice("Dial locked — ${unlockWith.label.replaceFirstChar { it.lowercaseChar() }}")
+    fun sayDialLocked() {
+        showNotice("Dial locked — click the wheel, or Settings › Keys")
+    }
+
+    /** Turning the setting off has to wake the dial, or the switch appears to do nothing. */
+    fun setDialLock(on: Boolean) {
+        prefs.setDialLock(on)
+        _dialLocked.value = on
+        showNotice(if (on) "Dial locks on launch" else "Dial lock off")
     }
 
     fun press(action: PressAction) {

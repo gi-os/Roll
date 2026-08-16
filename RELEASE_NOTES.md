@@ -1,38 +1,37 @@
-## Roll v2.49 — the dial starts locked, and a click is what opens it
+## Roll v2.50 — the dial lock is a setting, and it is off
 
-**The wheel is not Roll's wheel.** It is the phone's, it is shared with everything else on it, and
-it turns in a pocket. A filter is a decision about one photograph, so a camera being carried
-around should not be making that decision — and it was, which is what this report was about.
+**v2.49 could lock your filter dial with nothing on the phone able to open it. This turns that
+off and gives it a switch.** If the dial has been stuck since yesterday's update, installing this
+unsticks it — the lock is off unless you ask for it.
 
-The dial now **boots locked**, every time the app opens. Click the wheel to unlock it, click again
-to lock it. While it is locked a bare turn moves nothing and puts a line on the panel saying so,
-naming the control that would open it — named rather than described, because the lock is
-remappable and telling you to click the wheel when you have moved the lock to a volume key is
-worse than saying nothing at all.
+The fault was in the escape hatch rather than the lock. v2.49 made a click on the wheel the only
+way to wake the dial, and reasoned that as long as *something* was pointed at the lock there was
+always a way out. That check was about the binding, not about the key: it never asked whether a
+wheel click actually reaches this app. On a phone running LightControl — which binds the wheel
+system-wide, and is the ordinary state of affairs here — it may not. A turn still arrived, so the
+dial reported itself locked; the click did not, so nothing could unlock it. And the way back into
+Settings is the mode picker, which is reached with the wheel. A feature whose only escape is the
+control it disables is not a feature, and no amount of care inside `Controls` was going to fix
+that, because the assumption was outside it.
 
-**Locked is not remembered, and that is the point of it.** Remembering that you unlocked it
-yesterday would hand the pocket back the filter dial the moment you next picked the phone up. It
-lives for as long as the process does, the same span the filter itself is held for, and for the
-same reason.
+So the master switch is now **Settings › Keys › Dial lock**, it is **off by default**, and it is a
+row you tap. Nothing about it depends on the wheel working. Turning it off wakes the dial
+immediately rather than at the next launch, because a switch that appears to do nothing is how
+this went wrong the first time.
 
-Two turns deliberately ignore the lock, and neither is one you can make by accident. **Press and
-turn** needs the wheel held in, so exposure is exactly where it was. **An open strip** is a value
-you opened in order to set, and a strip has always taken the bare wheel for as long as it is open.
-The lock is for the bare turn, which is the only one a pocket can produce.
+With it on, the behaviour is what was asked for and what v2.49 described: the dial starts asleep
+every time the app opens, a click on the wheel wakes it, a second click puts it back, and a bare
+turn while it is asleep says so on the panel instead of moving anything. Press-and-turn and an
+open strip still ignore the lock — neither is a gesture a pocket can make. The notice now names
+both ways out, the click and the settings row, rather than only the quick one.
 
-**The click was the torch, and now it is the lock.** That is a changed default and worth saying
-plainly rather than letting you find it. The torch has not gone anywhere — point either volume key
-at it in Settings → Keys. The click had to be the one that moved: it is the control the report
-asked for, and it is the only one already under the finger that turns the wheel.
+**The torch is back on the wheel click.** v2.49 moved that binding's default to the lock, which
+took the torch away from everybody as a side effect of a feature nobody had switched on. The lock
+now *claims* the click for as long as the setting is on, without touching the binding underneath —
+the same mechanism that already lends the volume keys to a playing clip — so turning the lock off
+hands the click straight back to the torch on the very next press. The lock is no longer offered
+in the key picker at all, which is what stops it being put on your last shutter or taken off the
+click and stranding a locked dial again.
 
-The lock is itself a binding, so it can live on a volume key instead. Point **nothing** at *Lock
-the dial* and the lock switches itself off entirely — a wheel that behaves exactly as it did
-before v2.49. That is deliberate: the dial boots locked, so a mapping with no way to unlock it
-would be a wheel that never turns anything again, and settings is reached through the mode picker,
-which is reached with the wheel. Rather than refuse such a mapping the way the shutter rule
-refuses its own, the feature stands down — unbinding it is a reasonable way to say you never
-wanted it. Binding the lock over your last shutter is still refused, exactly as any other action
-would be.
-
-Fixes [light-reports#28] — a bare turn of the wheel changed the filter with nothing asked for
-first, and there was no note explaining why the dial had moved.
+Fixes [light-reports#28] — the dial lock could not be turned off, and on this phone could not be
+unlocked either.

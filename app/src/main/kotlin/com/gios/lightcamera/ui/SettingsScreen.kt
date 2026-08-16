@@ -336,6 +336,7 @@ private fun ControlsTab(
     warnPaper: Color,
 ) {
     val wheel by vm.prefs.wheelEnabled.collectAsState()
+    val dialLock by vm.prefs.dialLock.collectAsState()
     val bindings by vm.prefs.bindings.collectAsState()
     val slots by vm.prefs.bandSlots.collectAsState()
     val keyProblem = remember { CameraKeyAdvice.problem(context) }
@@ -360,7 +361,7 @@ private fun ControlsTab(
 
     Section("Keys") {
         Note(
-            "The camera button is not on this list and never will be: half press to focus, press through to shoot. Everything else can be pointed somewhere. The defaults: the wheel walks the filters, holding it in and turning is exposure, clicking it locks and unlocks the dial, and either volume key is a shutter. The click was the torch until v2.49 — the torch is still here and either volume key will take it.",
+            "The camera button is not on this list and never will be: half press to focus, press through to shoot. Everything else can be pointed somewhere. The defaults are what the app has always done — the wheel walks the filters, holding it in and turning is exposure, clicking it is the torch, and either volume key is a shutter. v2.49 briefly moved the click to the dial lock; v2.50 gave it back.",
         )
         Note(
             "There is no shutter button on the screen, because the phone has one on its side. So one control has to remain a shutter: if the camera button is being swallowed by an accessibility service — LightControl, most likely — the volume keys are the only shutter left, and an option that would take the last one away is skipped rather than offered.",
@@ -376,7 +377,7 @@ private fun ControlsTab(
         // can expect, and saying it twice reads as a bug in the settings screen.
         if (LightKeys.wheelLabelsPresent()) {
             Note(
-                "The dial starts locked every time the app opens, because the wheel is shared with the rest of the phone and turns in a pocket. Click to unlock, click again to lock; a turn while it is locked says so instead of moving anything. Holding the wheel in and turning is never locked, and neither is an open strip — you cannot make either gesture by accident. Point nothing at Lock the dial and the lock switches itself off.",
+                "Dial lock is off unless you turn it on. With it on, the filter dial starts asleep every time the app opens — the wheel is shared with the rest of the phone and turns in a pocket — and a click on the wheel wakes it, a second click puts it back. A turn while it is asleep says so instead of moving anything. Holding the wheel in and turning is never locked, and neither is an open strip: you cannot make either gesture by accident. While the lock is on the wheel click belongs to it and not to whatever else it is pointed at.",
             )
         }
         Note(
@@ -384,6 +385,12 @@ private fun ControlsTab(
         )
     }
     Setting("Wheel", if (wheel) "On" else "Off") { vm.prefs.setWheelEnabled(!wheel) }
+    // **Reachable by touch, and that is the point of it rather than a convenience.** The lock
+    // disables the wheel, and the wheel is how the mode picker and therefore this screen are
+    // normally reached — so the switch that turns it off must not need the wheel to press it.
+    if (LightKeys.wheelLabelsPresent()) {
+        Setting("Dial lock", if (dialLock) "On" else "Off") { vm.setDialLock(!dialLock) }
+    }
     Binding.entries.forEach { binding ->
         val current = bindings[binding] ?: binding.default
         Setting(
@@ -439,7 +446,7 @@ private fun nextBinding(
     val options: List<String> = if (binding.dial) {
         DialAction.entries.map { it.name }
     } else {
-        PressAction.entries.map { it.name }
+        PressAction.assignable.map { it.name }
     }
     val at = options.indexOf(current).coerceAtLeast(0)
     for (step in 1..options.size) {

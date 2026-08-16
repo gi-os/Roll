@@ -526,6 +526,19 @@ class Prefs(context: Context) {
     val wheelEnabled: StateFlow<Boolean> = _wheelEnabled.asStateFlow()
 
     /**
+     * Whether the filter dial has to be woken before a bare turn will move it.
+     *
+     * **Off by default, and it has to be.** v2.49 shipped this as unconditional behaviour whose only
+     * escape was a hardware key, and on a phone where LightControl has claimed the wheel system-wide
+     * that key never reaches us — so the dial was locked with nothing on the device able to open it,
+     * and the settings screen sits behind the mode picker, which is reached with the wheel. Off by
+     * default means an update can never take somebody's dial away, and the switch that turns it on
+     * is the same one that turns it off.
+     */
+    private val _dialLock = MutableStateFlow(prefs.getBoolean(DIAL_LOCK, false))
+    val dialLock: StateFlow<Boolean> = _dialLock.asStateFlow()
+
+    /**
      * What each physical control does, keyed by [Binding] name.
      *
      * One flow holding the whole map rather than five flows, because the safety rule in
@@ -628,6 +641,8 @@ class Prefs(context: Context) {
 
     fun setWheelEnabled(value: Boolean) = set(_wheelEnabled, value) { putBoolean(WHEEL, value) }
 
+    fun setDialLock(value: Boolean) = set(_dialLock, value) { putBoolean(DIAL_LOCK, value) }
+
     fun setSounds(value: Boolean) = set(_sounds, value) { putBoolean(SOUNDS, value) }
 
     fun setLevel(value: Boolean) = set(_level, value) { putBoolean(LEVEL, value) }
@@ -724,6 +739,7 @@ class Prefs(context: Context) {
         const val SCOPE = "scope"
         const val ROLL_LENGTH = "rollLength"
         const val WHEEL = "wheel"
+        const val DIAL_LOCK = "dialLock"
         const val SOUNDS = "sounds"
         const val LEVEL = "level"
         const val TIMINGS = "timings"
