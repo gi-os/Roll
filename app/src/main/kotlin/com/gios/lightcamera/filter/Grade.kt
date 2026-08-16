@@ -99,25 +99,33 @@ data class Grade(
  */
 enum class Adjust(
     val label: String,
+    /**
+     * What the row says when the list is beside a live viewfinder.
+     *
+     * The panel gives the frame most of the width on purpose — the whole point of adjusting with
+     * the viewfinder up is watching the change land — so the names have to survive a narrow column.
+     * Four to five characters, and unambiguous against each other at a glance.
+     */
+    val shortLabel: String,
     val hint: String,
     val min: Int = Grade.MIN,
     val max: Int = Grade.MAX,
 ) {
-    Exposure("Exposure", "Brighter or darker overall"),
-    Contrast("Contrast", "How far apart the darks and lights sit"),
-    Highlights("Highlights", "Recover a blown sky, or push it whiter"),
-    Shadows("Shadows", "Open up what is in the dark, or crush it"),
-    Vibrance("Vibrance", "Colour, but it leaves skin alone"),
-    Warmth("Warmth", "Toward orange, or toward blue"),
-    Tint("Tint", "Toward magenta, or toward green"),
-    Sharpness("Sharpness", "Crisper edges, or softer ones"),
+    Exposure("Exposure", "Exp", "Brighter or darker overall"),
+    Contrast("Contrast", "Cont", "How far apart the darks and lights sit"),
+    Highlights("Highlights", "High", "Recover a blown sky, or push it whiter"),
+    Shadows("Shadows", "Shad", "Open up what is in the dark, or crush it"),
+    Vibrance("Vibrance", "Vib", "Colour, but it leaves skin alone"),
+    Warmth("Warmth", "Warm", "Toward orange, or toward blue"),
+    Tint("Tint", "Tint", "Toward magenta, or toward green"),
+    Sharpness("Sharpness", "Sharp", "Crisper edges, or softer ones"),
 
     /**
      * The one that only goes up. Grain is something you add; there is no negative grain to take
      * away, and a stepper that offered -5 would be offering nothing.
      */
-    Grain("Grain", "Film texture, added", min = 0),
-    Vignette("Vignette", "Darker corners, or brighter ones"),
+    Grain("Grain", "Grain", "Film texture, added", min = 0),
+    Vignette("Vignette", "Vign", "Darker corners, or brighter ones"),
     ;
 
     /** `0`, `+2`, `-4`. The sign is the point, so zero is the only one shown bare. */

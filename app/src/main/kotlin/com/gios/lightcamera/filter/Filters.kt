@@ -808,117 +808,6 @@ half4 main(float2 xy) {
 """
 
     /**
-     * Datamosh: JPEG compression falling apart, simulated honestly.
-     *
-     * **What is really being modelled.** A JPEG is not pixels. The image is cut into 8x8 blocks,
-     * each block becomes 64 frequency coefficients, the coefficients are quantised against a table
-     * and the whole lot is packed into one continuous Huffman bitstream with no byte alignment
-     * between blocks. Two consequences produce every artifact below:
-     *
-     *  1. **DC coefficients are stored as differences.** Each block's average brightness is written
-     *     as an offset from the previous block's, so an error in one block is inherited by every
-     *     block after it — and since blocks are written in raster order, the error *drags
-     *     sideways*. That drag is the thing people mean by datamoshing.
-     *  2. **Losing the bitstream means losing alignment.** Overwrite a run of scan bytes and the
-     *     decoder is reading block boundaries in the wrong place from there on, so blocks land
-     *     displaced and their detail decodes as noise, until a restart marker resynchronises it.
-     *
-     * The reference implementation this is modelled on (cebola4444/cybershot-cam) does the real
-     * thing: it transplants chunks of the encoded scan over other chunks and rewrites the DQT and
-     * DHT tables in place, after the ESP32's encoder has run. That cannot be a filter here. Every
-     * filter in this app is one shader run over both the viewfinder and the file, which is what
-     * makes the photograph match the frame you were looking at — and a byte hack applied after
-     * encoding has no live form at all. So the *causes* are simulated rather than the bytes:
-     *
-     *  - `broken` is the desync, starting at a per-row break point and healing at a restart band.
-     *  - `shift` is the lost block alignment, growing as the run gets longer.
-     *  - `walk` is the DC difference chain drifting, which is the horizontal smear.
-     *  - the far tap is chroma dragging further than luma, because chroma is subsampled 2:1 and so
-     *    its blocks are twice as wide in the image.
-     *  - `levels` is the quantiser coarsening, which is the blocking.
-     *
-     * Animated, so the damage moves between frames the way a mosh does — and so every shot comes
-     * out differently, which is also true of the real thing.
-     */
-    private const val DATAMOSH = """
-half4 main(float2 xy) {
-    // One DCT block, sized in design pixels so a 12MP capture moshes at the same scale the
-    // viewfinder showed. This is the rule that keeps every patterned filter in this app honest.
-    float blk = unitPx() * 8.0;
-    float2 b = floor(xy / blk);
-    float cols = max(1.0, floor(size.x / blk));
-
-    // **Restart intervals are why the damage comes in bands.** A real encoder drops an RST marker
-    // every so many rows of blocks and the decoder resynchronises there, so corruption cannot run
-    // the whole height of the frame. Six rows is a plausible interval and, more to the point, is
-    // the one that looks right: long enough to smear, short enough that the frame survives.
-    float band = floor(b.y / 6.0);
-    float rowKey = hash(float2(band * 13.0, b.y * 0.37 + floor(seed * 0.05)));
-
-    // Where this row's reader loses the bitstream. Past the right edge for a good fraction of rows,
-    // which is how rows come out clean.
-    float breakAt = floor(hash(float2(b.y, band + seed * 0.017)) * cols * 1.45);
-    float broken = step(breakAt, b.x) * step(0.34, rowKey);
-    float run = max(0.0, b.x - breakAt) * broken;
-
-    // ---- lost block alignment ----
-    // The decoder is now cutting blocks out of the wrong bit offset, so they arrive from somewhere
-    // else along the row. Clamped, or a long run walks the sample position off the frame entirely
-    // and the tail of every broken row is one flat clamped colour.
-    float drift = hash(float2(b.y * 3.1, band + 5.0)) - 0.5;
-    float shift = broken * blk * clamp(floor(drift * 7.0 * (1.0 + run * 0.14)), -16.0, 16.0);
-    float2 p = xy - float2(shift, 0.0);
-
-    // ---- the block itself ----
-    // Four taps at the block's quarter points stand in for its DC coefficient — the average the
-    // encoder actually stores — and what is left over is the detail the AC coefficients carry.
-    float2 centre = (b + 0.5) * blk - float2(shift, 0.0);
-    float q = blk * 0.25;
-    float3 dc = (tap(centre + float2(-q, -q)) + tap(centre + float2(q, -q)) +
-                 tap(centre + float2(-q, q)) + tap(centre + float2(q, q))) * 0.25;
-    float3 ac = tap(p) - dc;
-    // A broken block keeps its average and loses most of its detail, which is what a wrecked AC
-    // run decodes to. Undamaged blocks keep everything: this filter is not a blur.
-    float3 c = dc + ac * mix(1.0, 0.22, broken);
-
-    // ---- the DC difference chain drifting ----
-    // The real thing is a random walk: every block adds its own misread difference to the running
-    // total, so the error accumulates rather than flickering. Summed here as five octaves along the
-    // block row instead of an eighty-iteration loop — same statistics, one frame's worth of work.
-    // Coarse octaves persist across many blocks (the drift), fine ones vary block to block (the
-    // stutter), and the whole thing ramps in over the first dozen blocks past the break, because a
-    // difference chain that has only just gone wrong has not gone very wrong yet.
-    float walk = 0.0;
-    float amp = 1.0;
-    for (int i = 0; i < 5; ++i) {
-        float scale = exp2(float(i));
-        walk += (hash(float2(floor(b.x / scale), b.y + float(i) * 31.0)) - 0.5) * amp;
-        amp *= 0.60;
-    }
-    c += broken * walk * 0.45 * clamp(run * 0.085, 0.0, 1.0);
-
-    // ---- chroma dragging further than luma ----
-    // Chroma is stored at half resolution, so a chroma block covers twice the width of a luma one
-    // and a desync carries its colour twice as far. Keeping this frame's luminance and taking the
-    // colour from further back along the row is exactly that: the shapes stay where they are and
-    // the colour slides off them, which is the smear everyone recognises.
-    float reach = blk * (2.0 + run * 0.55) * broken;
-    float3 far = tap(p - float2(reach, 0.0));
-    float lc = lum(c);
-    c = mix(c, float3(lc, lc, lc) + (far - float3(lum(far))), broken * 0.6);
-
-    // ---- the quantiser coarsening ----
-    // Wrecking the quantisation table is the other half of the reference implementation: low
-    // frequencies amplified, high ones erased. At the pixel level that reads as fewer levels and
-    // harder steps between them, which is this.
-    float levels = mix(26.0, 5.0, broken);
-    c = floor(clamp(c, 0.0, 1.0) * levels + 0.5) / levels;
-
-    return half4(float4(clamp(c, 0.0, 1.0), 1.0));
-}
-"""
-
-    /**
      * A filter, as the rest of the app sees it.
      *
      * [agsl] is null for [none] only. [animated] marks the ones whose look depends on
@@ -961,6 +850,14 @@ half4 main(float2 xy) {
          * ever has a non-neutral one.
          */
         val grade: Grade = Grade.NEUTRAL,
+        /**
+         * Marks the one filter that is not a shader at all.
+         *
+         * Datamosh edits the encoded JPEG after everything else has run — see
+         * [com.gios.lightcamera.filter.Databend]. It therefore has no [agsl], cannot be previewed,
+         * and is applied by `Frames.bend` rather than by `ShaderRuntime`.
+         */
+        val databend: Boolean = false,
     ) {
         /** The whole shader, prelude included. */
         val source: String? get() = agsl?.let { PRELUDE + it }
@@ -990,14 +887,14 @@ half4 main(float2 xy) {
     val preset = Filter("none", "Preset", PRESET, adjustable = true)
 
     /**
-     * Datamosh. Animated, because the damage should move.
+     * Datamosh. **The one filter with no shader and no preview.**
      *
-     * Not `lowRes`: the block grid is sized in design pixels, so a full-resolution capture moshes
-     * at the panel's scale and there is real detail inside the blocks that survive. The dithers
-     * take the viewfinder frame because they genuinely have nothing to gain from more pixels; this
-     * one does.
+     * The viewfinder stays plain while you frame, because there is nothing to show: the damage is
+     * done to the compressed file, and no compressed file exists until the shutter has been pressed.
+     * An approximation was tried and dropped — a preview that shows a different set of artifacts
+     * from the ones you get is worse than a preview that admits it cannot show them.
      */
-    val datamosh = Filter("datamosh", "Datamosh", DATAMOSH, animated = true)
+    val datamosh = Filter("datamosh", "Datamosh", null, databend = true)
 
     /**
      * Which filter to actually run.

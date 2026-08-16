@@ -9,6 +9,8 @@ import com.gios.lightcamera.StampStyle
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.FaceTune
+import com.gios.lightcamera.filter.Databend
+import kotlin.random.Random
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.filter.ShaderRuntime
 import java.io.ByteArrayInputStream
@@ -116,7 +118,7 @@ object Frames {
         // The date back costs a decode and a re-encode on a photograph that would otherwise have
         // been written exactly as the camera produced it. That is the price of printing on the
         // negative, it only applies when the stamp is on, and it is worth saying out loud.
-        if (filter.agsl == null && !needsCrop && stampAt == null) return untouched(frame)
+        if (filter.agsl == null && !needsCrop && stampAt == null) return bend(untouched(frame), filter, seed)
 
         // **A filter must never cost you the photograph.** Everything below decodes a 12-megapixel
         // JPEG into a 48MB bitmap, mirrors it, hands it to a GPU and encodes it again, and any step
@@ -125,12 +127,65 @@ object Frames {
         // shutter was pressed and there are bytes in hand, so the answer to all of it is the
         // sensor's own frame, unfiltered, rather than nothing at all. `runCatching` catches `Error`
         // as well as `Exception`, which for the out-of-memory case is the whole point of it.
-        return runCatching {
-            develop(frame, filter, aspect, seed, stampAt, stampStyle)
-        }.onFailure {
-            Log.e(TAG, "processing failed; writing the frame the sensor gave us", it)
-        }.getOrElse { untouched(frame) }
+        return bend(
+            runCatching {
+                develop(frame, filter, aspect, seed, stampAt, stampStyle)
+            }.onFailure {
+                Log.e(TAG, "processing failed; writing the frame the sensor gave us", it)
+            }.getOrElse { untouched(frame) },
+            filter,
+            seed,
+        )
     }
+
+    /**
+     * Datamosh, which happens **after** everything else and to the encoded file.
+     *
+     * Every other filter is a shader over pixels; this one edits the JPEG the encoder just produced —
+     * its quantisation tables, its Huffman tables and its entropy-coded scan. So it cannot run in
+     * the middle of the pipeline like a shader does, and it cannot be previewed at all: there is no
+     * compressed file to break until the photograph exists. See [Databend].
+     *
+     * The dimensions are carried over from the input rather than re-read. A databent JPEG still
+     * declares the same size in its SOF header — the damage is to how the pixels decode, not to how
+     * many there are — and re-reading would mean decoding a deliberately broken file to ask it a
+     * question we already know the answer to.
+     */
+    private fun bend(processed: Processed, filter: Filters.Filter, seed: Float): Processed {
+        if (!filter.databend) return processed
+        // Seeded from the frame's own seed, so the damage differs shot to shot the way the
+        // reference implementation's does — it drives its randomness off the live exposure reading.
+        val random = Random(seed.toRawBits().toLong())
+        // **Intensity rises as the frame gets darker**, which is the reference's behaviour and not an
+        // arbitrary choice: it scales the glitch by sensor gain, and gain is high exactly when the
+        // photograph is noisy and grainy already. A bright, clean frame gets a light touch.
+        val intensity = 0.35f + 0.5f * (1f - lightness(processed.jpeg))
+        val bent = runCatching { Databend.apply(processed.jpeg, intensity, random) }
+            .onFailure { Log.e(TAG, "databend failed; writing the clean photograph", it) }
+            .getOrDefault(processed.jpeg)
+        return Processed(bent, processed.width, processed.height)
+    }
+
+    /**
+     * Roughly how bright a JPEG is, 0..1, without decoding it properly.
+     *
+     * A 32-pixel-wide thumbnail is enough to tell a night shot from a daylight one, and that is the
+     * only question being asked. Falls back to the middle on anything it cannot read, which gives
+     * the default intensity.
+     */
+    private fun lightness(jpeg: ByteArray): Float = runCatching {
+        val opts = BitmapFactory.Options().apply { inSampleSize = 32 }
+        val small = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts) ?: return 0.5f
+        var total = 0L
+        val pixels = IntArray(small.width * small.height)
+        small.getPixels(pixels, 0, small.width, 0, 0, small.width, small.height)
+        small.recycle()
+        if (pixels.isEmpty()) return 0.5f
+        pixels.forEach { p ->
+            total += ((p shr 16 and 0xFF) * 30 + (p shr 8 and 0xFF) * 59 + (p and 0xFF) * 11) / 100
+        }
+        (total.toFloat() / pixels.size / 255f).coerceIn(0f, 1f)
+    }.getOrDefault(0.5f)
 
     /** The sensor's own JPEG, measured but otherwise left alone. */
     private fun untouched(frame: CapturedFrame): Processed {
@@ -246,7 +301,11 @@ object Frames {
         if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle)
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 4)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-        return Processed(out.toByteArray(), bitmap.width, bitmap.height)
+        // **Datamosh has to be applied here as well as in [process].** This is the whole capture
+        // path at `Screen` size and the rescue path when the sensor times out, so a databend applied
+        // only in `process` would have Datamosh silently produce a clean photograph — with nothing
+        // on screen to say why.
+        return bend(Processed(out.toByteArray(), bitmap.width, bitmap.height), filter, seed)
     }
 
     /** The dimensions of a JPEG without decoding it. */

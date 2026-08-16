@@ -98,6 +98,21 @@ class GradeTest {
     }
 
     @Test
+    fun `the preference keys never drift`() {
+        // The grade is stored one SharedPreferences key per adjustment, named off the enum constant.
+        // Renaming a constant would therefore silently reset every saved preset to zero on upgrade —
+        // the key would simply not be found and the default would win, with no error anywhere. This
+        // test is the only thing standing between a refactor and that.
+        assertEquals(
+            listOf(
+                "Exposure", "Contrast", "Highlights", "Shadows", "Vibrance",
+                "Warmth", "Tint", "Sharpness", "Grain", "Vignette",
+            ),
+            Adjust.entries.map { it.name },
+        )
+    }
+
+    @Test
     fun `adjustment labels fit the menu`() {
         Adjust.entries.forEach { adjust ->
             assertTrue("${adjust.label} is too long", adjust.label.length <= 12)

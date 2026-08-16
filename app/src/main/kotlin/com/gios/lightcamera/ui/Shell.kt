@@ -40,6 +40,12 @@ import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.lightClickable
 import kotlinx.coroutines.launch
 
+/** What the roll needs to read: stills and clips are two tables with two permissions. */
+private val MEDIA_PERMISSIONS = arrayOf(
+    Manifest.permission.READ_MEDIA_IMAGES,
+    Manifest.permission.READ_MEDIA_VIDEO,
+)
+
 private const val PAGE_ROLL = 0
 private const val PAGE_CAMERA = 1
 
@@ -78,10 +84,15 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                 PackageManager.PERMISSION_GRANTED,
         )
     }
+    // **Both halves, and images alone is not enough.** The roll reads stills and clips out of two
+    // MediaStore tables, and each table has its own granular permission since API 33. Held to
+    // images only, every video not recorded by this app is missing from the roll and refuses to
+    // play in the viewer — which looks like the roll dropping clips rather than like a permission.
     var mediaGranted by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) ==
-                PackageManager.PERMISSION_GRANTED,
+            MEDIA_PERMISSIONS.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            },
         )
     }
 
@@ -89,14 +100,21 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         cameraGranted = result[Manifest.permission.CAMERA] ?: cameraGranted
-        mediaGranted = result[Manifest.permission.READ_MEDIA_IMAGES] ?: mediaGranted
+        // **Re-queried rather than read out of the result map.** The map omits anything that was
+        // already granted, so folding it into the old value can only ever keep a false false — and
+        // since the launcher is only reached when `mediaGranted` is false, granting both would have
+        // left the roll permanently in its refusal state until the app was killed and relaunched.
+        // Asking the system is correct for the omitted case and the refused one alike.
+        mediaGranted = MEDIA_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
         if (mediaGranted) vm.onPermissionsChanged()
     }
 
     LaunchedEffect(Unit) {
         val wanted = buildList {
             if (!cameraGranted) add(Manifest.permission.CAMERA)
-            if (!mediaGranted) add(Manifest.permission.READ_MEDIA_IMAGES)
+            if (!mediaGranted) addAll(MEDIA_PERMISSIONS)
         }
         if (wanted.isNotEmpty()) ask.launch(wanted.toTypedArray())
     }
@@ -151,9 +169,7 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
             CameraScreen(
                 vm = vm,
                 active = true,
-                onOpenRoll = {},
                 onOpenSettings = {},
-                rollSwipeEnabled = false,
             )
         } else {
             VerticalPager(
@@ -170,7 +186,7 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                         vm = vm,
                         active = pager.currentPage == PAGE_ROLL,
                         mediaGranted = mediaGranted,
-                        onRequestMedia = { ask.launch(arrayOf(Manifest.permission.READ_MEDIA_IMAGES)) },
+                        onRequestMedia = { ask.launch(MEDIA_PERMISSIONS) },
                         onOpen = { viewing = it },
                         onOpenSettings = { settingsOpen = true },
                         onBackToCamera = {
@@ -182,9 +198,7 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                     else -> CameraScreen(
                         vm = vm,
                         active = pager.currentPage == PAGE_CAMERA && viewing == null && !settingsOpen,
-                        onOpenRoll = { scope.launch { pager.animateScrollToPage(PAGE_ROLL) } },
                         onOpenSettings = { settingsOpen = true },
-                        rollSwipeEnabled = true,
                     )
                 }
             }

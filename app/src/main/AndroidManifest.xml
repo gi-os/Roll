@@ -10,6 +10,13 @@
     <!-- The roll above the viewfinder is the device's real camera roll, not a private
          folder, so the whole of DCIM has to be readable. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!--
+      The roll shows clips as well as stills, so it needs the video half of the granular media
+      permissions too. Without it a video this app recorded is still visible - an app always owns
+      what it inserted - but anything recorded by anything else is invisible to the query and
+      unplayable in the viewer, which reads as the roll losing videos at random.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!--
         The send picker is a list of people, not a grid of apps. Android gives a third-party app

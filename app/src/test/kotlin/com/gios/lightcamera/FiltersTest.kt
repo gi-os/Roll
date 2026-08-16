@@ -34,10 +34,23 @@ class FiltersTest {
     }
 
     @Test
-    fun `only None has no shader`() {
+    fun `the only filters without a shader are the two that must not have one`() {
+        // None, because a plain photograph is the sensor's own JPEG written untouched, and Datamosh,
+        // because it edits the compressed file rather than the pixels and so cannot be a shader at
+        // all. Anything else appearing here is a filter that silently does nothing.
         val without = Filters.all.filter { it.agsl == null }
-        assertEquals(listOf("none"), without.map { it.id })
+        assertEquals(listOf("none", "datamosh"), without.map { it.id })
         assertNull(Filters.none.source)
+        assertTrue("datamosh must declare itself a databend", Filters.datamosh.databend)
+    }
+
+    @Test
+    fun `a databend filter has no shader and no preview`() {
+        Filters.all.filter { it.databend }.forEach { filter ->
+            assertNull("${filter.id} is a databend and must have no shader", filter.agsl)
+            assertTrue("${filter.id} must not animate a preview it does not have", !filter.animated)
+            assertTrue("${filter.id} must not claim to be low-res", !filter.lowRes)
+        }
     }
 
     @Test

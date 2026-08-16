@@ -116,9 +116,7 @@ private val BAND = 54.dp
 fun CameraScreen(
     vm: CameraViewModel,
     active: Boolean,
-    onOpenRoll: () -> Unit,
     onOpenSettings: () -> Unit,
-    rollSwipeEnabled: Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -399,10 +397,18 @@ fun CameraScreen(
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // **The band's first slot is Adjust, not the album.** The roll is already
+                        // one swipe from the viewfinder and that is how it is reached in practice,
+                        // so the icon was spending a permanent slot on a shortcut to a gesture.
+                        // The adjustments had no home at all, which is the worse problem.
                         ChromeIcon(
-                            icon = LightIcons.Album,
-                            onClick = onOpenRoll,
-                            lighten = !rollSwipeEnabled,
+                            // **Not the brightness glyph**, which the exposure slot already uses by
+                            // default — the same icon twice in one band, meaning two different
+                            // things, is worse than either choice of icon. Rows of lines reads as a
+                            // stack of sliders, which is what is behind it.
+                            icon = LightIcons.List,
+                            onClick = { if (presetOffered) presetOpen = !presetOpen },
+                            lighten = !presetOffered,
                         )
                         Spacer(Modifier.weight(1f))
                         // The stock camera's "PHOTO ⌄": what the camera is set to, and a
@@ -419,7 +425,13 @@ fun CameraScreen(
                             // the thing the wheel changes. Video, Selfie and Simple keep their own names,
                             // because in those the mode *is* the news.
                             LightText(
-                                text = if (mode == CaptureMode.Photo) {
+                                // **The filter's name, unless there isn't one to report.** Which
+                                // filter is on is the one piece of state you cannot read off the
+                                // picture with certainty, so in Pro the slot names it. But the first
+                                // slot is Preset, and "PRESET" sitting in the band says nothing —
+                                // it is the default, and whether anything is set is the Adjust
+                                // chip's job to show. So that case falls back to the mode.
+                                text = if (mode == CaptureMode.Photo && !presetOffered) {
                                     filter.label.uppercase()
                                 } else {
                                     mode.bandLabel
@@ -451,34 +463,6 @@ fun CameraScreen(
                                 )
                                 Spacer(Modifier.width(7.dp))
                                 Chevron(pointingUp = puriOpen)
-                            }
-                            Spacer(Modifier.weight(1f))
-                        }
-                        // The Preset chip, in the slot the Purikura one uses and for the same
-                        // reason: there are ten adjustments behind it, and a chip that stepped one
-                        // of them and hid the other nine would be a worse version of both controls.
-                        // Only in the first slot on the dial, and only where a filter applies at
-                        // all — video, QR and Simple all write the sensor's own frame.
-                        if (presetOffered) {
-                            Row(
-                                modifier = Modifier
-                                    .lightClickable { presetOpen = !presetOpen }
-                                    .padding(horizontal = 6.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                LightText(
-                                    // The count is the state you cannot read off the picture: a
-                                    // photograph a third of a stop warm looks like a photograph.
-                                    text = if (grade.touched == 0) {
-                                        "ADJUST"
-                                    } else {
-                                        "ADJUST " + grade.touched
-                                    },
-                                    variant = LightTextVariant.Button,
-                                    align = TextAlign.Center,
-                                )
-                                Spacer(Modifier.width(7.dp))
-                                Chevron(pointingUp = presetOpen)
                             }
                             Spacer(Modifier.weight(1f))
                         }
@@ -825,11 +809,12 @@ fun CameraScreen(
         }
 
         if (presetOpen && presetOffered) {
-            PresetMenu(
+            AdjustPanel(
                 grade = grade,
                 onStep = { adjust, by -> vm.prefs.stepGrade(adjust, by) },
                 onReset = { vm.prefs.clearGrade() },
                 onClose = { presetOpen = false },
+                modifier = Modifier.padding(start = BAND),
             )
         }
         if (modeOpen) {
@@ -2110,21 +2095,21 @@ private fun ScanAction(label: String, lighten: Boolean = false, onTap: () -> Uni
 }
 
 /**
- * The ten adjustments behind Preset, on one screen.
+ * The ten adjustments, in a column beside a **live** viewfinder.
  *
- * **The whole panel, not a strip beside the band** — the same call the Purikura menu makes, for the
- * same reason. Ten rows will not fit beside the band on a 3.92" screen held sideways, and a menu you
- * have to scroll to find half of is a menu that hides half its options.
+ * **The frame stays up, and that is the entire design.** A grade is not a setting you can reason
+ * about from its numbers — "warmth +2" means nothing until you see it on the thing you are pointing
+ * at — so a full-screen menu was the wrong shape for it. The list takes a narrow strip and the
+ * photograph keeps the rest, which is why the labels are [Adjust.shortLabel] and why the hint line
+ * was dropped: at this width they would not fit, and with the picture right there they are not
+ * needed.
  *
- * **Steppers, not sliders.** Each row is `- value +`, because the two ways you touch this phone are
- * a thumb on a small panel and a click wheel, and neither can land a continuous slider on a value.
- * Eleven positions with a detent at zero is a control you can drive by counting.
- *
- * The hint under the highlighted row rather than under every one: ten rows each carrying two lines
- * is a wall of text, and the only row whose meaning you need explained is the one you are on.
+ * Only the strip swallows taps. The viewfinder beside it is left alone so the shutter, the wheel and
+ * the half press all still work while the panel is open — you adjust and shoot without closing
+ * anything, which is the whole reason to keep the frame visible.
  */
 @Composable
-private fun PresetMenu(
+private fun AdjustPanel(
     grade: Grade,
     onStep: (Adjust, Int) -> Unit,
     onReset: () -> Unit,
@@ -2132,112 +2117,104 @@ private fun PresetMenu(
     modifier: Modifier = Modifier,
 ) {
     val colours = LightThemeTokens.colors
-    var focused by remember { mutableStateOf(Adjust.Exposure) }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colours.background)
-            // Eats every touch: the swipe down to the roll is a drag on a pager two levels up, and
-            // a background does not stop one.
-            .swallowTaps(),
-    ) {
-        HeldSideways {
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LightText(text = "ADJUST", variant = LightTextVariant.Detail)
-                    Spacer(Modifier.weight(1f))
-                    // Reset is only there when there is something to reset. A dead control in a
-                    // menu is a control you have to test to find out is dead.
-                    if (grade.touched > 0) {
-                        ChromeLabel(text = "Reset", lighten = true, onClick = onReset)
-                        Spacer(Modifier.width(10.dp))
-                    }
-                    ChromeIcon(icon = LightIcons.Close, lighten = true, onClick = onClose)
-                }
+    Box(modifier = modifier.fillMaxSize()) {
+        // Transparent, so the photograph is still there beside the strip. This is the only caller
+        // that passes it; see [HeldSideways].
+        HeldSideways(opaque = false) {
+            Row(Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
+                        .fillMaxHeight()
+                        .weight(ADJUST_COLUMN)
+                        // A scrim rather than the solid background: the strip has to be readable
+                        // over whatever is behind it without becoming a second opaque panel.
+                        .background(colours.scrim)
+                        .swallowTaps()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    Adjust.entries.forEach { adjust ->
-                        AdjustRow(
-                            adjust = adjust,
-                            value = grade[adjust],
-                            focused = adjust == focused,
-                            onStep = { by ->
-                                focused = adjust
-                                onStep(adjust, by)
-                            },
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LightText(text = "ADJUST", variant = LightTextVariant.Superfine)
+                        Spacer(Modifier.weight(1f))
+                        if (grade.touched > 0) {
+                            LightText(
+                                text = "RESET",
+                                variant = LightTextVariant.Superfine,
+                                lighten = true,
+                                modifier = Modifier
+                                    .lightClickable(onClick = onReset)
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                            )
+                        }
+                        ChromeIcon(
+                            icon = LightIcons.Close,
+                            size = 11.dp,
+                            lighten = true,
+                            onClick = onClose,
                         )
                     }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Adjust.entries.forEach { adjust ->
+                            AdjustRow(
+                                adjust = adjust,
+                                value = grade[adjust],
+                                onStep = { by -> onStep(adjust, by) },
+                            )
+                        }
+                    }
                 }
-                LightText(
-                    text = focused.hint,
-                    variant = LightTextVariant.Superfine,
-                    lighten = true,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                // The photograph. Nothing is drawn over it and nothing intercepts it.
+                Spacer(Modifier.weight(1f - ADJUST_COLUMN).fillMaxHeight())
             }
         }
     }
 }
 
 /**
- * One adjustment: name on the left, `-`, the value, `+`.
+ * How much of the width the strip takes. The frame keeps the rest.
  *
- * The value is drawn in a fixed-width box so the plus does not shuffle sideways between `0` and
- * `-5` — a control that moves under your thumb as you use it is a control you cannot hold down.
+ * A third was too wide to be worth it and a fifth could not fit `Sharp` beside `+2`. This is the
+ * narrowest the column goes without the numbers wrapping.
+ */
+private const val ADJUST_COLUMN = 0.28f
+
+/**
+ * One adjustment: short name, then `-`, the value, `+`.
  *
- * At the end of a range the arrow goes dim and stops. No wrap: an exposure that jumps from +5 to -5
- * because you pressed once more is the kind of surprise this app is trying not to have, and unlike
- * the filter dial there is nothing circular about a scale with a middle.
+ * The value sits in a fixed-width box so the plus does not shuffle sideways between `0` and `-5` —
+ * a control that moves under your thumb as you use it is one you cannot hold down. At the end of a
+ * range the arrow dims and stops; no wrap, because unlike the filter dial a scale with a middle has
+ * nothing circular about it, and jumping from +5 to -5 on one press is the kind of surprise this app
+ * is trying not to have.
  */
 @Composable
-private fun AdjustRow(
-    adjust: Adjust,
-    value: Int,
-    focused: Boolean,
-    onStep: (Int) -> Unit,
-) {
-    val colours = LightThemeTokens.colors
-    val set = value != 0
+private fun AdjustRow(adjust: Adjust, value: Int, onStep: (Int) -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LightText(
-            text = adjust.label,
-            variant = LightTextVariant.Button,
-            // Set adjustments read at full strength and untouched ones recede, so a glance at the
-            // menu tells you what this preset is without reading ten numbers.
-            lighten = !set && !focused,
+            text = adjust.shortLabel,
+            variant = LightTextVariant.Superfine,
+            // Set adjustments read at full strength and untouched ones recede, so a glance tells
+            // you what this preset is without reading ten numbers.
+            lighten = value == 0,
         )
         Spacer(Modifier.weight(1f))
-        Stepper(text = "−", enabled = value > adjust.min) { onStep(-1) }
-        Box(
-            modifier = Modifier.width(38.dp),
-            contentAlignment = Alignment.Center,
-        ) {
+        Stepper(text = "-", enabled = value > adjust.min) { onStep(-1) }
+        Box(modifier = Modifier.width(22.dp), contentAlignment = Alignment.Center) {
             LightText(
                 text = adjust.display(value),
-                variant = LightTextVariant.Button,
+                variant = LightTextVariant.Superfine,
                 align = TextAlign.Center,
-                lighten = !set,
+                lighten = value == 0,
             )
         }
         Stepper(text = "+", enabled = value < adjust.max) { onStep(1) }
-    }
-    if (focused) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(colours.rule),
-        )
     }
 }
 
@@ -2251,8 +2228,6 @@ private fun Stepper(text: String, enabled: Boolean, onClick: () -> Unit) {
         lighten = !enabled,
         modifier = Modifier
             .lightClickable(enabled = enabled, onClick = onClick)
-            // A generous target: this is the control you press most in this menu, and the two
-            // arrows are eight design pixels apart at the glyph.
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 7.dp, vertical = 2.dp),
     )
 }

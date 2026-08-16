@@ -63,8 +63,15 @@ import kotlin.math.atan2
  * down the strip, so a `Row` written the ordinary way round reads top-to-bottom on screen.
  */
 @Composable
-fun HeldSideways(content: @Composable () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+fun HeldSideways(opaque: Boolean = true, content: @Composable () -> Unit) {
+    // **[opaque] exists for the one caller that draws over a live viewfinder.** The black fill is
+    // right for a panel that replaces the picture and fatal for one that sits beside it — the Adjust
+    // strip's whole argument is that you can watch the frame change while you set a value, and a
+    // full-bleed background behind it turns that frame into a black rectangle. `RotatedToDevice`
+    // carries the same switch for the same reason.
+    BoxWithConstraints(
+        Modifier.fillMaxSize().then(if (opaque) Modifier.background(Color.Black) else Modifier),
+    ) {
         val across = maxHeight
         val down = maxWidth
         Box(

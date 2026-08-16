@@ -1,6 +1,5 @@
 package com.gios.lightcamera.ui
 
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,13 +38,16 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelTurns
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.Path
 import com.gios.lightcamera.media.durationLabel
+import android.widget.VideoView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.rememberUpdatedState
+import android.net.Uri
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.ui.theme.LightIcons
 import com.gios.lightcamera.ui.theme.LightText
@@ -71,7 +73,7 @@ fun ViewerScreen(
     onClose: () -> Unit,
     onSend: (List<Photo>) -> Unit,
 ) {
-    val context = LocalContext.current
+    var playing by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
     val colours = LightThemeTokens.colors
     val roll by vm.photos.collectAsState()
@@ -176,6 +178,9 @@ fun ViewerScreen(
         // Pinch to zoom, drag to move about, double tap to come back. The pager keeps the
         // horizontal drag until you are zoomed in, at which point panning has to win or a zoomed
         // photograph is impossible to look around.
+        // Which clip is playing, by id. **Cleared whenever the page changes**, so swiping to the
+        // next photograph stops the audio rather than leaving a clip running behind a still.
+        LaunchedEffect(pager.currentPage) { playing = null }
         HorizontalPager(
             state = pager,
             userScrollEnabled = !zoomed,
@@ -255,26 +260,35 @@ fun ViewerScreen(
                         }
                     }
                 }
-                // **A clip gets a play triangle over its poster frame, and that is the whole
-                // player.** Decoding video in here would mean a surface, a codec and a transport
-                // inside a pager that is already arbitrating pinch against swipe — for a thing the
-                // phone already has an app for. So the frame is shown, and the triangle hands the
-                // clip to whatever plays video on this phone, with the read grant attached.
+                // **The player is in here, because on this phone there is nowhere else.**
+                //
+                // This used to hand the clip to `ACTION_VIEW` and let the system pick a player,
+                // which is the polite Android thing to do and was wrong here: LightOS ships almost
+                // no apps, so on most phones nothing claimed the intent and tapping a video did
+                // nothing but show a notice. A camera whose own roll cannot play its own recordings
+                // is not finished.
+                //
+                // `VideoView` rather than a codec and a surface by hand: it is a `MediaPlayer`, a
+                // `SurfaceView` and the state machine between them, which is exactly the part that
+                // is fiddly to get right and nothing here needs to be clever about.
                 if (photo.isVideo) {
-                    PlayBadge(
-                        label = photo.durationLabel(),
-                        modifier = Modifier.align(Alignment.Center),
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(photo.uri, "video/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            // No player installed is a real state on a phone this stripped, and an
-                            // ActivityNotFoundException out of a tap on a photograph is not.
-                            runCatching { context.startActivity(intent) }
-                                .onFailure { vm.showNotice("No app here plays video") }
-                        },
-                    )
+                    if (playing == photo.id) {
+                        VideoSurface(
+                            uri = photo.uri,
+                            quarter = quarter,
+                            onEnded = { playing = null },
+                            onFailed = {
+                                playing = null
+                                vm.showNotice("That clip wouldn't play")
+                            },
+                        )
+                    } else {
+                        PlayBadge(
+                            label = photo.durationLabel(),
+                            modifier = Modifier.align(Alignment.Center),
+                            onClick = { playing = photo.id },
+                        )
+                    }
                 }
             }
         }
@@ -550,4 +564,64 @@ private fun PlayBadge(label: String, onClick: () -> Unit, modifier: Modifier = M
                 .padding(horizontal = 4.dp, vertical = 1.dp),
         )
     }
+}
+
+/**
+ * A clip, playing.
+ *
+ * `VideoView` is an old widget and the right one: it wraps a `MediaPlayer` and a `SurfaceView` and
+ * owns the handshake between them, which is the only genuinely awkward part of playing a file. It
+ * takes a MediaStore `content://` URI directly, so there is no path to resolve and no file to copy.
+ *
+ * **Turned with the photograph, not with the phone.** The activity is locked to portrait, so a clip
+ * recorded holding the phone sideways arrives rotated exactly like a still does — and it is rotated
+ * here the same way, by [quarter], so a video and the photograph before it in the roll are the same
+ * way up.
+ *
+ * Starts as soon as it is ready and reports back when it ends, so the caller can put the poster
+ * frame and the triangle back rather than leaving a black rectangle. Errors do the same: a clip that
+ * will not decode returns you to a still you can still look at.
+ */
+@Composable
+private fun VideoSurface(
+    uri: Uri,
+    quarter: Int,
+    onEnded: () -> Unit,
+    onFailed: () -> Unit,
+) {
+    val current = rememberUpdatedState(onEnded)
+    val failed = rememberUpdatedState(onFailed)
+    AndroidView(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { rotationZ = quarter.toFloat() },
+        factory = { ctx ->
+            VideoView(ctx).apply {
+                setOnPreparedListener { player ->
+                    // Looping is wrong for a camera roll: a clip should end so you can see it has,
+                    // and the triangle coming back is what says so.
+                    player.isLooping = false
+                    start()
+                }
+                setOnCompletionListener { current.value() }
+                setOnErrorListener { _, _, _ ->
+                    failed.value()
+                    // True: the error is handled here, and returning false would let the widget put
+                    // up its own system dialog on top of the photograph.
+                    true
+                }
+            }
+        },
+        update = { view ->
+            if (view.tag != uri) {
+                view.tag = uri
+                view.setVideoURI(uri)
+            }
+        },
+        onRelease = { view ->
+            // Without this the MediaPlayer outlives the composable and the audio keeps going after
+            // the viewer is closed — the classic version of this bug.
+            runCatching { view.stopPlayback() }
+        },
+    )
 }
