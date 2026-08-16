@@ -360,7 +360,7 @@ private fun ControlsTab(
 
     Section("Keys") {
         Note(
-            "The camera button is not on this list and never will be: half press to focus, press through to shoot. Everything else can be pointed somewhere. The defaults are what the app has always done — the wheel walks the filters, holding it in and turning is exposure, clicking it is the torch, and either volume key is a shutter.",
+            "The camera button is not on this list and never will be: half press to focus, press through to shoot. Everything else can be pointed somewhere. The defaults: the wheel walks the filters, holding it in and turning is exposure, clicking it locks and unlocks the dial, and either volume key is a shutter. The click was the torch until v2.49 — the torch is still here and either volume key will take it.",
         )
         Note(
             "There is no shutter button on the screen, because the phone has one on its side. So one control has to remain a shutter: if the camera button is being swallowed by an accessibility service — LightControl, most likely — the volume keys are the only shutter left, and an option that would take the last one away is skipped rather than offered.",
@@ -372,6 +372,13 @@ private fun ControlsTab(
                 "This build doesn't map the wheel keys, so the three wheel rows below may do nothing. The volume keys are AOSP keycodes and work on any build."
             },
         )
+        // Only where there is a wheel to lock. The note above already says what a build without one
+        // can expect, and saying it twice reads as a bug in the settings screen.
+        if (LightKeys.wheelLabelsPresent()) {
+            Note(
+                "The dial starts locked every time the app opens, because the wheel is shared with the rest of the phone and turns in a pocket. Click to unlock, click again to lock; a turn while it is locked says so instead of moving anything. Holding the wheel in and turning is never locked, and neither is an open strip — you cannot make either gesture by accident. Point nothing at Lock the dial and the lock switches itself off.",
+            )
+        }
         Note(
             "A key set to Nothing is given back to the phone rather than eaten, so a volume key with no job here still changes the volume.",
         )

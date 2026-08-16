@@ -524,6 +524,40 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     fun pressFor(binding: Binding): PressAction =
         Controls.pressNow(binding, prefs.pressFor(binding), clipPlaying)
 
+    /**
+     * Whether the dial is locked, which it is at every launch.
+     *
+     * **Deliberately not a preference.** "Always boot on a locked dial" is the whole of the request:
+     * the wheel is shared with the rest of the phone and turns in a pocket, so the safe state is the
+     * one you start in, and remembering that you unlocked it yesterday would hand the pocket back
+     * the filter dial. It lives exactly as long as the process does — the same span the filter
+     * itself is held for, and for the same reason.
+     */
+    private val _dialLocked = MutableStateFlow(true)
+    val dialLocked: StateFlow<Boolean> = _dialLocked.asStateFlow()
+
+    /**
+     * Toggle it, and say which way it went.
+     *
+     * The notice is the only feedback there is — nothing else on the panel changes — so it is not
+     * optional. A lock whose state you cannot see is a wheel that intermittently does nothing.
+     */
+    fun toggleDialLock() {
+        val locked = !_dialLocked.value
+        _dialLocked.value = locked
+        showNotice(if (locked) "Dial locked" else "Dial unlocked")
+    }
+
+    /**
+     * Said when a locked dial is turned, naming the control that would unlock it.
+     *
+     * Named rather than described, because the lock is remappable: telling somebody to click the
+     * wheel when they have moved the lock to a volume key is worse than saying nothing.
+     */
+    fun sayDialLocked(unlockWith: Binding) {
+        showNotice("Dial locked — ${unlockWith.label.replaceFirstChar { it.lowercaseChar() }}")
+    }
+
     fun press(action: PressAction) {
         when (action) {
             PressAction.Shutter -> shoot()
@@ -533,6 +567,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             PressAction.Timer -> cycleTimer()
             PressAction.Exposure -> openStripOrSayWhyNot(Strip.Exposure)
             PressAction.Zoom -> openStripOrSayWhyNot(Strip.Zoom)
+            PressAction.DialLock -> toggleDialLock()
             PressAction.Nothing -> Unit
         }
     }

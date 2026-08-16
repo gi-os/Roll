@@ -77,6 +77,7 @@ import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.CameraKeyAdvice
+import com.gios.lightcamera.hw.Controls
 import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
 import com.gios.lightcamera.ocr.TextBoxes
@@ -336,6 +337,21 @@ fun CameraScreen(
     }
     val heldDial = remember(bindings) { vm.prefs.dialFor(Binding.WheelPressTurn) }
 
+    // **The dial lock.** The wheel is shared with the rest of the phone and turns in a pocket, so it
+    // boots locked and a click unlocks it. `unlockWith` is the control that would — found rather than
+    // assumed, because the lock is remappable and a note naming the wrong key is worse than no note.
+    // Nothing bound to it at all switches the lock off entirely; see `Controls.dialLive`.
+    val dialLocked by vm.dialLocked.collectAsState()
+    val unlockWith = remember(bindings) {
+        listOf(Binding.WheelClick, Binding.VolumeUp, Binding.VolumeDown)
+            .firstOrNull { vm.prefs.pressFor(it) == PressAction.DialLock }
+    }
+    val dialLive = Controls.dialLive(
+        locked = dialLocked,
+        unlockable = unlockWith != null,
+        stripOpen = openStrip != null,
+    )
+
     // **Unarmed for the filters, armed for a value.** Each filter notch has to count — None is
     // three notches wide on the track so a stray one lands somewhere harmless — whereas exposure
     // and zoom are values you rack through, where swallowing the overflow makes the dial feel
@@ -343,12 +359,27 @@ fun CameraScreen(
     // **Nothing scrolls while the Purikura menu is open.** The menu is a list of five things you are
     // reading; a wheel that walked the filters underneath it would change the picture behind the menu
     // and take Purikura away, closing the menu you were using.
+    //
+    // The lock is read **inside** the route rather than switching it off, so that a turn against a
+    // locked dial is still received and can be answered. A route that simply went inactive would
+    // give a wheel that silently does nothing, which is the fault this feature exists to fix rather
+    // than a way of fixing it.
     WheelTurns(
         active = active && wheelEnabled && !puriOpen && bareDial != DialAction.Nothing,
         armed = bareDial != DialAction.Filter,
     ) { notches ->
-        turnDial(vm, engine, bareDial, notches)
+        if (dialLive) {
+            turnDial(vm, engine, bareDial, notches)
+        } else {
+            // Every locked turn, and it does not stack: the notice is one line of state that
+            // replaces itself, so holding the wheel over keeps it up rather than queueing a
+            // second copy behind the first.
+            unlockWith?.let { vm.sayDialLocked(it) }
+        }
     }
+    // **Press-and-turn ignores the lock.** You cannot make this gesture in a pocket — it needs the
+    // wheel held in — so there is nothing here to protect against, and locking it would take
+    // exposure away from the one turn that was never the problem.
     WheelTurns(
         active = active && wheelEnabled && !puriOpen && heldDial != DialAction.Nothing,
         armed = heldDial != DialAction.Filter,

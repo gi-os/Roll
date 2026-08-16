@@ -28,7 +28,13 @@ enum class Binding(val label: String, val dial: Boolean) {
             VolumeDown -> PressAction.Shutter.name
             WheelTurn -> DialAction.Filter.name
             WheelPressTurn -> DialAction.Exposure.name
-            WheelClick -> PressAction.Torch.name
+            // **Changed in v2.49, and it displaced the torch.** The wheel is shared with the rest of
+            // the phone and turns in a pocket, so the dial now boots locked and a click is what
+            // unlocks it — which only works if something is pointed at [PressAction.DialLock] out of
+            // the box. The click is the only control the report asked for and the only one already
+            // under the finger that turns the wheel. The torch is still here and can be bound to
+            // either volume key.
+            WheelClick -> PressAction.DialLock.name
         }
 }
 
@@ -46,6 +52,13 @@ enum class PressAction(val label: String) {
     Timer("Self timer"),
     Exposure("Exposure strip"),
     Zoom("Zoom strip"),
+    /**
+     * Lock the dial, or unlock it. See [Controls.dialLive].
+     *
+     * A toggle rather than a hold: the wheel is not a control you keep a finger on, and a
+     * press-and-hold would collide with press-and-turn, which is a binding of its own.
+     */
+    DialLock("Lock the dial"),
     Nothing("Nothing"),
     ;
 
@@ -119,4 +132,44 @@ object Controls {
         volumeUp == PressAction.Shutter ||
         volumeDown == PressAction.Shutter ||
         wheelClick == PressAction.Shutter
+
+    /* ---------------- the dial lock ---------------- */
+
+    /**
+     * **Is there a way to unlock the dial?**
+     *
+     * The same shape of rule as [shutterSafe], and it exists for the same reason. The dial boots
+     * locked, so a mapping with nothing pointed at [PressAction.DialLock] would be a wheel that
+     * never turns anything again — and the way back into settings is the mode picker, which is
+     * reached by the wheel.
+     *
+     * Rather than refuse such a mapping, the lock **switches itself off**: see [dialLive]. Unbinding
+     * the lock is a perfectly reasonable way to say "I never wanted this feature", and refusing it
+     * would make the one control you can always reach the one you cannot give away.
+     */
+    fun dialUnlockable(
+        volumeUp: PressAction,
+        volumeDown: PressAction,
+        wheelClick: PressAction,
+    ): Boolean = volumeUp == PressAction.DialLock ||
+        volumeDown == PressAction.DialLock ||
+        wheelClick == PressAction.DialLock
+
+    /**
+     * Whether a bare turn of the wheel should reach whatever it is pointed at.
+     *
+     * The wheel is shared with the rest of the phone and it turns in a pocket, so a filter — a
+     * decision about one photograph — was being changed by a camera being carried. Locked, a turn
+     * moves nothing and says so on the panel instead.
+     *
+     * Two things deliberately ignore the lock, and both are gestures you could not make by
+     * accident: **press-and-turn**, which needs the wheel held in, and **an open strip**, which is a
+     * value you opened in order to set. The lock is for the bare turn, which is the only one a
+     * pocket can produce.
+     *
+     * @param locked the live state, which starts true at every launch and is not remembered.
+     * @param unlockable whether any press can undo it — see [dialUnlockable].
+     */
+    fun dialLive(locked: Boolean, unlockable: Boolean, stripOpen: Boolean): Boolean =
+        !locked || !unlockable || stripOpen
 }

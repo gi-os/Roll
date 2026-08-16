@@ -1,56 +1,38 @@
-## Roll v2.48 — Datamosh leaves a photograph behind, and the date reads on black and white
+## Roll v2.49 — the dial starts locked, and a click is what opens it
 
-**Datamosh returned confetti.** Not a glitched photograph — coloured static, with nothing
-underneath it you could recognise as the thing you had pointed the camera at. It had been that way
-since v2.46 swapped the old shader for a real databend of the encoded file, and it was reported
-three times before anyone could say what "doesn't work" actually looked like.
+**The wheel is not Roll's wheel.** It is the phone's, it is shared with everything else on it, and
+it turns in a pocket. A filter is a decision about one photograph, so a camera being carried
+around should not be making that decision — and it was, which is what this report was about.
 
-Two of the five ported operations were doing it, and both for the same reason: they damaged the
-whole frame uniformly instead of tearing part of it.
+The dial now **boots locked**, every time the app opens. Click the wheel to unlock it, click again
+to lock it. While it is locked a bare turn moves nothing and puts a line on the panel saying so,
+naming the control that would open it — named rather than described, because the lock is
+remappable and telling you to click the wheel when you have moved the lock to a volume key is
+worse than saying nothing at all.
 
-`rotateHuffman` rotated AC symbols inside each magnitude group of the Huffman tables. The
-reasoning written above it was half right — rotating within one magnitude does keep every code
-length valid, so the file stays in sync and decodes. But a symbol's low nibble is the
-coefficient's *size* and its high nibble is the *run of zeroes before it*, so rotating within a
-size group rewrites the run. Every coefficient in every block in the image lands at a different
-frequency. That is not a tear that drags sideways, it is a global reshuffle, and it was already
-past the point of no return at the lightest intensity the app can produce — so the exposure-driven
-intensity control had nothing left to control.
+**Locked is not remembered, and that is the point of it.** Remembering that you unlocked it
+yesterday would hand the pocket back the filter dial the moment you next picked the phone up. It
+lives for as long as the process does, the same span the filter itself is held for, and for the
+same reason.
 
-`amplifyChroma` wrote 162–180 into the chroma table's DC slot, where a real table holds 17–99. A
-chroma DC quantiser that large snaps each block's average colour to a wildly wrong value, which is
-where the flat acid green and magenta came from.
+Two turns deliberately ignore the lock, and neither is one you can make by accident. **Press and
+turn** needs the wheel held in, so exposure is exactly where it was. **An open strip** is a value
+you opened in order to set, and a strip has always taken the bare wheel for as long as it is open.
+The lock is for the bare turn, which is the only one a pocket can produce.
 
-Both are gone. What remains is `rotateZigzag`, `erodeQuant` and `transplantScan` — the last of
-which is the actual mosh, and always was: it overwrites runs of the entropy stream with bytes from
-elsewhere in the same scan, so the decoder loses block alignment and the DC difference chain
-inherits an error that drags sideways through the rest of the frame. The face survives, the tears
-are visible, the colour still goes. Two tests hold the line: the Huffman tables must come out
-byte-identical, and every quantisation table must keep its DC term through the whole treatment.
+**The click was the torch, and now it is the lock.** That is a changed default and worth saying
+plainly rather than letting you find it. The torch has not gone anywhere — point either volume key
+at it in Settings → Keys. The click had to be the one that moved: it is the control the report
+asked for, and it is the only one already under the finger that turns the wheel.
 
-**Datamosh has also moved on the dial.** It was the last filter in the list, and because stepping
-wraps — a physical dial should never dead-end — last is exactly one notch *backwards* from Preset.
-Reaching for the plain photograph and overshooting by a single click landed on the one filter that
-deliberately damages the file, which is how it kept getting switched on by accident. It now sits
-eleventh of twenty-one, which is as far from Preset as any entry can be in either direction. The
-wrap is untouched; nothing else moved.
+The lock is itself a binding, so it can live on a volume key instead. Point **nothing** at *Lock
+the dial* and the lock switches itself off entirely — a wheel that behaves exactly as it did
+before v2.49. That is deliberate: the dial boots locked, so a mapping with no way to unlock it
+would be a wheel that never turns anything again, and settings is reached through the mode picker,
+which is reached with the wheel. Rather than refuse such a mapping the way the shutter rule
+refuses its own, the feature stands down — unbinding it is a reasonable way to say you never
+wanted it. Binding the lock over your last shutter is still refused, exactly as any other action
+would be.
 
-**And the date stamp stops printing in amber on a black-and-white photograph.** The stamp is drawn
-*after* the filter on purpose — a date back printed through the film gate puts the date on the
-emulsion rather than under it, and dithering the digits along with the picture turns them into
-confetti — so it never sees what it lands on. On Mono, Dither BW, 1-Bit and Halftone it was landing
-at full colour.
-
-Those four filters now say so, and the stamp asks. The mono palette is not the amber desaturated:
-take the hue away and contrast is the only channel left, and a 1-Bit frame is nothing but white and
-black, so a light-grey date would vanish over half of it. The bloom inverts instead — near-black,
-under near-white lamps — which leaves a dark keyline around every lit dot. On white the keyline
-reads the digits; on black the lamps do. All three styles keep their shape, and Game Boy and X-Ray
-are deliberately not included: they have a colour of their own, and a white date on a Game Boy's
-green is not more correct than an amber one, only different.
-
-Fixes [light-reports#23], [light-reports#29] and the first half of [light-reports#27] — Datamosh
-returned confetti rather than a glitched photograph.
-Fixes the second half of [light-reports#27] — Datamosh sat one notch backwards from Preset and was
-being selected by accident.
-Fixes [light-reports#25] — the date stamp printed in amber on black-and-white frames.
+Fixes [light-reports#28] — a bare turn of the wheel changed the filter with nothing asked for
+first, and there was no note explaining why the dial had moved.
