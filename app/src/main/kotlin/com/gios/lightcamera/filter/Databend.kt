@@ -204,21 +204,41 @@ object Databend {
     /**
      * Overwrite runs of the scan with bytes from elsewhere in the same scan. **This is the mosh.**
      *
-     * Straight from `applyGlitchScan`: two to four transplants, each a run of scan length over a
-     * random divisor, sourced from 25–50% further along. The transplanted bytes are themselves valid
-     * entropy-coded data, so the decoder does not stop — it carries on reading block boundaries in
-     * the wrong place, producing blocks that belong somewhere else and a DC difference chain that is
-     * now wrong for the rest of the row.
+     * After `applyGlitchScan`: a run of the scan's length over a random divisor, sourced from 25–50%
+     * further along, repeated. The transplanted bytes are themselves valid entropy-coded data, so
+     * the decoder does not stop — it carries on reading block boundaries in the wrong place,
+     * producing blocks that belong somewhere else and a DC difference chain that is now wrong for
+     * the rest of the row.
+     *
+     * **How many and how long are the two numbers that had to stop being constants.** See below:
+     * the reference's counts are sized for a thumbnail, and on a 12MP frame they produced coloured
+     * bands rather than a mosh.
      */
     fun transplantScan(buf: ByteArray, intensity: Float, random: Random) {
         val scan = scanRange(buf) ?: return
         val start = scan.first
         val length = scan.last - scan.first + 1
 
-        val transplants = 2 + random.nextInt(3)
-        val divisor = 8 + random.nextInt(11)
+        // **Both of these scale with the file, and the fact that they did not is why Datamosh came
+        // out as a handful of flat coloured bars on a real photograph.**
+        //
+        // The reference runs on an ESP32's thumbnail, where two to four runs of up to 4096 bytes is
+        // most of the frame. A 12MP capture's scan is several megabytes, so the same numbers were
+        // four tears of under a thousandth of the file each. A transplant that short desynchronises
+        // the reader for a few blocks and then it re-syncs — what survives is not a smear but the
+        // *DC difference chain* inheriting one error, and because that chain runs in raster order
+        // every block below the tear takes the same wrong average colour. Four tears, four flat
+        // bands of wrong colour over an otherwise untouched photograph. That is what was being
+        // reported, and no amount of intensity fixed it, because intensity never touched either
+        // number.
+        //
+        // Measured off-device against a 12MP frame: at these values the subject stays recognisable
+        // at every intensity the app can produce, the tears visibly drag and repeat the way a mosh
+        // does, and forty seeds at maximum intensity still invent no marker.
+        val transplants = 24 + (intensity * 24f).toInt() + random.nextInt(9)
+        val divisor = 30 + random.nextInt(21)
         val donorPercent = 25 + random.nextInt(26)
-        val runLength = (length / divisor).coerceIn(64, 4096)
+        val runLength = (length / divisor).coerceAtLeast(64)
         val donorOffset = length * donorPercent / 100
 
         for (t in 0 until transplants) {

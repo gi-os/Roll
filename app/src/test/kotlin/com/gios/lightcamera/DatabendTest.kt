@@ -223,6 +223,36 @@ class DatabendTest {
         assertArrayEquals("the databend must be reproducible for a given seed", a, b)
     }
 
+    /**
+     * **The v2.50 fault, as arithmetic.** The transplant run was `coerceIn(64, 4096)`, so on a 12MP
+     * capture — several megabytes of scan — four tears of under a thousandth of the file each
+     * desynchronised the reader for a few blocks and then let it re-sync. What survived was the DC
+     * difference chain inheriting one error per tear, and since that chain runs in raster order,
+     * everything below a tear took the same wrong average colour: a handful of flat coloured bands
+     * over an otherwise untouched photograph, rather than a smear.
+     *
+     * Checked as "the damage is a fraction of the file rather than a fixed number of bytes", which
+     * is the property that was missing, and checked at both ends of the size range because a
+     * constant looks perfectly correct at whichever size it was chosen for.
+     */
+    @Test
+    fun `the damage scales with the file rather than sitting at a constant`() {
+        fun changedBytes(scanBytes: Int): Int {
+            val original = jpeg(scanBytes = scanBytes)
+            val out = Databend.apply(original, intensity = 0.6f, random = Random(5))
+            return original.indices.count { original[it] != out[it] }
+        }
+        val small = changedBytes(4_096)
+        val large = changedBytes(262_144)
+        // Sixty-four times the scan must not come back with the same absolute damage on it. The
+        // bound is deliberately loose — transplants overlap, and a run copied over itself changes
+        // nothing — but a fixed byte budget cannot clear it however the seeds fall.
+        assertTrue(
+            "small $small, large $large — the transplant is not scaling with the file",
+            large > small * 8,
+        )
+    }
+
     @Test
     fun `different seeds give different damage`() {
         val a = Databend.apply(jpeg(), intensity = 0.6f, random = Random(1))
