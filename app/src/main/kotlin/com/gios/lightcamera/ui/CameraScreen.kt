@@ -58,6 +58,8 @@ import androidx.core.graphics.createBitmap
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.gios.light.common.hw.WheelTurns
 import com.gios.lightcamera.BandSlot
+import com.gios.lightcamera.filter.Adjust
+import com.gios.lightcamera.filter.Grade
 import com.gios.lightcamera.CaptureMode
 import com.gios.lightcamera.Chrome
 import com.gios.lightcamera.Colour
@@ -165,6 +167,19 @@ fun CameraScreen(
     val openStrip by vm.strip.collectAsState()
     val evOpen = openStrip == Strip.Exposure
     val zoomOpen = openStrip == Strip.Zoom
+    var presetOpen by remember { mutableStateOf(false) }
+    val grade by vm.prefs.grade.collectAsState()
+
+    // Half press clears the frame. Everything that covers the viewfinder closes at once, because
+    // half of them cover it completely and you cannot see which one you are dismissing.
+    LaunchedEffect(Unit) {
+        vm.dismissPanels.collect {
+            modeOpen = false
+            gridOpen = false
+            puriOpen = false
+            presetOpen = false
+        }
+    }
 
     val previewView = remember {
         PreviewView(context).apply {
@@ -254,6 +269,11 @@ fun CameraScreen(
     } else {
         emptyList()
     }
+    // `liveFilter` rather than `filter`: it is the one that has already had video, Simple and the
+    // readers forced back to plain, which is exactly the set of modes where an adjustment would be
+    // promising something the file would not deliver.
+    val presetOffered = liveFilter.id == com.gios.lightcamera.filter.Filters.none.id &&
+        mode != CaptureMode.Video && !mode.isSimple && !mode.isReader
     val puriFrameId by vm.prefs.puriFrame.collectAsState()
     val puriFaceStickers by vm.prefs.puriFaceStickers.collectAsState()
     val puriMarginStickers by vm.prefs.puriMarginStickers.collectAsState()
@@ -431,6 +451,34 @@ fun CameraScreen(
                                 )
                                 Spacer(Modifier.width(7.dp))
                                 Chevron(pointingUp = puriOpen)
+                            }
+                            Spacer(Modifier.weight(1f))
+                        }
+                        // The Preset chip, in the slot the Purikura one uses and for the same
+                        // reason: there are ten adjustments behind it, and a chip that stepped one
+                        // of them and hid the other nine would be a worse version of both controls.
+                        // Only in the first slot on the dial, and only where a filter applies at
+                        // all — video, QR and Simple all write the sensor's own frame.
+                        if (presetOffered) {
+                            Row(
+                                modifier = Modifier
+                                    .lightClickable { presetOpen = !presetOpen }
+                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                LightText(
+                                    // The count is the state you cannot read off the picture: a
+                                    // photograph a third of a stop warm looks like a photograph.
+                                    text = if (grade.touched == 0) {
+                                        "ADJUST"
+                                    } else {
+                                        "ADJUST " + grade.touched
+                                    },
+                                    variant = LightTextVariant.Button,
+                                    align = TextAlign.Center,
+                                )
+                                Spacer(Modifier.width(7.dp))
+                                Chevron(pointingUp = presetOpen)
                             }
                             Spacer(Modifier.weight(1f))
                         }
@@ -776,6 +824,14 @@ fun CameraScreen(
             )
         }
 
+        if (presetOpen && presetOffered) {
+            PresetMenu(
+                grade = grade,
+                onStep = { adjust, by -> vm.prefs.stepGrade(adjust, by) },
+                onReset = { vm.prefs.clearGrade() },
+                onClose = { presetOpen = false },
+            )
+        }
         if (modeOpen) {
             ModeStrip(
                 mode = mode,
@@ -2050,5 +2106,153 @@ private fun ScanAction(label: String, lighten: Boolean = false, onTap: () -> Uni
             .fillMaxWidth()
             .lightClickable { onTap() }
             .padding(vertical = 12.dp),
+    )
+}
+
+/**
+ * The ten adjustments behind Preset, on one screen.
+ *
+ * **The whole panel, not a strip beside the band** — the same call the Purikura menu makes, for the
+ * same reason. Ten rows will not fit beside the band on a 3.92" screen held sideways, and a menu you
+ * have to scroll to find half of is a menu that hides half its options.
+ *
+ * **Steppers, not sliders.** Each row is `- value +`, because the two ways you touch this phone are
+ * a thumb on a small panel and a click wheel, and neither can land a continuous slider on a value.
+ * Eleven positions with a detent at zero is a control you can drive by counting.
+ *
+ * The hint under the highlighted row rather than under every one: ten rows each carrying two lines
+ * is a wall of text, and the only row whose meaning you need explained is the one you are on.
+ */
+@Composable
+private fun PresetMenu(
+    grade: Grade,
+    onStep: (Adjust, Int) -> Unit,
+    onReset: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colours = LightThemeTokens.colors
+    var focused by remember { mutableStateOf(Adjust.Exposure) }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colours.background)
+            // Eats every touch: the swipe down to the roll is a drag on a pager two levels up, and
+            // a background does not stop one.
+            .swallowTaps(),
+    ) {
+        HeldSideways {
+            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LightText(text = "ADJUST", variant = LightTextVariant.Detail)
+                    Spacer(Modifier.weight(1f))
+                    // Reset is only there when there is something to reset. A dead control in a
+                    // menu is a control you have to test to find out is dead.
+                    if (grade.touched > 0) {
+                        ChromeLabel(text = "Reset", lighten = true, onClick = onReset)
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    ChromeIcon(icon = LightIcons.Close, lighten = true, onClick = onClose)
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Adjust.entries.forEach { adjust ->
+                        AdjustRow(
+                            adjust = adjust,
+                            value = grade[adjust],
+                            focused = adjust == focused,
+                            onStep = { by ->
+                                focused = adjust
+                                onStep(adjust, by)
+                            },
+                        )
+                    }
+                }
+                LightText(
+                    text = focused.hint,
+                    variant = LightTextVariant.Superfine,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One adjustment: name on the left, `-`, the value, `+`.
+ *
+ * The value is drawn in a fixed-width box so the plus does not shuffle sideways between `0` and
+ * `-5` — a control that moves under your thumb as you use it is a control you cannot hold down.
+ *
+ * At the end of a range the arrow goes dim and stops. No wrap: an exposure that jumps from +5 to -5
+ * because you pressed once more is the kind of surprise this app is trying not to have, and unlike
+ * the filter dial there is nothing circular about a scale with a middle.
+ */
+@Composable
+private fun AdjustRow(
+    adjust: Adjust,
+    value: Int,
+    focused: Boolean,
+    onStep: (Int) -> Unit,
+) {
+    val colours = LightThemeTokens.colors
+    val set = value != 0
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(
+            text = adjust.label,
+            variant = LightTextVariant.Button,
+            // Set adjustments read at full strength and untouched ones recede, so a glance at the
+            // menu tells you what this preset is without reading ten numbers.
+            lighten = !set && !focused,
+        )
+        Spacer(Modifier.weight(1f))
+        Stepper(text = "−", enabled = value > adjust.min) { onStep(-1) }
+        Box(
+            modifier = Modifier.width(38.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            LightText(
+                text = adjust.display(value),
+                variant = LightTextVariant.Button,
+                align = TextAlign.Center,
+                lighten = !set,
+            )
+        }
+        Stepper(text = "+", enabled = value < adjust.max) { onStep(1) }
+    }
+    if (focused) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colours.rule),
+        )
+    }
+}
+
+/** One end of a stepper. A character rather than an icon, because the icon set has no plus. */
+@Composable
+private fun Stepper(text: String, enabled: Boolean, onClick: () -> Unit) {
+    LightText(
+        text = text,
+        variant = LightTextVariant.Button,
+        align = TextAlign.Center,
+        lighten = !enabled,
+        modifier = Modifier
+            .lightClickable(enabled = enabled, onClick = onClick)
+            // A generous target: this is the control you press most in this menu, and the two
+            // arrows are eight design pixels apart at the glyph.
+            .padding(horizontal = 12.dp, vertical = 4.dp),
     )
 }

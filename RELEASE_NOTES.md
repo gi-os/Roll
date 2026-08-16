@@ -1,103 +1,111 @@
-## LightCamera v2.44 — Point the controls where you want them
+## Roll v2.45 — Your videos were there the whole time
 
-The wheel walks the filters, holding it in and turning is exposure, clicking it is the torch, and
-either volume key is a shutter. That is a good mapping and it is still exactly what a fresh install
-does. It was also the *only* mapping, which is a problem on this phone in particular: the wheel is a
-system-wide control, and anyone who has remapped it elsewhere — with LightControl, most likely —
-found this app quietly assuming the wheel was free.
+Every clip this camera has ever recorded was written correctly, finalised correctly and was visible
+in every other gallery on the phone. It just never showed up in *this* one, which reads as a
+recorder that quietly throws the take away.
 
-So the mapping is a setting now. Five controls, each pointed wherever you want it:
+MediaStore keeps stills and clips in two separate tables. For eleven versions the roll only ever
+asked the first one. Nothing was ever lost; the query simply never looked. It looks now — both
+tables, merged newest-first, so a clip and a still taken in the same second sit next to each other
+instead of in two blocks. Clips carry their running time in the corner of the cell, because a video
+shown as a still of its first frame is indistinguishable from a photograph, and open with a play
+triangle over the poster frame.
 
-| Control | Can be | Defaults to |
-| --- | --- | --- |
-| Volume up | shutter, torch, front/rear, next mode, timer, exposure, zoom, nothing | shutter |
-| Volume down | the same list | shutter |
-| Click the wheel | the same list | torch |
-| Turn the wheel | filter, exposure, zoom, nothing | filter |
-| Press and turn | the same four | exposure |
+**Nothing needs to be re-recorded.** Every clip you have ever taken with this app is already in the
+roll as of this build.
 
-The camera button is not on the list and never will be: half press to focus, press through to shoot.
+### Coming back to Photo after filming
 
-**One shutter always survives.** There is no shutter button on the screen, so unbinding the last one
-on a phone whose camera key is being swallowed by an accessibility service would leave a camera that
-cannot take a photograph and no obvious way back. An option that would do that is skipped rather
-than offered. A key set to Nothing is handed back to the phone rather than eaten, so a volume key
-with no job here still changes the volume.
+`Recording.stop()` is a request, not an event. The muxer still has to flush the file and clear its
+pending flag, and only then is the recording actually over — but the camera was allowed to rebind
+during that gap, and the app had already committed the mode change before asking whether the camera
+had accepted it. So the interface would be drawing Pro, with the filter dial live and the shutter
+wired to `takePicture`, while the camera was still bound to the video pipeline and the stills unit
+behind it was attached to nothing at all. The next press went straight through the floor.
 
-A filter dial stays unarmed — each notch counts once, and None is three notches wide so a flick
-lands somewhere harmless. Exposure and zoom are armed, so a fast turn racks through them. Whichever
-way the wheel is pointed, an open strip takes it for as long as it is open.
+Three things now, and each of them alone would have been enough:
 
-### Drag the exposure strip
+- Tapping a mode while filming means stop filming. It used to say "Stop recording first" and do
+  nothing, which is the app arguing with an unambiguous instruction.
+- The switch waits for the file to finish before rebinding, with a two-second ceiling — a phone that
+  will not go back to taking photographs is worse than a clip that came out short.
+- The shutter refuses to fire at a camera that is mid-rebind, instead of throwing from inside a
+  callback where nothing can catch it.
 
-Twelve notches is the whole exposure range on this camera, so getting from −2 to +2 by tapping `+`
-was twelve taps. Now: drag to set it, tap to jump to a stop, long-press to go back to zero. The `+`
-and `−` are still there for a single stop, and the wheel is still the better control — this is the
-one you reach for when the phone is already in your hand.
+### Half press clears the frame
 
-### Zoom, at last, as a control
+A finger resting on the first detent is a finger about to take a photograph, so the mode strip, the
+filter grid, the exposure and zoom strips and the Purikura menu all close on the half press — before
+the lens has finished hunting. A menu you have to dismiss before you can shoot the thing you were
+already looking at is a menu in the way.
 
-The lens is fixed and the crop is digital, which is why the wheel was spent on filters instead. But
-a digital crop is still the difference between a photograph of a sign and a photograph of the wall
-it is on, and until now the only way to get one was a pinch on a 3.92" panel held sideways in one
-hand. There is a zoom strip now, and it is **logarithmic**: each doubling gets the same travel, so
-the low end is not crushed into the first few millimetres.
+### A muted phone is a quiet camera
 
-### Two slots in the band are yours
+The shutter checked the ringer switch, which is only half the question. A phone muted by holding
+volume-down until the bar is empty often stays in the normal ringer mode with the stream sitting at
+zero — and on this phone, with no ringer switch to flick, that is the only way to mute anything. So
+the shutter, the focus blips and the saved tone kept sounding on a phone that had been unambiguously
+silenced. All three now read the system, notification and ring streams as well, including a stream
+muted by policy while its remembered volume is still set.
 
-The album, the mode-and-filter chip and the flash are the stock camera's own bar in the stock
-camera's own order, and they stay put. The two at the end — where the brightness icon was — can be
-exposure, zoom, front/rear, self timer, shape, grid, or nothing. Exposure then nothing is what the
-app has always shown.
+### None is now Preset
 
-**Front/rear is the one worth pointing at.** Turning the camera round was a double tap on the
-viewfinder and nothing else, which is not a thing anybody finds.
+The first slot on the dial was None, which is not a look but the absence of one, and it was the slot
+most photographs were taken in. It is Preset now: still the plain photograph by default, with
+somewhere to put the small corrections a photograph actually wants.
 
-### Exposure aids, for a greyscale screen
+Ten adjustments, behind an **Adjust** chip in the band that also tells you how many are set — which
+is the one piece of state you cannot read off the picture, because a photograph a third of a stop
+warm still looks like a photograph.
 
-Judging exposure in black and white is the hard case: a face and a window can read as the same grey,
-and nothing warns you that a highlight has gone to 255 and taken the detail with it. Two aids, both
-off by default, both drawn from the frame already on the panel so neither changes what the camera is
-bound to and neither costs the shutter anything:
+| | |
+| --- | --- |
+| Exposure | in stops, so the number means something |
+| Contrast | pivoted on mid grey, not on the frame's own average |
+| Highlights | recover a blown sky, or push it whiter |
+| Shadows | open up what is in the dark, or crush it |
+| Vibrance | weighted by what is missing colour, and held back on skin |
+| Warmth | a real temperature shift: red against blue |
+| Tint | the other axis: green against magenta |
+| Sharpness | unsharp mask above zero, a plain blur below it |
+| Grain | modulated by the midtones, the way Film's is |
+| Vignette | darker corners, or brighter ones |
 
-- a **histogram**, bottom left, 64 bins on a square-root scale so the shadows are visible rather
-  than a flat line;
-- **clipping marks**, a 45° hairline hatch over the cells that have gone to white. Hatching rather
-  than crawling zebras: a static diagonal on a monochrome panel is already unmistakably not part of
-  the world, and it does not put an animation over the viewfinder permanently.
+Steppers rather than sliders, eleven positions with a detent at zero, because the two ways you touch
+this phone are a thumb on a small panel and a click wheel and neither can land a continuous slider
+on a value.
 
-A cell has to be a third blown before it is marked, so one hot pixel does not hatch a correctly
-exposed night frame.
+**A Preset with nothing set costs nothing.** It is not an identity shader running thirty times a
+second over the viewfinder and once more over the file — the whole GPU path is skipped, and the
+shutter writes the sensor's own JPEG exactly as it did before. That is deliberate: this is the
+default filter, so it had to stay free.
 
-### Sharpest of eight
+The order the adjustments run in is a darkroom's, not the list's, because these do not commute.
+Detail, then tone, then colour, then the two things laid on top of the finished photograph.
+Sharpening after a vignette sharpens the vignette.
 
-Optional, and off by default. Where the photograph comes off the panel — Simple, and every coarse
-filter — the shutter can take eight frames over about a quarter of a second, score each by the
-variance of its Laplacian in the middle of the frame, and keep the sharpest. That is hand shake
-being chosen against instead of frozen into the file.
+### Datamosh
 
-It is off by default because it changes *which* frame you get: what you want for a face is not what
-you want for timing a jump. Simple without it is exactly as quick as it ever was.
+A JPEG is not pixels. The image is cut into 8×8 blocks, each block becomes 64 frequency
+coefficients, and the whole lot is packed into one continuous bitstream with no byte alignment
+between blocks. Two consequences produce everything this filter does:
 
-### The filter can no longer change mid-shot
+**Block averages are stored as differences.** Each block's brightness is written as an offset from
+the previous one, so an error is inherited by every block after it — and since blocks are written
+left to right, the error drags sideways. That drag is what people mean by datamoshing.
 
-In Pro the filter is applied to the bytes *after* the sensor answers, about 1.8 seconds after your
-finger. A notch turned inside that window baked a look you were not framing into the file, while the
-held frame on the panel went on showing you the old one. The dial is closed from the press until the
-file is written, and says so rather than buzzing.
+**Losing the bitstream means losing alignment.** From the moment the reader is off, block boundaries
+are in the wrong place: blocks land displaced, their detail decodes as noise, and colour — stored at
+half resolution — smears twice as far as the shapes it belongs to. It heals at the next restart
+marker, which is why the damage comes in bands rather than running the whole height of the frame.
 
-### Settings has tabs
+All five of those are what the filter models, plus the quantiser coarsening that gives it its
+blocking. It is modelled on cebola4444's cybershot-cam, which does the real thing to real bytes
+after its encoder has run. That cannot be a filter here — every filter in this app is one shader
+over both the viewfinder and the file, which is what makes the photograph match the frame you were
+looking at, and a byte hack applied after encoding has no live form. So the causes are simulated
+rather than the bytes, which means you can see it before you press, and it works in the modes a
+post-encode hack could not reach.
 
-Every setting was worth having and the notes beside them were worth reading, and together they were
-one column about eleven screens long — so finding the film roll meant scrolling past the date back.
-Same rows, same order, cut where the subject changes: **Frame, Look, Keys, Film, About**. The prose
-is folded behind a `?` on each section, unchanged, for the once you wonder rather than every time
-you come in to change the timer.
-
-### Faster filtered captures
-
-An offscreen GPU renderer — an ImageReader, a HardwareRenderer bound to its surface and a RenderNode
-— was built and torn down again on **every single photograph**, to draw one rectangle through it. The
-draw was a fraction of a frame; the setup and teardown around it were most of the time the filtered
-path spent on the GPU. Two of them are kept and reused now, one for the panel and one for the
-capture size, and released when the camera screen goes away.
+Animated, so the damage moves — and so no two shots come out the same, which is also true of the
+real thing.

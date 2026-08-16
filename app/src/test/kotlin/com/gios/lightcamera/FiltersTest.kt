@@ -16,6 +16,17 @@ import org.junit.Test
  */
 class FiltersTest {
 
+    /**
+     * Every shader in the app, which is **not** the same list as the dial's.
+     *
+     * `Filters.preset` deliberately sits outside [Filters.all] — it shares `none`'s id and its slot,
+     * and putting it in the list would give the wheel two Presets to walk through. That also meant
+     * it was the one shader no structural check here ever looked at, which is exactly the shader
+     * you least want unchecked: it is the default filter, so a brace out of place in it would take
+     * out the app's most-used position rather than its least.
+     */
+    private val shaders = (Filters.all + Filters.preset).filter { it.agsl != null }
+
     @Test
     fun `ids are unique`() {
         val ids = Filters.all.map { it.id }
@@ -31,15 +42,14 @@ class FiltersTest {
 
     @Test
     fun `every shader declares the entry point AGSL expects`() {
-        Filters.all.mapNotNull { it.agsl?.let { source -> it.id to source } }
-            .forEach { (id, source) ->
-                assertTrue("$id has no main()", source.contains("half4 main(float2 "))
-            }
+        shaders.forEach { filter ->
+            assertTrue("${filter.id} has no main()", filter.agsl!!.contains("half4 main(float2 "))
+        }
     }
 
     @Test
     fun `every shader gets the prelude exactly once`() {
-        Filters.all.filter { it.agsl != null }.forEach { filter ->
+        shaders.forEach { filter ->
             val source = filter.source!!
             assertEquals(
                 "${filter.id} declares src ${source.split("uniform shader src").size - 1} times",
@@ -52,7 +62,7 @@ class FiltersTest {
 
     @Test
     fun `braces and parentheses balance`() {
-        Filters.all.filter { it.agsl != null }.forEach { filter ->
+        shaders.forEach { filter ->
             val source = filter.source!!
             assertEquals(
                 "${filter.id} has unbalanced braces",
@@ -76,12 +86,21 @@ class FiltersTest {
         val always = setOf("src", "size", "seed")
         val faceUniforms =
             setOf("faceCount", "face0", "face1", "face2", "warp", "wash", "faceTurn")
-        Filters.all.filter { it.agsl != null }.forEach { filter ->
+        // Preset's ten adjustments arrive as three vec4s, written by `ShaderRuntime.setGrade` and
+        // only for a filter that declares itself adjustable. Same contract as the face uniforms:
+        // declaring one of these without the flag means it is never written and the shader reads
+        // whatever the last filter left in it.
+        val gradeUniforms = setOf("gradeA", "gradeB", "gradeC")
+        shaders.forEach { filter ->
             val declared = Regex("uniform\\s+\\w+\\s+(\\w+)\\s*;")
                 .findAll(filter.source!!)
                 .map { it.groupValues[1] }
                 .toSet()
-            val expected = if (filter.facesAware) always + faceUniforms else always
+            val expected = when {
+                filter.facesAware -> always + faceUniforms
+                filter.adjustable -> always + gradeUniforms
+                else -> always
+            }
             assertEquals("${filter.id} declares the wrong uniforms", expected, declared)
         }
     }
@@ -103,11 +122,11 @@ class FiltersTest {
     fun `no shader declares a variable named after a type`() {
         // `half` is a type in AGSL, so `float2 half = ...` is a compile error — and one that only
         // shows up as an unfiltered viewfinder and a line in logcat.
-        Filters.all.mapNotNull { f -> f.agsl?.let { f.id to it } }.forEach { (id, source) ->
-            val code = source.lines().filterNot { it.trimStart().startsWith("//") }
+        shaders.forEach { filter ->
+            val code = filter.agsl!!.lines().filterNot { it.trimStart().startsWith("//") }
             code.forEach { line ->
                 assertTrue(
-                    "$id declares a variable called half",
+                    "${filter.id} declares a variable called half",
                     !Regex("\\b(float2|float3|float4|float|int)\\s+half\\b").containsMatchIn(line),
                 )
             }

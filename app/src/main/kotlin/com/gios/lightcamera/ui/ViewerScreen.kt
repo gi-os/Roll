@@ -42,6 +42,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelTurns
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Path
+import com.gios.lightcamera.media.durationLabel
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.ui.theme.LightIcons
 import com.gios.lightcamera.ui.theme.LightText
@@ -250,6 +254,27 @@ fun ViewerScreen(
                             )
                         }
                     }
+                }
+                // **A clip gets a play triangle over its poster frame, and that is the whole
+                // player.** Decoding video in here would mean a surface, a codec and a transport
+                // inside a pager that is already arbitrating pinch against swipe — for a thing the
+                // phone already has an app for. So the frame is shown, and the triangle hands the
+                // clip to whatever plays video on this phone, with the read grant attached.
+                if (photo.isVideo) {
+                    PlayBadge(
+                        label = photo.durationLabel(),
+                        modifier = Modifier.align(Alignment.Center),
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(photo.uri, "video/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            // No player installed is a real state on a phone this stripped, and an
+                            // ActivityNotFoundException out of a tap on a photograph is not.
+                            runCatching { context.startActivity(intent) }
+                                .onFailure { vm.showNotice("No app here plays video") }
+                        },
+                    )
                 }
             }
         }
@@ -482,5 +507,47 @@ fun ContactSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * A play triangle and a running time, drawn rather than shipped.
+ *
+ * The icon set this app draws from has no play glyph, and a triangle is three lines of `Path`.
+ * Sized in dp so it is the same size on the panel whatever the clip's resolution is.
+ */
+@Composable
+private fun PlayBadge(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colours = LightThemeTokens.colors
+    Column(
+        modifier = modifier.lightClickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Canvas(modifier = Modifier.size(54.dp)) {
+            drawCircle(color = Color.Black.copy(alpha = 0.45f), radius = size.minDimension / 2f)
+            val r = size.minDimension / 2f
+            val w = r * 0.62f
+            val h = r * 0.72f
+            // Nudged right by an eighth of its width: a triangle centred on its bounding box
+            // reads as sitting left of centre, because its mass is on the flat edge.
+            val cx = center.x + w * 0.12f
+            drawPath(
+                path = Path().apply {
+                    moveTo(cx - w / 2f, center.y - h)
+                    lineTo(cx + w, center.y)
+                    lineTo(cx - w / 2f, center.y + h)
+                    close()
+                },
+                color = Color.White,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        LightText(
+            text = label,
+            variant = LightTextVariant.Superfine,
+            modifier = Modifier
+                .background(colours.scrim)
+                .padding(horizontal = 4.dp, vertical = 1.dp),
+        )
     }
 }

@@ -99,6 +99,42 @@ object ShaderRuntime {
     }
 
     /**
+     * Hand the ten adjustments to Preset.
+     *
+     * Packed into three `float4`s rather than ten scalars, for the same reason the face quads are:
+     * a uniform write is a driver call, and Preset's uniforms are rewritten on every preview frame
+     * that a grain or a seed changes. Ten calls per frame instead of three is not free on this GPU.
+     *
+     * Gated on the flag, not attempted and caught: setting a uniform a shader does not declare
+     * throws, and every other filter in the app declares none of these.
+     */
+    private fun setGrade(shader: RuntimeShader, filter: Filters.Filter) {
+        if (!filter.adjustable) return
+        val grade = filter.grade
+        shader.setFloatUniform(
+            "gradeA",
+            grade.normalised(Adjust.Exposure),
+            grade.normalised(Adjust.Contrast),
+            grade.normalised(Adjust.Highlights),
+            grade.normalised(Adjust.Shadows),
+        )
+        shader.setFloatUniform(
+            "gradeB",
+            grade.normalised(Adjust.Vibrance),
+            grade.normalised(Adjust.Warmth),
+            grade.normalised(Adjust.Tint),
+            grade.normalised(Adjust.Sharpness),
+        )
+        shader.setFloatUniform(
+            "gradeC",
+            grade.normalised(Adjust.Grain),
+            grade.normalised(Adjust.Vignette),
+            0f,
+            0f,
+        )
+    }
+
+    /**
      * The effect to hang on the preview.
      *
      * Returns null for [Filters.none], which the caller must read as "clear the effect"
@@ -114,6 +150,10 @@ object ShaderRuntime {
         tune: FaceTune = FaceTune(),
     ): RenderEffect? {
         if (width <= 0 || height <= 0) return null
+        // A Preset with nothing set is not a filter, and the caller reads null as "clear the
+        // effect" — so the viewfinder goes back to costing nothing rather than running an identity
+        // shader thirty times a second.
+        if (filter.adjustable && filter.grade.isNeutral) return null
         // The uniforms are inside the net along with the effect, for the same reason they are in
         // [Offscreen.render]: this runs from a composition on the main thread, so a shader that turns
         // out not to declare a uniform this code sets would take the app down rather than the filter.
@@ -122,6 +162,7 @@ object ShaderRuntime {
             shader.setFloatUniform("size", width.toFloat(), height.toFloat())
             shader.setFloatUniform("seed", seed)
             setFaces(shader, filter, faces, tune)
+            setGrade(shader, filter)
             RenderEffect.createRuntimeShaderEffect(shader, "src")
         }.onFailure { Log.e(TAG, "effect failed for ${filter.id}", it) }.getOrNull()
     }
@@ -143,6 +184,10 @@ object ShaderRuntime {
         tune: FaceTune = FaceTune(),
     ): Bitmap {
         if (filter.agsl == null) return source
+        // The same short-circuit as the preview's, and here it is worth more: this is on the
+        // shutter's path, and it is the difference between a photograph that costs a decode, a GPU
+        // pass and a re-encode and one that costs nothing at all.
+        if (filter.adjustable && filter.grade.isNeutral) return source
         // **The shader was never the expensive part.** An `Offscreen` is an ImageReader, a
         // HardwareRenderer bound to its surface and a RenderNode — a GPU surface allocation and a
         // renderer handshake — and this used to build one, draw a single rectangle through it and
@@ -255,6 +300,7 @@ object ShaderRuntime {
             shader.setFloatUniform("size", width.toFloat(), height.toFloat())
             shader.setFloatUniform("seed", seed)
             setFaces(shader, filter, faces, tune)
+            setGrade(shader, filter)
             val bitmapShader = BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             // Scale the source into the node if the caller handed us a different size —
             // used by the filter grid, whose cells are smaller than the preview frame.

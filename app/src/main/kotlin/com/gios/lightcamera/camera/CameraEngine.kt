@@ -55,6 +55,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -348,8 +350,14 @@ class CameraEngine(private val context: Context) {
      * Switch mode, which rebinds. Selfie is the front lens and nothing else — that is what it
      * is on the stock camera too.
      */
-    fun setMode(next: CaptureMode, flash: FlashMode) {
-        if (_recording.value) return
+    fun setMode(next: CaptureMode, flash: FlashMode): Boolean {
+        // **Reports whether it took, and that is the crash.** This used to return silently while a
+        // recording was live, but the view model committed `prefs.setMode` *before* calling it — so
+        // the app would be drawing Pro, with the filter dial live and the shutter wired to
+        // `takePicture`, while the camera was still bound to `VideoCapture` and the `ImageCapture`
+        // sitting in this class was attached to nothing. The next shutter press threw. Refusing out
+        // loud lets the caller keep the two in step.
+        if (_recording.value) return false
         val lens = when (next) {
             CaptureMode.Selfie -> CameraSelector.LENS_FACING_FRONT
             // QR and Text are the back lens and cannot be talked out of it: the front camera on
@@ -362,12 +370,13 @@ class CameraEngine(private val context: Context) {
         }
         val lensChanged = lens != _lensFacing.value
         val modeChanged = next != mode
-        if (!lensChanged && !modeChanged) return
+        if (!lensChanged && !modeChanged) return true
         mode = next
         _lensFacing.value = lens
         _faces.value = emptyList()
         _zoom.value = 1f
         rebind(flash)
+        return true
     }
 
     fun setPhotoSize(size: PhotoSize, flash: FlashMode) {
@@ -645,6 +654,10 @@ class CameraEngine(private val context: Context) {
             .build()
 
         runCatching {
+            // Down before anything is torn down, not after it is built. A shutter press that lands
+            // between the unbind and the bind would otherwise see a stale `ready` and fire into a
+            // use case with no camera behind it.
+            _ready.value = false
             provider.unbindAll()
             preview.setSurfaceProvider(view.surfaceProvider)
             // One use case beside the preview, whichever mode it is. Preview + capture + video is
@@ -980,8 +993,15 @@ class CameraEngine(private val context: Context) {
 
     suspend fun capture(): CapturedFrame = suspendCancellableCoroutine { cont ->
         val capture = imageCapture
-        if (capture == null) {
-            cont.resumeWithException(IllegalStateException("camera not bound"))
+        // **`imageCapture` being non-null never meant it was bound.** `rebind` builds one on every
+        // pass and only *binds* it when the mode is not Video, so in Video — and in the window
+        // between `unbindAll` and `bindToLifecycle` on any rebind — this field holds a perfectly
+        // good use case attached to no camera at all. `takePicture` on that throws from inside
+        // CameraX, off the caller's stack, which is an uncatchable crash rather than a failed shot.
+        // The three conditions below are the ones that make it real: a camera, a completed bind,
+        // and a mode whose second use case is actually the stills unit.
+        if (capture == null || camera == null || !_ready.value || mode == CaptureMode.Video) {
+            cont.resumeWithException(IllegalStateException("camera not bound for stills"))
             return@suspendCancellableCoroutine
         }
         capture.takePicture(
@@ -1067,9 +1087,41 @@ class CameraEngine(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    /**
+     * Ask the recorder to stop. **Returns before the file exists.**
+     *
+     * `Recording.stop()` is a request: the muxer still has to flush, write the moov atom and clear
+     * `IS_PENDING`, and only then does `VideoRecordEvent.Finalize` arrive and `recording` go false.
+     * Anything that rebinds the camera has to wait for that — see [awaitIdle].
+     *
+     * The handle is **not** cleared here any more. It used to be, which meant that between the stop
+     * and the finalize this class believed nothing was recording while CameraX believed something
+     * was, and a `stop()` arriving twice in that window went to a reference nobody held.
+     */
     fun stopRecording() {
         runCatching { activeRecording?.stop() }
-        activeRecording = null
+    }
+
+    /**
+     * Wait for the recorder to finish writing, up to [timeoutMs].
+     *
+     * The timeout is not optional. `Finalize` is the only thing that lowers `recording`, and a
+     * muxer that dies without emitting it would otherwise leave the camera pinned in video mode
+     * for the rest of the process — a phone that will not go back to taking photographs is worse
+     * than a clip that came out short, so after the timeout the flag is forced down and the rebind
+     * happens anyway.
+     */
+    suspend fun awaitIdle(timeoutMs: Long = FINALIZE_TIMEOUT_MS) {
+        if (!_recording.value) return
+        val settled = withTimeoutOrNull(timeoutMs) {
+            _recording.first { !it }
+            true
+        }
+        if (settled == null) {
+            Log.w(TAG, "recorder never finalized in ${timeoutMs}ms; forcing idle")
+            _recording.value = false
+            activeRecording = null
+        }
     }
 
     fun evLabel(): String {
@@ -1098,6 +1150,14 @@ class CameraEngine(private val context: Context) {
     }
 
     private companion object {
+        /**
+         * How long a stop is given to become a file.
+         *
+         * A second of muxing is a very long clip on this hardware; two is the honest ceiling with
+         * room for a phone that is busy writing something else at the same time.
+         */
+        const val FINALIZE_TIMEOUT_MS = 2_000L
+
         const val TAG = "CameraEngine"
 
         /** ~11% per notch: nine notches to double, so a full 8x rack is a deliberate spin. */

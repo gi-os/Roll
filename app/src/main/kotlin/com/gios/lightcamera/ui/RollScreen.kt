@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
 import com.gios.lightcamera.media.DayLabels
 import com.gios.lightcamera.media.Photo
+import com.gios.lightcamera.media.durationLabel
 import com.gios.lightcamera.media.RollScope
 import com.gios.lightcamera.ui.theme.LightIcon
 import com.gios.lightcamera.ui.theme.LightIcons
@@ -401,6 +402,20 @@ private fun Thumb(
                         // the same inversion trick the rest of the app uses for state.
                         alpha = if (selecting && !selected) UNSELECTED_ALPHA else 1f
                     },
+            )
+        }
+        // **A clip says so, and says how long.** Without this a video is a still of its first
+        // frame — indistinguishable from a photograph in the grid, which is most of why the
+        // recorder looked broken even once the query found them.
+        if (photo.isVideo) {
+            LightText(
+                text = photo.durationLabel(),
+                variant = LightTextVariant.Superfine,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(3.dp)
+                    .background(colours.scrim)
+                    .padding(horizontal = 3.dp, vertical = 1.dp),
             )
         }
         // The tick is chrome, so it stays pinned to the phone rather than turning with the

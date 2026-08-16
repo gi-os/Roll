@@ -76,9 +76,10 @@ fun FilterGrid(
 ) {
     val colours = LightThemeTokens.colors
     val current by vm.filter.collectAsState()
+    val grade by vm.prefs.grade.collectAsState()
     var frames by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
-    LaunchedEffect(previewView) {
+    LaunchedEffect(previewView, grade) {
         val renderer = withContext(Dispatchers.Default) {
             ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
         }
@@ -88,13 +89,16 @@ fun FilterGrid(
                 if (source != null) {
                     val seed = Random.nextFloat() * 1000f
                     val rendered = withContext(Dispatchers.Default) {
-                        Filters.all.associate { filter ->
+                        Filters.all.associate { entry ->
+                            // Resolved here too, or the Preset cell would be the one tile in the
+                            // grid showing you something other than what picking it would give you.
+                            val filter = Filters.forGrade(entry, grade)
                             val bitmap = if (filter.agsl == null) {
                                 source
                             } else {
                                 renderer?.render(source, filter, seed) ?: source
                             }
-                            filter.id to bitmap.asImageBitmap()
+                            entry.id to bitmap.asImageBitmap()
                         }
                     }
                     frames = rendered

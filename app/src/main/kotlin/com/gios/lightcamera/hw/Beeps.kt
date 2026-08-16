@@ -64,16 +64,40 @@ class Beeps(context: Context) {
 
     private fun play(t: AudioTrack?) {
         val track = t ?: return
-        // Silent when the phone is, without duplicating the ringer logic: a sonification
-        // stream at zero volume would still spin the speaker up for nothing.
-        val audio = appContext.getSystemService(AudioManager::class.java)
-        if (audio != null && audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        if (silenced()) return
         runCatching {
             if (track.playState != AudioTrack.PLAYSTATE_STOPPED) track.stop()
             // The documented way to replay a MODE_STATIC buffer. Without it the second beep
             // plays nothing at all, because the head is sitting at the end of the sample.
             track.reloadStaticData()
             track.play()
+        }
+    }
+
+    /**
+     * Whether the phone is muted, asked properly.
+     *
+     * **The ringer mode alone was not enough, and that was the bug.** `RINGER_MODE_SILENT` is only
+     * set by the silent *switch*; a phone muted by holding volume-down until the bar is empty
+     * frequently stays in `RINGER_MODE_NORMAL` with the stream sitting at zero, and on LightOS —
+     * which has no ringer switch to flick — that is the only way to mute anything. So the shutter
+     * kept clicking on a phone the user had unambiguously silenced.
+     *
+     * `USAGE_ASSISTANCE_SONIFICATION` is routed to `STREAM_SYSTEM`, so that is the stream that
+     * decides. `STREAM_NOTIFICATION` and `STREAM_RING` are checked too because they are what most
+     * launchers actually move when you press the key, and on devices that alias the three together
+     * reading only one of them can report a volume nothing is playing at.
+     *
+     * `isStreamMute` is checked separately from the level: a stream can be muted by a policy while
+     * its remembered volume is still non-zero, and that is a phone the user has silenced as well.
+     */
+    private fun silenced(): Boolean {
+        val audio = appContext.getSystemService(AudioManager::class.java) ?: return false
+        if (audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return true
+        return MUTABLE_STREAMS.any { stream ->
+            runCatching {
+                audio.isStreamMute(stream) || audio.getStreamVolume(stream) == 0
+            }.getOrDefault(false)
         }
     }
 
@@ -155,5 +179,12 @@ class Beeps(context: Context) {
 
     private companion object {
         const val SAMPLE_RATE = 44_100
+
+        /** The streams a muted phone can express itself through. Any one at zero means quiet. */
+        val MUTABLE_STREAMS = intArrayOf(
+            AudioManager.STREAM_SYSTEM,
+            AudioManager.STREAM_NOTIFICATION,
+            AudioManager.STREAM_RING,
+        )
     }
 }

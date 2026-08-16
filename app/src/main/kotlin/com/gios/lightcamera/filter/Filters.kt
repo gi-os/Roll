@@ -703,6 +703,222 @@ half4 main(float2 xy) {
 """
 
     /**
+     * Preset: ten adjustments, and the plain photograph when they are all at zero.
+     *
+     * Ordered the way a darkroom would order them and not the way the data class lists them, because
+     * these operations do not commute. Sharpening after a vignette sharpens the vignette's edge.
+     * Grain before contrast gets its own contrast stretched. So: detail, then tone, then colour, then
+     * the two things that are laid on top of the finished photograph.
+     *
+     * Every uniform arrives as -1..1, so the constants below are "what one end of the stepper does".
+     */
+    private const val PRESET = """
+uniform float4 gradeA;   // exposure, contrast, highlights, shadows
+uniform float4 gradeB;   // vibrance, warmth, tint, sharpness
+uniform float4 gradeC;   // grain, vignette, unused, unused
+
+half4 main(float2 xy) {
+    float3 c = tap(xy);
+
+    // ---- sharpness ----
+    // One control, both directions: an unsharp mask above zero and a plain blur below it. The blur
+    // is the same four taps read the other way round, so softening costs exactly what sharpening
+    // does and there is no second code path to keep honest.
+    float sh = gradeB.w;
+    if (sh != 0.0) {
+        float u = unitPx();
+        float3 blur = (tap(xy + float2(u, 0.0)) + tap(xy - float2(u, 0.0)) +
+                       tap(xy + float2(0.0, u)) + tap(xy - float2(0.0, u))) * 0.25;
+        c = sh > 0.0 ? c + (c - blur) * (sh * 1.7) : mix(c, blur, -sh * 0.85);
+    }
+
+    // ---- exposure ----
+    // In stops, because that is the unit the number means something in: the top of the stepper is
+    // a stop and a half, which is the range a photograph is recoverable across.
+    c *= pow(2.0, gradeA.x * 1.5);
+
+    // ---- highlights and shadows ----
+    // Weighted by where the pixel already sits, with the two windows overlapping only in the
+    // midtones — otherwise the two controls fight over the middle and each one undoes the other.
+    //
+    // The direction trick: pushing up moves a pixel toward white by a fraction of the room it has
+    // left (1 - c), pushing down moves it toward black by a fraction of what it has (c). Both are
+    // asymptotic, so neither can clip, and nothing ever crosses over.
+    float l = lum(c);
+    float hiW = smoothstep(0.42, 1.0, l);
+    float loW = 1.0 - smoothstep(0.0, 0.58, l);
+    float hi = gradeA.z;
+    float lo = gradeA.w;
+    c += hi * hiW * 0.50 * mix(c, 1.0 - c, step(0.0, hi));
+    c += lo * loW * 0.55 * mix(c, 1.0 - c, step(0.0, lo));
+
+    // ---- contrast ----
+    // Pivoted on mid grey rather than on the frame's own average: an average-pivoted curve makes
+    // the same slider do different things to a snow scene and a night one, which is not what the
+    // person turning it expects.
+    c = (c - 0.5) * (1.0 + gradeA.y * 0.65) + 0.5;
+
+    // ---- warmth and tint ----
+    // The two axes a white balance actually has. Warmth trades red against blue; tint trades green
+    // against the other two, which is the magenta direction.
+    float w = gradeB.y;
+    c.r *= 1.0 + w * 0.20;
+    c.b *= 1.0 - w * 0.20;
+    float t = gradeB.z;
+    c.g *= 1.0 - t * 0.15;
+    c.r *= 1.0 + t * 0.07;
+    c.b *= 1.0 + t * 0.07;
+
+    // ---- vibrance ----
+    // **Not saturation, and the difference is the whole reason this control is the one here.**
+    // Saturation multiplies everything, so the already-loud parts of a frame go first and skin goes
+    // orange. Vibrance is weighted twice: by how much saturation a pixel is *missing*, so the dull
+    // parts move and the vivid parts are left alone, and by how much the pixel looks like skin, so
+    // a face keeps its colour while the sky behind it comes up.
+    float3 lit = clamp(c, 0.0, 1.0);
+    float mx = max(lit.r, max(lit.g, lit.b));
+    float mn = min(lit.r, min(lit.g, lit.b));
+    float sat = mx - mn;
+    // Skin: red above green above blue, with a red-to-blue spread in a narrow band. Crude, and
+    // crude is correct — it only has to hold back a fraction of the effect, not make a matte.
+    float ordered = step(lit.b, lit.g) * step(lit.g, lit.r);
+    float spread = clamp(1.0 - abs((lit.r - lit.b) * 3.4 - 0.62) * 1.8, 0.0, 1.0);
+    float skin = ordered * spread;
+    float room = 1.0 - clamp(sat * 1.7, 0.0, 1.0);
+    float amount = gradeB.x * (0.15 + 0.85 * room) * (1.0 - skin * 0.65);
+    float g = lum(c);
+    c = mix(float3(g, g, g), c, 1.0 + amount * 1.15);
+
+    // ---- grain ----
+    // Modulated by the midtones, the same as Film's: silver clumps where there is something to
+    // clump in, and flat noise over the whole frame reads as a bad sensor rather than as film.
+    if (gradeC.x > 0.0) {
+        float n = hash(floor(xy / unitPx())) - 0.5;
+        c += n * gradeC.x * 0.18 * (1.0 - abs(lum(c) - 0.5) * 1.4);
+    }
+
+    // ---- vignette ----
+    // Negative brightens the corners, which is not a thing lenses do but is a thing people want
+    // when a photograph has gone dark at the edges and they would like it not to be.
+    float2 d = xy / size - 0.5;
+    c *= 1.0 - dot(d, d) * gradeC.y * 1.25;
+
+    return half4(float4(clamp(c, 0.0, 1.0), 1.0));
+}
+"""
+
+    /**
+     * Datamosh: JPEG compression falling apart, simulated honestly.
+     *
+     * **What is really being modelled.** A JPEG is not pixels. The image is cut into 8x8 blocks,
+     * each block becomes 64 frequency coefficients, the coefficients are quantised against a table
+     * and the whole lot is packed into one continuous Huffman bitstream with no byte alignment
+     * between blocks. Two consequences produce every artifact below:
+     *
+     *  1. **DC coefficients are stored as differences.** Each block's average brightness is written
+     *     as an offset from the previous block's, so an error in one block is inherited by every
+     *     block after it — and since blocks are written in raster order, the error *drags
+     *     sideways*. That drag is the thing people mean by datamoshing.
+     *  2. **Losing the bitstream means losing alignment.** Overwrite a run of scan bytes and the
+     *     decoder is reading block boundaries in the wrong place from there on, so blocks land
+     *     displaced and their detail decodes as noise, until a restart marker resynchronises it.
+     *
+     * The reference implementation this is modelled on (cebola4444/cybershot-cam) does the real
+     * thing: it transplants chunks of the encoded scan over other chunks and rewrites the DQT and
+     * DHT tables in place, after the ESP32's encoder has run. That cannot be a filter here. Every
+     * filter in this app is one shader run over both the viewfinder and the file, which is what
+     * makes the photograph match the frame you were looking at — and a byte hack applied after
+     * encoding has no live form at all. So the *causes* are simulated rather than the bytes:
+     *
+     *  - `broken` is the desync, starting at a per-row break point and healing at a restart band.
+     *  - `shift` is the lost block alignment, growing as the run gets longer.
+     *  - `walk` is the DC difference chain drifting, which is the horizontal smear.
+     *  - the far tap is chroma dragging further than luma, because chroma is subsampled 2:1 and so
+     *    its blocks are twice as wide in the image.
+     *  - `levels` is the quantiser coarsening, which is the blocking.
+     *
+     * Animated, so the damage moves between frames the way a mosh does — and so every shot comes
+     * out differently, which is also true of the real thing.
+     */
+    private const val DATAMOSH = """
+half4 main(float2 xy) {
+    // One DCT block, sized in design pixels so a 12MP capture moshes at the same scale the
+    // viewfinder showed. This is the rule that keeps every patterned filter in this app honest.
+    float blk = unitPx() * 8.0;
+    float2 b = floor(xy / blk);
+    float cols = max(1.0, floor(size.x / blk));
+
+    // **Restart intervals are why the damage comes in bands.** A real encoder drops an RST marker
+    // every so many rows of blocks and the decoder resynchronises there, so corruption cannot run
+    // the whole height of the frame. Six rows is a plausible interval and, more to the point, is
+    // the one that looks right: long enough to smear, short enough that the frame survives.
+    float band = floor(b.y / 6.0);
+    float rowKey = hash(float2(band * 13.0, b.y * 0.37 + floor(seed * 0.05)));
+
+    // Where this row's reader loses the bitstream. Past the right edge for a good fraction of rows,
+    // which is how rows come out clean.
+    float breakAt = floor(hash(float2(b.y, band + seed * 0.017)) * cols * 1.45);
+    float broken = step(breakAt, b.x) * step(0.34, rowKey);
+    float run = max(0.0, b.x - breakAt) * broken;
+
+    // ---- lost block alignment ----
+    // The decoder is now cutting blocks out of the wrong bit offset, so they arrive from somewhere
+    // else along the row. Clamped, or a long run walks the sample position off the frame entirely
+    // and the tail of every broken row is one flat clamped colour.
+    float drift = hash(float2(b.y * 3.1, band + 5.0)) - 0.5;
+    float shift = broken * blk * clamp(floor(drift * 7.0 * (1.0 + run * 0.14)), -16.0, 16.0);
+    float2 p = xy - float2(shift, 0.0);
+
+    // ---- the block itself ----
+    // Four taps at the block's quarter points stand in for its DC coefficient — the average the
+    // encoder actually stores — and what is left over is the detail the AC coefficients carry.
+    float2 centre = (b + 0.5) * blk - float2(shift, 0.0);
+    float q = blk * 0.25;
+    float3 dc = (tap(centre + float2(-q, -q)) + tap(centre + float2(q, -q)) +
+                 tap(centre + float2(-q, q)) + tap(centre + float2(q, q))) * 0.25;
+    float3 ac = tap(p) - dc;
+    // A broken block keeps its average and loses most of its detail, which is what a wrecked AC
+    // run decodes to. Undamaged blocks keep everything: this filter is not a blur.
+    float3 c = dc + ac * mix(1.0, 0.22, broken);
+
+    // ---- the DC difference chain drifting ----
+    // The real thing is a random walk: every block adds its own misread difference to the running
+    // total, so the error accumulates rather than flickering. Summed here as five octaves along the
+    // block row instead of an eighty-iteration loop — same statistics, one frame's worth of work.
+    // Coarse octaves persist across many blocks (the drift), fine ones vary block to block (the
+    // stutter), and the whole thing ramps in over the first dozen blocks past the break, because a
+    // difference chain that has only just gone wrong has not gone very wrong yet.
+    float walk = 0.0;
+    float amp = 1.0;
+    for (int i = 0; i < 5; ++i) {
+        float scale = exp2(float(i));
+        walk += (hash(float2(floor(b.x / scale), b.y + float(i) * 31.0)) - 0.5) * amp;
+        amp *= 0.60;
+    }
+    c += broken * walk * 0.45 * clamp(run * 0.085, 0.0, 1.0);
+
+    // ---- chroma dragging further than luma ----
+    // Chroma is stored at half resolution, so a chroma block covers twice the width of a luma one
+    // and a desync carries its colour twice as far. Keeping this frame's luminance and taking the
+    // colour from further back along the row is exactly that: the shapes stay where they are and
+    // the colour slides off them, which is the smear everyone recognises.
+    float reach = blk * (2.0 + run * 0.55) * broken;
+    float3 far = tap(p - float2(reach, 0.0));
+    float lc = lum(c);
+    c = mix(c, float3(lc, lc, lc) + (far - float3(lum(far))), broken * 0.6);
+
+    // ---- the quantiser coarsening ----
+    // Wrecking the quantisation table is the other half of the reference implementation: low
+    // frequencies amplified, high ones erased. At the pixel level that reads as fewer levels and
+    // harder steps between them, which is this.
+    float levels = mix(26.0, 5.0, broken);
+    c = floor(clamp(c, 0.0, 1.0) * levels + 0.5) / levels;
+
+    return half4(float4(clamp(c, 0.0, 1.0), 1.0));
+}
+"""
+
+    /**
      * A filter, as the rest of the app sees it.
      *
      * [agsl] is null for [none] only. [animated] marks the ones whose look depends on
@@ -728,12 +944,70 @@ half4 main(float2 xy) {
         val animated: Boolean = false,
         val lowRes: Boolean = false,
         val facesAware: Boolean = false,
+        /**
+         * Marks the one filter whose look is not fixed: Preset, which is handed the ten
+         * adjustments as uniforms. See [forGrade] for why it is a second `Filter` sharing an id
+         * with [none] rather than a flag on [none] itself.
+         */
+        val adjustable: Boolean = false,
+        /**
+         * The ten adjustments, carried on the filter rather than passed beside it.
+         *
+         * **This is why nothing between the shutter and the shader had to change.** A grade is
+         * per-photograph state, the same as which filter is on, and the capture path already
+         * carries a `Filter` from the view model through `Frames.process` and into
+         * `ShaderRuntime`. Adding a parallel `Grade` parameter to each of those would have been
+         * four signatures and four call sites able to disagree with each other. Only [preset]
+         * ever has a non-neutral one.
+         */
+        val grade: Grade = Grade.NEUTRAL,
     ) {
         /** The whole shader, prelude included. */
         val source: String? get() = agsl?.let { PRELUDE + it }
     }
 
-    val none = Filter("none", "None", null)
+    /**
+     * The first slot on the dial, with nothing set.
+     *
+     * Still a null shader, and that matters more than the name: `agsl == null` is what the capture
+     * path reads as "write the camera's own JPEG, untouched" — no decode, no GPU, no re-encode. A
+     * neutral Preset has to be exactly that photograph, so it has to be exactly this filter.
+     */
+    val none = Filter("none", "Preset", null)
+
+    /**
+     * The same slot with adjustments on it.
+     *
+     * **Deliberately shares [none]'s id.** The id is what the wheel positions itself by, what the
+     * dwell timer keys on, what is written to preferences and what "the app asked for plain" clears
+     * to — and by every one of those measures this is the same slot, not a nineteenth filter. What
+     * differs is only whether there is a shader to run, which is decided per photograph by whether
+     * the grade is neutral. So there are two `Filter` values for one dial position and [forGrade]
+     * picks between them; nothing else in the app has to know.
+     *
+     * It is not in [all]: putting it there would give the dial two Presets to walk through.
+     */
+    val preset = Filter("none", "Preset", PRESET, adjustable = true)
+
+    /**
+     * Datamosh. Animated, because the damage should move.
+     *
+     * Not `lowRes`: the block grid is sized in design pixels, so a full-resolution capture moshes
+     * at the panel's scale and there is real detail inside the blocks that survive. The dithers
+     * take the viewfinder frame because they genuinely have nothing to gain from more pixels; this
+     * one does.
+     */
+    val datamosh = Filter("datamosh", "Datamosh", DATAMOSH, animated = true)
+
+    /**
+     * Which filter to actually run.
+     *
+     * The only place the [none] / [preset] pair is resolved. Call it wherever a filter is about to
+     * be rendered — the viewfinder, the shutter, the filter grid — and everything downstream can go
+     * on treating a filter as one opaque thing.
+     */
+    fun forGrade(filter: Filter, grade: Grade): Filter =
+        if (filter.id == none.id && !grade.isNeutral) preset.copy(grade = grade) else filter
 
     /**
      * Order matters: this is the order the wheel and a sideways swipe walk through, so it
@@ -760,6 +1034,7 @@ half4 main(float2 xy) {
         Filter("mirror", "Mirror", MIRROR),
         Filter("kaleido", "Kaleido", KALEIDO),
         Filter("tunnel", "Tunnel", TUNNEL),
+        datamosh,
     )
 
     fun byId(id: String?): Filter = all.firstOrNull { it.id == id } ?: none

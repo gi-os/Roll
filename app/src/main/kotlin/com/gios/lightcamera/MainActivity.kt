@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
                         activity = this@MainActivity,
                         wheel = wheel,
                         shutter = ShutterRelease(
-                            onHalfPress = { vm.engine.halfPress() },
+                            onHalfPress = { vm.halfPress() },
                             onFullPress = { vm.shoot() },
                             onRelease = { vm.engine.releaseFocus() },
                         ),

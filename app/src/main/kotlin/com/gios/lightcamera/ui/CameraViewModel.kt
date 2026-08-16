@@ -138,6 +138,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _shutterTick = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     val shutterTick: SharedFlow<Unit> = _shutterTick.asSharedFlow()
 
+    /**
+     * "Get out of the way, I am about to take this."
+     *
+     * The mode strip, the filter grid, the Purikura menu and the exposure and zoom strips are all
+     * local state inside the camera composable, so there is nothing for the view model to set —
+     * hence a signal rather than a flag. A `SharedFlow`: closing a panel is an event, and a
+     * `StateFlow` would re-close them on every recomposition that re-read it.
+     */
+    private val _dismissPanels = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val dismissPanels: SharedFlow<Unit> = _dismissPanels.asSharedFlow()
+
     /** Seconds left on the self timer, or null. */
     private val _countdown = MutableStateFlow<Int?>(null)
     val countdown: StateFlow<Int?> = _countdown.asStateFlow()
@@ -214,7 +225,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _captureRequestDone = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
     val captureRequestDone: SharedFlow<Boolean> = _captureRequestDone.asSharedFlow()
 
-    private val _filter = MutableStateFlow(Filters.byId(prefs.filterId.value))
+    /**
+     * The filter as the whole app sees it, **already resolved against the grade**.
+     *
+     * So this holds `Filters.preset` carrying the ten adjustments whenever the dial is on the first
+     * slot and something is set, and the plain null-shader `Filters.none` whenever it is not. Every
+     * reader — the viewfinder's `RenderEffect`, the shutter, `Frames.process`, the band's label —
+     * goes on treating it as one opaque filter, and the `agsl == null` fast path still means what it
+     * always meant. Resolving in one place is what stops the preview and the file disagreeing about
+     * whether there is a shader to run.
+     */
+    private val _filter = MutableStateFlow(
+        Filters.forGrade(Filters.byId(prefs.filterId.value), prefs.grade.value),
+    )
     val filter: StateFlow<Filters.Filter> = _filter.asStateFlow()
 
     /**
@@ -280,7 +303,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             // `filterLocked` gates this rather than the collector being skipped: the lock is
             // set after construction, and a user changing the filter in the grid mid-request
             // must not leak into somebody else's photograph either.
-            prefs.filterId.collect { id -> if (!filterLocked) _filter.value = Filters.byId(id) }
+            prefs.filterId.collect { id ->
+                if (!filterLocked) _filter.value = Filters.forGrade(Filters.byId(id), prefs.grade.value)
+            }
+        }
+        // Turning an adjustment has to change the viewfinder in the same frame, and on the first
+        // notch away from zero it has to *attach* a shader that was not there a moment ago — which
+        // is a change of filter, not a change of uniform. Hence a collector rather than a uniform
+        // write: `none` becomes `preset`, and the preview's `LaunchedEffect` keys on the filter.
+        viewModelScope.launch {
+            prefs.grade.collect { grade ->
+                if (filterLocked) return@collect
+                _filter.value = Filters.forGrade(Filters.byId(prefs.filterId.value), grade)
+            }
         }
         viewModelScope.launch {
             prefs.afMode.collect { engine.afMode = it }
@@ -540,11 +575,44 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun videoMode(): Boolean = prefs.mode.value == CaptureMode.Video
 
+    /**
+     * The half detent on the shutter release.
+     *
+     * Focus is the obvious half of it. The other half is that **a half press is the clearest
+     * statement of intent the camera gets**: a finger resting on the first detent is a finger about
+     * to take a photograph, and a mode strip covering the frame at that moment is a menu you have
+     * to dismiss before you can shoot the thing you were looking at. So the panels go, and the
+     * viewfinder is clear before the lens has finished hunting.
+     */
+    fun halfPress() {
+        _dismissPanels.tryEmit(Unit)
+        closeStrip()
+        engine.halfPress()
+    }
+
+    /**
+     * Change mode, stopping a recording first if one is running.
+     *
+     * **"Stop recording first" was the wrong answer and the crash was underneath it.** Tapping Pro
+     * while filming obviously means stop filming, so it now does that — but the important part is
+     * what follows: `Recording.stop()` returns long before the muxer has finished, and rebinding
+     * the camera during that window is what took the app down when you came back to Photo. So the
+     * switch waits for the recorder to go idle and then rebinds, and [applyMode] only commits the
+     * mode to preferences once the engine confirms it actually rebound.
+     */
     fun setMode(next: CaptureMode) {
         if (engine.recording.value) {
-            showNotice("Stop recording first")
+            engine.stopRecording()
+            viewModelScope.launch {
+                engine.awaitIdle()
+                applyMode(next)
+            }
             return
         }
+        applyMode(next)
+    }
+
+    private fun applyMode(next: CaptureMode) {
         // **Simple drops Auto flash.** Auto is not free even when it decides not to fire: the HAL runs a
         // precapture metering sequence — often a preflash — before it will start the frame you asked for,
         // which is most of a second that a mode whose whole argument is speed should not be spending. Off
@@ -562,8 +630,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         _pageSheet.value = null
         _held.value = null
         _reading.value = false
+        // **The engine goes first and preferences follow it.** The other order is what let the
+        // interface get ahead of the camera: preferences said Pro, every composable redrew for Pro,
+        // and the engine — which refuses to rebind mid-recording — was still bound to `VideoCapture`
+        // with an `ImageCapture` attached to nothing behind it.
+        if (!engine.setMode(next, prefs.flash.value)) {
+            showNotice("Still finishing the recording")
+            return
+        }
         prefs.setMode(next)
-        engine.setMode(next, prefs.flash.value)
         showNotice(next.bandLabel)
     }
 

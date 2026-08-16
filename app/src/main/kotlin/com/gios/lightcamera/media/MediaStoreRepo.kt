@@ -26,7 +26,17 @@ data class Photo(
     val width: Int,
     val height: Int,
     val bucket: String?,
+    /** True for a clip. The roll draws these with a duration badge and opens them in a player. */
+    val isVideo: Boolean = false,
+    /** Length of the clip in milliseconds, zero for a still. */
+    val durationMs: Long = 0L,
 )
+
+/** `0:07`, `1:24`, `12:03`. Minutes and seconds is all a phone clip ever needs. */
+fun Photo.durationLabel(): String {
+    val total = (durationMs / 1000L).coerceAtLeast(0L)
+    return "%d:%02d".format(total / 60L, total % 60L)
+}
 
 /** Which photos the roll shows. */
 enum class RollScope(val label: String) {
@@ -65,6 +75,18 @@ class MediaStoreRepo(private val context: Context) {
     private val collection: Uri =
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
+    /**
+     * The other half of the camera roll.
+     *
+     * **MediaStore keeps stills and clips in two separate tables, and for eleven versions this
+     * app only ever asked the first one.** Every video the camera recorded was written correctly,
+     * finalised correctly and was visible in every other gallery on the phone — and invisible
+     * here, which read as a recorder that silently threw the take away. Nothing was ever lost;
+     * the query simply never looked.
+     */
+    private val videoCollection: Uri =
+        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+
     private val projection = arrayOf(
         MediaStore.Images.Media._ID,
         MediaStore.Images.Media.DISPLAY_NAME,
@@ -74,6 +96,16 @@ class MediaStoreRepo(private val context: Context) {
         MediaStore.Images.Media.HEIGHT,
         MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
     )
+
+    /**
+     * Deliberately the same column *names* as the stills projection, in the same order.
+     *
+     * `MediaStore.Video.Media` and `MediaStore.Images.Media` both inherit `MediaColumns`, so
+     * `_ID`, `DISPLAY_NAME`, `DATE_TAKEN`, `WIDTH` and the rest are the identical strings in both
+     * tables. Keeping the order identical means one cursor reader serves both, and the only
+     * genuinely video-specific column — `DURATION` — is appended on the end.
+     */
+    private val videoProjection = projection + arrayOf(MediaStore.Video.Media.DURATION)
 
     suspend fun load(scope: RollScope): List<Photo> = withContext(Dispatchers.IO) {
         // **The four frames of a strip are hidden from the roll.** They are saved, and you can open
@@ -97,17 +129,45 @@ class MediaStoreRepo(private val context: Context) {
             "${MediaStore.Images.Media.DATE_ADDED} * 1000) DESC"
 
         val out = ArrayList<Photo>(256)
+        out += read(collection, projection, selection, args, order, video = false)
+        out += read(videoCollection, videoProjection, selection, args, order, video = true)
+        // **Merged here rather than by the database, because there are two databases.** Each table
+        // came back sorted; a roll interleaves them, so the combined list is sorted once more in
+        // memory. Newest first, the same key the queries used, so a clip and a still taken in the
+        // same second land next to each other rather than in two blocks.
+        out.sortByDescending { it.takenAt }
+        out
+    }
+
+    /**
+     * One cursor read, shared by the stills table and the video table.
+     *
+     * Both projections start with the same seven columns in the same order, so the only thing that
+     * differs is whether there is a `DURATION` on the end — which is what [video] decides.
+     */
+    private fun read(
+        from: Uri,
+        columns: Array<String>,
+        selection: String,
+        args: Array<String>,
+        order: String,
+        video: Boolean,
+    ): List<Photo> {
+        val out = ArrayList<Photo>(128)
         runCatching {
-            context.contentResolver.query(collection, projection, selection, args, order)
+            context.contentResolver.query(from, columns, selection, args, order)
                 ?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-                    val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
-                    val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                    val wCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
-                    val hCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val takenCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
+                    val addedCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val wCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.WIDTH)
+                    val hCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.HEIGHT)
                     val bucketCol =
-                        cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                        cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+                    // Not `getColumnIndexOrThrow`: a stills cursor has no duration and asking for
+                    // one would take the whole roll down rather than the badge on one cell.
+                    val durCol = cursor.getColumnIndex(MediaStore.MediaColumns.DURATION)
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val taken = if (cursor.isNull(takenCol)) {
@@ -117,17 +177,23 @@ class MediaStoreRepo(private val context: Context) {
                         }
                         out += Photo(
                             id = id,
-                            uri = ContentUris.withAppendedId(collection, id),
+                            uri = ContentUris.withAppendedId(from, id),
                             name = cursor.getString(nameCol) ?: "",
                             takenAt = taken,
                             width = cursor.getInt(wCol),
                             height = cursor.getInt(hCol),
                             bucket = cursor.getString(bucketCol),
+                            isVideo = video,
+                            durationMs = if (durCol >= 0 && !cursor.isNull(durCol)) {
+                                cursor.getLong(durCol)
+                            } else {
+                                0L
+                            },
                         )
                     }
                 }
-        }.onFailure { Log.e(TAG, "query failed", it) }
-        out
+        }.onFailure { Log.e(TAG, "query failed for $from", it) }
+        return out
     }
 
     /**
@@ -262,13 +328,21 @@ class MediaStoreRepo(private val context: Context) {
         }.getOrNull()
     }
 
-    /** Fires whenever anything in the collection changes, including our own writes. */
+    /**
+     * Fires whenever anything in either collection changes, including our own writes.
+     *
+     * **Both tables, for the same reason [load] reads both.** Registered on the stills table alone,
+     * finishing a recording changed nothing the roll was watching, so a clip only ever appeared
+     * after the next photograph happened to poke the observer.
+     */
     fun observe(onChange: () -> Unit): AutoCloseable {
         val observer = object : ContentObserver(null) {
             override fun onChange(selfChange: Boolean) = onChange()
         }
-        context.contentResolver.registerContentObserver(collection, true, observer)
-        return AutoCloseable { context.contentResolver.unregisterContentObserver(observer) }
+        val resolver = context.contentResolver
+        resolver.registerContentObserver(collection, true, observer)
+        resolver.registerContentObserver(videoCollection, true, observer)
+        return AutoCloseable { resolver.unregisterContentObserver(observer) }
     }
 
     private companion object {

@@ -5,6 +5,8 @@ import com.gios.lightcamera.camera.AfMode
 import com.gios.lightcamera.camera.FlashMode
 import com.gios.lightcamera.camera.FrameAspect
 import com.gios.lightcamera.camera.PuriArt
+import com.gios.lightcamera.filter.Adjust
+import com.gios.lightcamera.filter.Grade
 import com.gios.lightcamera.filter.FaceTune
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.camera.PuriStrip
@@ -634,6 +636,36 @@ class Prefs(context: Context) {
 
     fun setSimpleMode(value: Boolean) = set(_simpleMode, value) { putBoolean(SIMPLE_MODE, value) }
 
+    /* ---------------- the Preset grade ---------------- */
+
+    /**
+     * The ten adjustments, stored one key per adjustment.
+     *
+     * **One key each rather than a serialised blob**, keyed off the enum's own name. A blob would
+     * have to be versioned the first time an adjustment is added or renamed, and this way a key
+     * that is not there yet simply reads as zero — which is exactly what a new adjustment should
+     * default to.
+     */
+    private val _grade = MutableStateFlow(readGrade())
+    val grade: StateFlow<Grade> = _grade.asStateFlow()
+
+    private fun readGrade(): Grade {
+        var out = Grade()
+        Adjust.entries.forEach { adjust ->
+            out = out.with(adjust, prefs.getInt(gradeKey(adjust), 0))
+        }
+        return out
+    }
+
+    fun setGrade(value: Grade) = set(_grade, value) {
+        Adjust.entries.forEach { adjust -> putInt(gradeKey(adjust), value[adjust]) }
+    }
+
+    fun stepGrade(adjust: Adjust, by: Int) = setGrade(_grade.value.step(adjust, by))
+
+    /** Back to the plain photograph, in one tap. The menu's only destructive control. */
+    fun clearGrade() = setGrade(Grade.NEUTRAL)
+
     // All written down: a switch you flick should stay flicked.
     fun setPuriFrame(value: String) = set(_puriFrame, value) { putString(PURI_FRAME, value) }
 
@@ -706,6 +738,9 @@ class Prefs(context: Context) {
         const val PURI_EYES = "puriEyes"
         const val PURI_CHIN = "puriChin"
         const val PURI_SLIM = "puriSlim"
+        /** `grade.warmth`, `grade.vibrance`. Namespaced so a future adjustment cannot collide. */
+        fun gradeKey(adjust: Adjust): String = "grade." + adjust.name
+
         const val FAVOURITES = PrefsFile.FAVOURITES
         /** Kept only so an existing setting can be read forward once. */
         const val DATE_STAMP = "dateStamp"
