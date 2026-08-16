@@ -153,30 +153,41 @@ class DatabendTest {
     }
 
     @Test
-    fun `huffman rotation keeps every symbol`() {
+    fun `the Huffman tables are never touched at all`() {
+        // v2.48 removed `rotateHuffman`. It rotated AC symbols within a magnitude group, which kept
+        // every code length valid — the file decoded — but rewrote each symbol's zero-run, so every
+        // coefficient in the image landed at a different frequency. The result was confetti with no
+        // photograph under it, which is what light-reports#29 was.
+        //
+        // Guarded as "the whole DHT segment is byte-identical" rather than as the absence of a
+        // function, because the next person to reach for a Huffman-table edit will write a new
+        // function and this should stop them there.
         val original = jpeg()
-        val out = original.copyOf().also { Databend.rotateHuffman(it, 0.9f) }
-        val dht = out.indexOfMarker(0xC4)
-        val len = (out.u(dht + 2) shl 8) or out.u(dht + 3)
-        val symbolsAt = dht + 4 + 1 + 16
-        val symbolsEnd = dht + 2 + len
-        val before = (symbolsAt until symbolsEnd).map { original.u(it) }.sorted()
-        val after = (symbolsAt until symbolsEnd).map { out.u(it) }.sorted()
-        // Rotating within a magnitude group reorders symbols; it must never invent or drop one, or
-        // the code lengths stop matching the counts and the file will not decode at all.
-        assertEquals("symbol set changed", before, after)
+        val out = Databend.apply(original, intensity = 0.95f, random = Random(11))
+        val dht = original.indexOfMarker(0xC4)
+        val end = dht + 2 + ((original.u(dht + 2) shl 8) or original.u(dht + 3))
+        for (i in dht until end) {
+            assertEquals("the databend rewrote a Huffman table byte at $i", original.u(i), out.u(i))
+        }
     }
 
     @Test
-    fun `the counts table is never touched`() {
+    fun `every table keeps its DC quantiser through the whole pipeline`() {
+        // The other half of light-reports#29. `amplifyChroma` wrote 162-180 into the chroma table's
+        // DC slot, where a real table holds 17-99, and a chroma DC quantiser that large snaps each
+        // block's average colour to a wildly wrong value — the flat acid green and magenta.
+        //
+        // `erodeQuant` has always preserved k=0 and `rotateZigzag` only permutes k=1..63, so with
+        // the chroma edit gone this now holds for the whole treatment and not just one function.
         val original = jpeg()
-        val out = original.copyOf().also { Databend.rotateHuffman(it, 0.95f) }
-        val dht = out.indexOfMarker(0xC4)
-        for (k in 0 until 16) {
+        val out = Databend.apply(original, intensity = 0.95f, random = Random(13))
+        // Both tables: id 0 at the segment's first value, id 1 one table-plus-id-byte further on.
+        val first = quantAt(original)
+        listOf(first, first + 65).forEach { at ->
             assertEquals(
-                "rotateHuffman rewrote a length count at $k",
-                original.u(dht + 5 + k),
-                out.u(dht + 5 + k),
+                "the DC quantiser at $at moved — colour will snap to nonsense",
+                original.u(at),
+                out.u(at),
             )
         }
     }

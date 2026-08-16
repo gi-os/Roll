@@ -219,7 +219,11 @@ object Frames {
         // After the filter, always: a date back printed through the film gate, so the date is on
         // the emulsion and not under it. Dithering the stamp along with the picture would turn the
         // digits into confetti.
-        if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle)
+        //
+        // Which is why the stamp is told what it is landing on rather than shown it: printed last,
+        // it has no way to see that the photograph under it came out black and white, and an amber
+        // date on a Mono frame is what light-reports#25 was.
+        if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle, filter.mono)
 
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 6)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
@@ -298,7 +302,7 @@ object Frames {
                 Log.e(TAG, "no mutable copy for the overlay; saving the frame without it")
             }
         }
-        if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle)
+        if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle, filter.mono)
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 4)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
         // **Datamosh has to be applied here as well as in [process].** This is the whole capture

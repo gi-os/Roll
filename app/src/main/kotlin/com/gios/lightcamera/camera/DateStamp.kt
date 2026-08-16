@@ -7,7 +7,6 @@ import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
@@ -43,6 +42,52 @@ import java.util.Calendar
  *    watermark.
  */
 object DateStamp {
+
+    /**
+     * The two colours a stamp is drawn in: the lit element and the bloom beneath it.
+     *
+     * Packed ARGB, and packed by hand rather than by `Color.argb`, so that [inkFor] is arithmetic
+     * with no Android in it and the palette can be checked off-device. `Paint.color` takes exactly
+     * this Int.
+     */
+    data class Ink(val lamp: Int, val halo: Int)
+
+    private fun argb(a: Int, r: Int, g: Int, b: Int): Int =
+        (a shl 24) or (r shl 16) or (g shl 8) or b
+
+    /**
+     * What to draw the stamp in, given the style and whether the photograph underneath has any
+     * colour in it.
+     *
+     * **Colour is the default and the whole point.** A date back was an amber LED array or an
+     * orange-red LCD, and that colour is half of why a stamped photograph reads as 1994.
+     *
+     * On a black-and-white frame it reads as a mistake instead, which is what light-reports#25 was:
+     * the stamp is printed after the filter — see [com.gios.lightcamera.filter.Filters.Filter.mono]
+     * — so a Mono, Dither BW, 1-Bit or Halftone photograph came out with a full-colour amber date
+     * sitting on top of it.
+     *
+     * The mono palette is **not** simply the amber desaturated. Take the hue away and contrast is
+     * the only channel the stamp has left, and a light-grey date is invisible over a white sky and a
+     * 1-Bit frame has nothing *but* white and black. So the bloom inverts: near-black, drawn under
+     * lamps that are near-white and slightly smaller, which leaves a dark keyline around every lit
+     * dot. On white the keyline reads the digits; on black the lamps do. The camcorder style already
+     * worked this way — a black keyline under a bright fill is what a character generator drew — so
+     * in mono it only loses its amber.
+     */
+    fun inkFor(style: StampStyle, mono: Boolean): Ink = when {
+        // Near-white rather than white, and the halo heavy enough to hold its own against a blown
+        // highlight without reading as a drop shadow.
+        mono && style == StampStyle.Outline -> Ink(argb(255, 245, 245, 245), argb(245, 0, 0, 0))
+        mono -> Ink(argb(235, 245, 245, 245), argb(120, 0, 0, 0))
+        // The compact camera's amber-green dot matrix, at nine tenths opacity so the picture shows
+        // through the way a light does rather than sitting on top like paint.
+        style == StampStyle.Dots -> Ink(argb(230, 205, 222, 74), argb(58, 214, 232, 96))
+        // The film SLR's quartz back: orange-red, with the halation as a stroke around the same path.
+        style == StampStyle.Quartz -> Ink(argb(240, 240, 86, 30), argb(50, 255, 132, 60))
+        // The camcorder's character generator: amber fill, heavy black keyline.
+        else -> Ink(argb(255, 247, 160, 42), argb(245, 0, 0, 0))
+    }
 
     /**
      * `11  5 '21` — month, day, then the two-digit year behind an apostrophe.
@@ -116,7 +161,13 @@ object DateStamp {
      *
      * Takes a copy when handed an immutable bitmap, which a freshly decoded JPEG always is.
      */
-    fun apply(bitmap: Bitmap, millis: Long, style: StampStyle = StampStyle.Dots): Bitmap {
+    fun apply(
+        bitmap: Bitmap,
+        millis: Long,
+        style: StampStyle = StampStyle.Dots,
+        /** Whether the filter under the stamp left the photograph black and white. See [inkFor]. */
+        mono: Boolean = false,
+    ): Bitmap {
         val target = if (bitmap.isMutable) {
             bitmap
         } else {
@@ -124,17 +175,18 @@ object DateStamp {
         }
         val text = format(millis, style)
         val canvas = Canvas(target)
+        val ink = inkFor(style, mono)
         when (style) {
-            StampStyle.Dots -> drawDots(canvas, target, text)
-            StampStyle.Quartz -> drawQuartz(canvas, target, text)
-            StampStyle.Outline -> drawOutline(canvas, target, text)
+            StampStyle.Dots -> drawDots(canvas, target, text, ink)
+            StampStyle.Quartz -> drawQuartz(canvas, target, text, ink)
+            StampStyle.Outline -> drawOutline(canvas, target, text, ink)
         }
         return target
     }
 
     /* ---------------- dots: the compact-camera matrix ---------------- */
 
-    private fun drawDots(canvas: Canvas, target: Bitmap, text: String) {
+    private fun drawDots(canvas: Canvas, target: Bitmap, text: String, ink: Ink) {
 
         // One glyph is seven cells tall, and the whole stamp about a twenty-fifth of the frame —
         // measured off photographs from a Canon Sure Shot, which is as principled as this gets.
@@ -154,11 +206,11 @@ object DateStamp {
             // Circles, so antialiasing goes back on — a hard-edged circle at this size is a
             // polygon. The squares it replaced wanted it off for exactly the opposite reason.
             isAntiAlias = true
-            color = Color.argb(58, 214, 232, 96)
+            color = ink.halo
         }
         val lamp = Paint().apply {
             isAntiAlias = true
-            color = Color.argb(230, 205, 222, 74)
+            color = ink.lamp
         }
 
         text.forEach { ch ->
@@ -191,7 +243,7 @@ object DateStamp {
      *    each bar separately. The display leans; the segments are upright inside it.
      *  - a hair of a gap at every joint, because seven separate bars is what it is.
      */
-    private fun drawQuartz(canvas: Canvas, target: Bitmap, text: String) {
+    private fun drawQuartz(canvas: Canvas, target: Bitmap, text: String, ink: Ink) {
         // Sized off the long edge, and smaller again — a date back's display is a couple of
         // centimetres of LCD reflected into the corner of a 35mm frame. The digit is now about a
         // fiftieth of the long edge, with the classic LCD proportions: near twice as tall as it is
@@ -208,7 +260,7 @@ object DateStamp {
 
         val glow = Paint().apply {
             isAntiAlias = true
-            color = Color.argb(50, 255, 132, 60)
+            color = ink.halo
             // Halation as a stroke around the same path, so the bloom follows the mitred ends
             // instead of being a second, fatter, differently-shaped bar.
             style = Paint.Style.FILL_AND_STROKE
@@ -216,7 +268,7 @@ object DateStamp {
         }
         val lamp = Paint().apply {
             isAntiAlias = true
-            color = Color.argb(240, 240, 86, 30)
+            color = ink.lamp
         }
 
         text.forEach { ch ->
@@ -329,7 +381,7 @@ object DateStamp {
      * drawn as text: stroke pass first for the outline, fill pass on top, no lean, slashes between
      * the numbers, and all four digits of the year.
      */
-    private fun drawOutline(canvas: Canvas, target: Bitmap, text: String) {
+    private fun drawOutline(canvas: Canvas, target: Bitmap, text: String, ink: Ink) {
         // A character generator drew this into a video line, so it was small — about a
         // twenty-fifth of the frame, not a fifteenth — and the keyline was one pixel of video,
         // which is a hairline here rather than the heavy slab of the first attempt.
@@ -346,13 +398,13 @@ object DateStamp {
             strokeWidth = size * 0.22f
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
-            color = Color.argb(245, 0, 0, 0)
+            color = ink.halo
         }
         val fill = Paint().apply {
             isAntiAlias = true
             typeface = CONDENSED
             textSize = size
-            color = Color.argb(255, 247, 160, 42)
+            color = ink.lamp
         }
         val width = fill.measureText(text)
         val x = target.width - size * 0.7f - width

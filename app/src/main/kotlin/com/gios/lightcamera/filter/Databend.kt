@@ -12,17 +12,36 @@ import kotlin.random.Random
  * drawing, only by breaking.
  *
  * Ported from cebola4444's cybershot-cam (`src/main.cpp`), which does this on an ESP32-S3 to its own
- * camera's output. Five operations, in the order they are applied:
+ * camera's output. Three operations, in the order they are applied:
  *
  * | Function | Marker | What it edits | What you see |
  * | --- | --- | --- | --- |
  * | [rotateZigzag] | `FFDB` | circular-rotates the 63 AC quantisation values | frequencies swap roles — emboss, relief |
  * | [erodeQuant] | `FFDB` | low frequencies to 1, high to 255 | detail erased, blocks posterise |
- * | [amplifyChroma] | `FFDB` (table 1) | chroma table's DC and mid AC only | colour explodes, luminance stays sharp |
- * | [rotateHuffman] | `FFC4` | rotates AC symbols within each magnitude group | coefficients land in the wrong slots |
  * | [transplantScan] | `FFDA`→`FFD9` | overwrites runs of the entropy stream | **Huffman desync — the smear** |
  *
- * The last one is the actual mosh and the reason the others are here at all. JPEG packs every block
+ * **Two more were ported and have been removed, and they are worth naming so they do not come
+ * back.** The reference runs on a thumbnail-sized ESP32 frame where a total scramble still reads as
+ * an image; at photograph size it does not, and both of these scrambled globally rather than
+ * locally:
+ *
+ *  - `rotateHuffman` rotated AC symbols inside each magnitude group of the `FFC4` tables. The
+ *    reasoning it carried was half right — rotating within one magnitude does keep every code
+ *    length valid, so the file stays in sync and decodes. But a symbol's low nibble is the
+ *    coefficient's *size* and its high nibble is the *run of zeroes before it*, so rotating within a
+ *    size group rewrites the run. Every coefficient in every block in the image lands at a different
+ *    frequency. That is not a tear that drags sideways, it is a global reshuffle, and it is why
+ *    Datamosh returned confetti with no photograph under it.
+ *  - `amplifyChroma` wrote 162–180 into the chroma table's DC slot, where a real table holds 17–99.
+ *    A chroma DC quantiser that large snaps each block's average colour to a wildly wrong value, so
+ *    the frame came back in flat acid green and magenta. Removed with the same reasoning: it damaged
+ *    the whole frame uniformly, which is a colour bug wearing a filter's clothes.
+ *
+ * What is left damages the photograph without erasing it — which is the line this filter has to
+ * stay on, because the difference between a glitched photograph and a destroyed one is the
+ * difference between a filter and a bug.
+ *
+ * [transplantScan] is the actual mosh and the reason the others are here at all. JPEG packs every block
  * into one continuous bitstream with no byte alignment between blocks, and each block's DC
  * coefficient is stored as a *difference* from the previous block's. So overwriting a run of scan
  * bytes does two things at once: the reader loses block alignment, and the DC difference chain
@@ -46,7 +65,6 @@ object Databend {
 
     private const val MARKER = 0xFF
     private const val DQT = 0xDB
-    private const val DHT = 0xC4
     private const val SOS = 0xDA
     private const val EOI = 0xD9
 
@@ -148,78 +166,6 @@ object Databend {
             val ac = IntArray(63) { readQuant(buf, at, precision, it + 1) }
             for (k in 0 until 63) {
                 writeQuant(buf, at, precision, k + 1, ac[(k + rotation) % 63])
-            }
-        }
-    }
-
-    /**
-     * Blow out colour without touching sharpness.
-     *
-     * Only table id 1, the chrominance one — luminance keeps its own table untouched, so edges and
-     * detail survive intact while the colour goes wild. If the encoder emitted no separate chroma
-     * table (it shares one), every table is treated instead, because the alternative is doing
-     * nothing at all.
-     */
-    fun amplifyChroma(buf: ByteArray, intensity: Float) {
-        var hasChroma = false
-        eachQuantTable(buf) { id, _, _ -> if (id == 1) hasChroma = true }
-
-        val midHi = 18 + (intensity * 10f).toInt()
-        val dc = 162 + (intensity * 18f).toInt()
-        val ac = 198 + (intensity * 32f).toInt()
-
-        eachQuantTable(buf) { id, precision, at ->
-            if (hasChroma && id != 1) return@eachQuantTable
-            writeQuant(buf, at, precision, 0, dc)
-            for (k in 4..midHi.coerceAtMost(63)) writeQuant(buf, at, precision, k, ac)
-        }
-    }
-
-    /**
-     * Rotate the AC Huffman symbols inside each magnitude group.
-     *
-     * **AC tables only — rotating a DC table desynchronises the stream immediately** and the image
-     * does not survive it. A symbol's low nibble is the coefficient's magnitude and the high nibble
-     * is the run of zeroes before it; shuffling symbols within one magnitude keeps every code length
-     * valid, so the file still decodes, but each coefficient lands at the wrong position in its
-     * block. Higher magnitudes are rotated further, so fine detail distorts more than structure.
-     */
-    fun rotateHuffman(buf: ByteArray, intensity: Float) {
-        val rotLuma = (1 + (intensity * 5f).toInt()).coerceIn(1, 6)
-        val rotChroma = (rotLuma - 1).coerceIn(1, 3)
-
-        segments(buf, DHT).forEach { seg ->
-            val end = seg + 2 + buf.segmentLength(seg)
-            var pos = seg + 4
-            while (pos < end) {
-                val tableClass = (buf.u(pos) shr 4) and 0x0F
-                val tableId = buf.u(pos) and 0x0F
-                pos++
-                if (pos + 16 > end) return@forEach
-                var symbols = 0
-                for (k in 0 until 16) symbols += buf.u(pos + k)
-                pos += 16
-                if (pos + symbols > end) return@forEach
-
-                if (tableClass == 1 && symbols > 1) {
-                    val rotation = if (tableId == 0) rotLuma else rotChroma
-                    for (size in 1..10) {
-                        val idx = ArrayList<Int>(16)
-                        for (k in 0 until symbols) {
-                            if ((buf.u(pos + k) and 0x0F) == size) {
-                                idx += k
-                                if (idx.size >= 16) break
-                            }
-                        }
-                        if (idx.size < 2) continue
-                        val values = IntArray(idx.size) { buf.u(pos + idx[it]) }
-                        val shift = ((rotation * size) / 5).coerceIn(1, idx.size - 1)
-                        for (k in idx.indices) {
-                            buf[pos + idx[k]] = values[(k + shift) % idx.size].toByte()
-                        }
-                    }
-                }
-                pos += symbols
             }
         }
     }
@@ -330,8 +276,6 @@ object Databend {
         runCatching {
             rotateZigzag(out, amount)
             erodeQuant(out, amount)
-            amplifyChroma(out, amount)
-            rotateHuffman(out, amount)
             transplantScan(out, amount, random)
         }.onFailure { return jpeg }
         return out

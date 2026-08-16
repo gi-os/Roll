@@ -840,6 +840,21 @@ half4 main(float2 xy) {
          */
         val adjustable: Boolean = false,
         /**
+         * Marks the filters whose output has no colour of its own.
+         *
+         * Read by the date back, and by nothing else. The stamp is drawn **after** the filter on
+         * purpose — a date back printed through the film gate puts the date on the emulsion rather
+         * than under it, and dithering the digits along with the picture turns them into confetti —
+         * so an amber dot-matrix date was landing at full colour on a black-and-white photograph
+         * (light-reports#25). This is what lets the stamp desaturate itself without the filter
+         * having to run over it.
+         *
+         * **Greyscale output only.** Game Boy and X-Ray are not here: they have a colour of their
+         * own, and a white date on a Game Boy's green is not more correct than an amber one, only
+         * different. The ask was black and white on black and white.
+         */
+        val mono: Boolean = false,
+        /**
          * The ten adjustments, carried on the filter rather than passed beside it.
          *
          * **This is why nothing between the shutter and the shader had to change.** A grade is
@@ -909,19 +924,30 @@ half4 main(float2 xy) {
     /**
      * Order matters: this is the order the wheel and a sideways swipe walk through, so it
      * runs from the ones you would actually shoot with to the ones you would not.
+     *
+     * **[datamosh] is the one entry placed by arithmetic rather than by taste.** It used to sit last,
+     * which on a dial that wraps put it exactly *one notch backwards* from Preset — so reaching for
+     * the plain photograph and overshooting by a single click landed on the one filter that
+     * deliberately damages the file, and it was being switched on by accident (light-reports#27).
+     *
+     * It is now at index 11 of twenty-one, which is as far from Preset as any entry can be: ten
+     * notches forwards and eleven back. Nothing else moved, and the wrap stayed — a physical dial
+     * should never dead-end, and special-casing the step to refuse one neighbour would have made
+     * the wheel feel broken to fix an ordering problem.
      */
     val all: List<Filter> = listOf(
         none,
         Filter("film", "Film", FILM, animated = true),
-        Filter("mono", "Mono", MONO),
+        Filter("mono", "Mono", MONO, mono = true),
         Filter("dither16", "Dither 16", DITHER16, lowRes = true),
         Filter("dither32", "Dither 32", DITHER32, lowRes = true),
-        Filter("dithergrey", "Dither BW", DITHER_GREY, lowRes = true),
-        Filter("onebit", "1-Bit", ONE_BIT, lowRes = true),
-        Filter("halftone", "Halftone", HALFTONE, lowRes = true),
+        Filter("dithergrey", "Dither BW", DITHER_GREY, lowRes = true, mono = true),
+        Filter("onebit", "1-Bit", ONE_BIT, lowRes = true, mono = true),
+        Filter("halftone", "Halftone", HALFTONE, lowRes = true, mono = true),
         Filter("gameboy", "Game Boy", GAMEBOY, lowRes = true),
         Filter("gbcolor", "GB Color", GB_COLOR, lowRes = true),
         Filter("comic", "Comic", COMIC),
+        datamosh,
         Filter("purikura", "Purikura", PURIKURA, animated = true, facesAware = true),
         Filter("thermal", "Thermal", THERMAL),
         Filter("xray", "X-Ray", X_RAY),
@@ -931,7 +957,6 @@ half4 main(float2 xy) {
         Filter("mirror", "Mirror", MIRROR),
         Filter("kaleido", "Kaleido", KALEIDO),
         Filter("tunnel", "Tunnel", TUNNEL),
-        datamosh,
     )
 
     fun byId(id: String?): Filter = all.firstOrNull { it.id == id } ?: none

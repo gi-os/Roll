@@ -176,6 +176,37 @@ class FiltersTest {
     }
 
     @Test
+    fun `Datamosh is as far from Preset as the dial allows`() {
+        // light-reports#27. Datamosh was last in the list, and because stepping wraps, last is one
+        // notch *backwards* from first — so overshooting Preset by a single click landed on the one
+        // filter that deliberately damages the file, and it was being switched on by accident.
+        //
+        // Guarded as a distance rather than as an index so that inserting a filter cannot quietly
+        // walk it back to Preset's shoulder.
+        val size = Filters.all.size
+        val at = Filters.indexOf(Filters.datamosh)
+        val away = minOf(at, size - at)
+        assertTrue("Datamosh sits $away notch(es) from Preset", away >= size / 3)
+        assertEquals(
+            "the dial must not step from Preset straight onto Datamosh",
+            listOf(false, false),
+            listOf(Filters.step(Filters.none, 1), Filters.step(Filters.none, -1))
+                .map { it.id == Filters.datamosh.id },
+        )
+    }
+
+    @Test
+    fun `only greyscale filters ask the date stamp to go neutral`() {
+        // The stamp is printed after the filter, so it cannot see what it landed on and is told
+        // instead. A filter with a colour of its own must not claim to be mono — a white date on a
+        // Game Boy's green is not more correct than an amber one, only different.
+        assertEquals(
+            listOf("mono", "dithergrey", "onebit", "halftone"),
+            Filters.all.filter { it.mono }.map { it.id },
+        )
+    }
+
+    @Test
     fun `an unknown id falls back to None rather than crashing`() {
         assertEquals(Filters.none.id, Filters.byId("nope").id)
         assertEquals(Filters.none.id, Filters.byId(null).id)
