@@ -87,6 +87,29 @@ object Controls {
      * @param cameraKeyWorks whether the camera button's events are reaching this app. See
      *   [CameraKeyAdvice], which answers it by looking for a service that binds the key.
      */
+    /**
+     * What a press does *right now*, which is not always what it is bound to.
+     *
+     * One case, and it only exists because this app takes the keys before anything else can: both
+     * volume keys are a shutter by default, so with a clip playing in the viewer there was no way
+     * to change its volume — the keys were being spent on a shutter belonging to a viewfinder that
+     * is not even on screen.
+     *
+     * [PressAction.Nothing] is not "do nothing" here. `LightControls` hands an unbound key back to
+     * the system rather than swallowing it, which is precisely "let the phone change the volume",
+     * so this needs no new plumbing and no new control on the panel.
+     *
+     * Volume keys only. The wheel and its click have no system meaning to give back, and the
+     * camera key is not remappable in the first place. The shutter is unaffected everywhere else,
+     * so [shutterSafe] still holds: nothing plays outside the viewer.
+     */
+    fun pressNow(binding: Binding, bound: PressAction, clipPlaying: Boolean): PressAction =
+        if (clipPlaying && (binding == Binding.VolumeUp || binding == Binding.VolumeDown)) {
+            PressAction.Nothing
+        } else {
+            bound
+        }
+
     fun shutterSafe(
         volumeUp: PressAction,
         volumeDown: PressAction,

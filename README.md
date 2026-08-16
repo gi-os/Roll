@@ -136,8 +136,8 @@ You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `2.38.0`. CI adds the run number
-as the patch, so the release from the current `main` is `v2.38.x`. See
+**Current version:** `versionName` in `app/build.gradle.kts` is `2.47.0`. CI adds the run number
+as the patch, so the release from the current `main` is `v2.47.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 
 ## Controls
@@ -479,6 +479,7 @@ Everything is in the in-app Settings screen. There is no config file and nothing
 
 | Setting | Options | Notes |
 |---|---|---|
+| `v2.47.x` | 2026-08-16 | **A clip in the viewer shows its first frame, and its volume can be changed while it plays.** The viewer decodes frames with `BitmapFactory`, which reads image files and nothing else, so a video came back null and drew as a black rectangle with a play triangle on it — a clip looked like a frame that had failed to load. Poster frames now come from `loadThumbnail`, the same call the roll grid already makes, which is usually cached and applies the clip's rotation so the still and the video that follows it are the same way up; a clip MediaStore has no thumbnail for falls back to decoding the opening keyframe. Separately, both volume keys are a shutter by default and Roll takes them in `dispatchKeyEvent` before anything else can, so a playing clip's volume could not be moved at all. While one plays they report as unbound, which already meant "hand the key back to the phone" — no new control, and the flag is cleared on playback ending, on swiping away and on closing the viewer, because leaving it set would take the fallback shutter with it. |
 | Colour | Viewfinder only / whole app / off | Needs the `WRITE_SECURE_SETTINGS` grant above. Without it, everything stays grey. |
 | Frame | 4:3, 3:2, 16:9, 1:1 | Applied as a centre crop at save time. The live viewfinder always fills the screen. |
 | Size | 50MP / 12MP / 5MP / 2MP / Screen | 12MP by default, because the sensor's native 50MP readout *is* the shutter lag. **Screen** never calls the shutter at all. It keeps the frame you were looking at, instantly, filter included. |

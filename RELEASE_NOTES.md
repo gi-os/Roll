@@ -1,65 +1,28 @@
-## Roll v2.46 — Adjust with the picture in front of you
+## Roll v2.47 — a clip looks like a photograph again, and you can turn it down
 
-A grade is not something you can reason about from its numbers. "Warmth +2" means nothing until you
-see it on the thing you are pointing at, and v2.45 put the ten adjustments behind a menu that
-covered the frame — so you set a value, closed the menu, looked, opened it again.
+**A video in the viewer was a black rectangle with a play triangle floating in the middle of it.**
+Every other page in that pager is a picture, so a clip did not read as a clip — it read as a frame
+that had failed to load, and the only way to find out what was on it was to press play.
 
-The adjustments now live in a narrow column down one side with the **viewfinder live beside them**.
-Only the column takes touches: the shutter, the wheel and the half press all still work with it
-open, so you adjust and shoot without closing anything. Names are shortened to fit and the
-explanatory line is gone, because with the picture right there neither was doing any work.
+The viewer decodes its full-screen frames with `BitmapFactory`, which reads image files and nothing
+else. Handed a video it returns null, every time, silently. The roll grid never showed the problem
+because it asks MediaStore for a thumbnail instead, and MediaStore is happy to produce one for a
+clip. So the fix is to ask the same question in the viewer: a clip's poster frame now comes from
+`loadThumbnail`, which is usually already cached and applies the clip's rotation on the way out, so
+the still you see before you press play is the same way up as the video that follows it. A clip
+MediaStore has no thumbnail for falls back to a single-frame decode of the opening keyframe.
 
-It is the first thing in the band now, where the album icon used to be. The album was spending a
-permanent slot on a shortcut to a swipe you already had; the adjustments had nowhere at all. The
-roll is still one swipe from the viewfinder, exactly as before.
+**And the volume keys work while a clip is playing.** Both of them are a shutter by default — the
+phone has no shutter button on its screen, so that mapping is load-bearing — and Roll takes them in
+`dispatchKeyEvent`, before the view hierarchy and before the system. That is right in front of a
+viewfinder and wrong in front of a video: a clip would play at whatever the phone's media volume
+happened to be, with no way to move it, because the keys were being spent on a shutter belonging to
+a screen that was not even visible.
 
-**The mode chip says PHOTO again.** In Pro it names the filter, because which filter is on is the
-one piece of state you cannot read off the picture — but the first slot is Preset, and "PRESET"
-sitting in the band told you nothing. Whether anything is actually set is the Adjust control's job.
-FILM, MONO and the rest still name themselves.
+While a clip plays, and only then, the volume keys report as unbound. That already had a defined
+meaning — an unbound key is handed back to the phone rather than swallowed — so the keys do what
+they do everywhere else, and nothing new appears on the panel. The flag is cleared when playback
+ends, when you swipe to another frame, and when the viewer closes, because a flag left set would
+take away the fallback shutter with nothing on screen to explain it. A test pins both directions.
 
-Your adjustments persist across restarts, as they did before — one preference key per adjustment,
-and there is now a test pinning those key names, because renaming one would silently reset
-everybody's preset to zero on upgrade with no error anywhere.
-
-### Datamosh is real now
-
-v2.45's Datamosh was a shader that simulated the *causes* of JPEG corruption. It looked convincing
-and it was still a drawing of a broken photograph rather than a broken photograph.
-
-This one does what cebola4444's cybershot-cam does, ported to Kotlin and pointed at the file the
-encoder just produced. Five operations on the actual bytes:
-
-| | Marker | What it edits |
-| --- | --- | --- |
-| Zigzag rotation | `FFDB` | circular-rotates the 63 AC quantisation values, so frequencies swap roles |
-| Frequency erosion | `FFDB` | low frequencies to 1, high to 255 — detail erased, blocks posterise |
-| Chroma amplification | `FFDB` table 1 | chroma table only, so colour explodes while luminance stays sharp |
-| Huffman rotation | `FFC4` | rotates AC symbols within each magnitude group |
-| **Scan transplant** | `FFDA`→`FFD9` | overwrites runs of the entropy-coded stream |
-
-The last one is the mosh. JPEG packs every block into one continuous bitstream with no byte
-alignment between blocks, and each block's DC coefficient is stored as a *difference* from the one
-before it. So overwriting a run of scan bytes does two things at once: the reader loses block
-alignment, and the DC difference chain inherits an error that every later block adds to. Because
-blocks are written left to right, that error drags sideways. That drag is datamoshing.
-
-Intensity scales with how dark the frame is, which is the reference's behaviour rather than an
-arbitrary choice — it drives the glitch off sensor gain, and gain is high exactly when the
-photograph is already noisy.
-
-**There is no preview, and that is honest rather than lazy.** The damage is done to a compressed
-file, and no compressed file exists until you press the shutter. A shader approximation would show
-you a different set of artifacts from the ones you get.
-
-**One deliberate departure from the reference, four bytes wide.** Inside valid scan data an `FF` is
-always followed by `00` or a restart marker, so a transplanted run stays legal in its middle — the
-only place it can accidentally spell `FF D9` is where it butts against the bytes it replaced. `FF D9`
-is end-of-image: every decoder stops there and the photograph becomes whatever was above the tear
-plus a grey rectangle. Databenders enjoy that; a camera cannot ship it. Both seams are checked and a
-stray `FF` is nudged to `FE`, which costs one coefficient in one block.
-
-Being plain bytes rather than a shader, this is also the first filter in the app that can be tested
-properly without a phone. Twelve tests cover it: the file keeps its markers and its length, the DC
-quantiser survives, rotations permute without inventing or dropping symbols, malformed input comes
-back untouched instead of throwing, and forty seeded runs are checked for invented markers.
+Fixes [light-reports#24] — a video showed no first frame and its volume could not be changed.

@@ -33,6 +33,35 @@ class ControlsTest {
         assertFalse(Binding.WheelClick.dial)
     }
 
+    /**
+     * A clip playing takes the volume keys back, and gives them back again when it stops. The
+     * second half is the one that matters: a flag left set would leave the phone with no shutter.
+     */
+    @Test
+    fun `a playing clip lends the volume keys to the system`() {
+        assertEquals(
+            PressAction.Nothing,
+            Controls.pressNow(Binding.VolumeUp, PressAction.Shutter, clipPlaying = true),
+        )
+        assertEquals(
+            PressAction.Nothing,
+            Controls.pressNow(Binding.VolumeDown, PressAction.Shutter, clipPlaying = true),
+        )
+        assertEquals(
+            PressAction.Shutter,
+            Controls.pressNow(Binding.VolumeUp, PressAction.Shutter, clipPlaying = false),
+        )
+    }
+
+    /** Nothing else is touched — there is no system volume behaviour to hand a wheel back to. */
+    @Test
+    fun `the wheel keeps its job while a clip plays`() {
+        assertEquals(
+            PressAction.Torch,
+            Controls.pressNow(Binding.WheelClick, PressAction.Torch, clipPlaying = true),
+        )
+    }
+
     /** A working camera key is a shutter, so nothing else has to be one. */
     @Test
     fun `anything goes while the camera key works`() {

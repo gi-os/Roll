@@ -25,6 +25,8 @@ import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Beeps
+import com.gios.lightcamera.hw.Binding
+import com.gios.lightcamera.hw.Controls
 import com.gios.lightcamera.hw.PressAction
 import com.gios.lightcamera.ocr.Found
 import com.gios.lightcamera.ocr.PageReader
@@ -503,6 +505,25 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * arm of it is a view-model call, and the activity holding a lambda per action was five
      * closures that had to be kept in step with an enum.
      */
+    /**
+     * True while a clip is playing in the viewer. Set by the viewer, cleared when it leaves —
+     * cleared on the way out as well as on every page change, because a flag left set here takes
+     * the fallback shutter away with nothing on screen to say why.
+     */
+    private var clipPlaying = false
+
+    fun setClipPlaying(playing: Boolean) {
+        clipPlaying = playing
+    }
+
+    /**
+     * The binding as pressed rather than as stored. See [Controls.pressNow] — this is the one
+     * place the two can differ, and it is here rather than in [Prefs] because whether a clip is
+     * playing is state, not a preference.
+     */
+    fun pressFor(binding: Binding): PressAction =
+        Controls.pressNow(binding, prefs.pressFor(binding), clipPlaying)
+
     fun press(action: PressAction) {
         when (action) {
             PressAction.Shutter -> shoot()

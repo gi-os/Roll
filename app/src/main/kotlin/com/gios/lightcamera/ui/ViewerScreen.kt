@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -181,6 +182,12 @@ fun ViewerScreen(
         // Which clip is playing, by id. **Cleared whenever the page changes**, so swiping to the
         // next photograph stops the audio rather than leaving a clip running behind a still.
         LaunchedEffect(pager.currentPage) { playing = null }
+        // **The volume keys are the shutter, so a playing clip has to borrow them back.**
+        // `dispatchKeyEvent` sees them before anything else does, so without this there is no way
+        // to change a video's volume at all. Cleared on dispose as well as on every change: left
+        // set, it would take the fallback shutter away for the rest of the session.
+        LaunchedEffect(playing) { vm.setClipPlaying(playing != null) }
+        DisposableEffect(Unit) { onDispose { vm.setClipPlaying(false) } }
         HorizontalPager(
             state = pager,
             userScrollEnabled = !zoomed,
@@ -189,7 +196,9 @@ fun ViewerScreen(
             val photo = photoAt(page) ?: return@HorizontalPager
             var image by remember(photo.id) { mutableStateOf<ImageBitmap?>(null) }
             LaunchedEffect(photo.id) {
-                image = vm.thumbs.frame(photo.uri, photo.id, screenWidthPx)?.asImageBitmap()
+                image = vm.thumbs
+                    .frame(photo.uri, photo.id, screenWidthPx, photo.isVideo)
+                    ?.asImageBitmap()
             }
             Box(
                 modifier = Modifier

@@ -168,9 +168,11 @@ class MainActivity : ComponentActivity() {
                             onFullPress = { vm.shoot() },
                             onRelease = { vm.engine.releaseFocus() },
                         ),
-                        // The map is read through the view model's prefs at the moment of the
-                        // press, so a binding changed in settings is live on the next press.
-                        pressFor = { vm.prefs.pressFor(it) },
+                        // The map is read through the view model at the moment of the press, so
+                        // a binding changed in settings is live on the next press — and so is the
+                        // one case where the mapping is overridden by state rather than by
+                        // preference. See `CameraViewModel.pressFor`.
+                        pressFor = { vm.pressFor(it) },
                         onPress = { vm.press(it) },
                     )
                 }
