@@ -34,23 +34,23 @@ class FiltersTest {
     }
 
     @Test
-    fun `the only filters without a shader are the two that must not have one`() {
-        // None, because a plain photograph is the sensor's own JPEG written untouched, and Datamosh,
-        // because it edits the compressed file rather than the pixels and so cannot be a shader at
-        // all. Anything else appearing here is a filter that silently does nothing.
+    fun `the only filter without a shader is the one that must not have one`() {
+        // None, because a plain photograph is the sensor's own JPEG written untouched. Anything else
+        // appearing here is a filter that silently does nothing.
+        //
+        // Datamosh was the second entry here until v2.52, when it stopped being a JPEG databend and
+        // became a shader like everything else — see `Filters.datamosh`. A filter with no shader can
+        // have no preview, which is the cost that finally decided it.
         val without = Filters.all.filter { it.agsl == null }
-        assertEquals(listOf("none", "datamosh"), without.map { it.id })
+        assertEquals(listOf("none"), without.map { it.id })
         assertNull(Filters.none.source)
-        assertTrue("datamosh must declare itself a databend", Filters.datamosh.databend)
     }
 
     @Test
-    fun `a databend filter has no shader and no preview`() {
-        Filters.all.filter { it.databend }.forEach { filter ->
-            assertNull("${filter.id} is a databend and must have no shader", filter.agsl)
-            assertTrue("${filter.id} must not animate a preview it does not have", !filter.animated)
-            assertTrue("${filter.id} must not claim to be low-res", !filter.lowRes)
-        }
+    fun `datamosh is a shader and previews like everything else`() {
+        assertTrue("datamosh must have a shader", Filters.datamosh.agsl != null)
+        // Nothing else in the app should be reaching for a compressed file any more.
+        assertTrue("datamosh must be in the dial", Filters.all.any { it.id == "datamosh" })
     }
 
     @Test

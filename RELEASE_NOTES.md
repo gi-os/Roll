@@ -1,34 +1,42 @@
-## Roll v2.51 — Datamosh tears the photograph instead of recolouring it
+## Roll v2.52 — Datamosh is the motion, not the file
 
-**Datamosh was coming back as a few flat coloured bars.** The photograph underneath was largely
-intact and largely untouched; what you got was three or four horizontal bands, each a wrong solid
-colour, and none of the smeared, dragged, repeated look the filter is for.
+**Datamosh has been chasing the wrong mechanism for six releases, and this changes it.** It is a
+shader now: it draws the smear instead of breaking the JPEG, it looks like the thing people mean by
+datamoshing, and for the first time it previews in the viewfinder.
 
-The cause is two numbers that were never scaled to the file, and it is why the last release looked
-right in the evidence and wrong on the phone. The port came from an ESP32 camera working on a
-thumbnail, where **two to four transplants of up to 4096 bytes** is most of the frame. A 12MP
-capture's entropy-coded scan is several megabytes, so the same constants produced four tears of
-under a thousandth of the file each.
+The old one edited the encoded file — quantisation tables, Huffman tables, the entropy stream — on
+a principle written into it that "you cannot get them by drawing, only by breaking". That is true
+of *JPEG* artifacts. It is not true of datamoshing, and the two had been conflated the whole time.
 
-A tear that short desynchronises the decoder for a handful of blocks and then it re-syncs. The
-smear never gets going. What does survive is the *DC difference chain* — every block's brightness
-and colour is stored as a difference from the block before it — inheriting one error at the tear.
-That chain runs in raster order, so every block below the tear carries the same wrong average
-colour to the bottom of the image. Four tears, four flat bands. Turning the intensity up did
-nothing, because intensity never touched either number: it drove the quantisation tables, which
-flatten detail, which is exactly what made the bands look painted on.
+Datamoshing is a **video** technique. You delete an I-frame, and the P-frames after it — which
+carry only *motion*, "this macroblock came from over there" — get applied to whatever pixels were
+left in the reference buffer. The picture melts along the motion of a scene it does not belong to.
+Every tool that does this works on video, for that reason.
 
-Both numbers scale now. The run is a fraction of the scan rather than a byte count, and the count
-rises with intensity instead of sitting at two-to-four. The tears overlap, the decoder never
-settles, and the block displacement — the part that reads as a mosh — is visible across the frame
-rather than being a colour shift at four seams.
+A JPEG has no motion vectors. Nothing in the file says where a block came from, so there is nothing
+to misapply, and no amount of breaking the entropy stream can produce the effect. What it produces
+instead is a broken **DC difference chain**: each block's average is stored relative to the one
+before it, so a single bad seam recolours everything below it in raster order. Flat coloured bands
+over an otherwise untouched photograph — which is exactly what kept being reported, and what v2.48
+through v2.51 kept re-tuning without ever being able to fix, because the tuning was on the wrong
+axis.
 
-Checked off the phone against a 12-megapixel frame, at every intensity `bend` can produce: the
-subject stays recognisable at all of them, the tears drag and repeat, and forty seeds at maximum
-intensity still invent no end-of-image marker — which remains the one thing this filter must never
-do, because half a photograph and a grey rectangle is a bug rather than a filter. A test now pins
-the property that was missing: the damage has to be a fraction of the file, not a fixed number of
-bytes, checked at both ends of the size range. A constant looks perfectly correct at whichever
-size it was chosen for, which is how this survived a release.
+So the motion is drawn. The frame is cut into horizontal runs a few macroblocks long, a different
+length on every row; about a third of them take a vector, and every macroblock inside a run is
+painted from the *same* source block. That is what an un-reset motion vector does, and it is why
+the result drags and repeats sideways rather than shuffling. The channels are pulled by slightly
+different amounts, so edges fringe the way a chroma-subsampled frame does when its blocks stop
+lining up. A trace of the original stays underneath, which is what leaves a subject standing in the
+middle of it. It is sized off `unitPx` like every other pattern here, so a macroblock is the same
+fraction of the picture in a 340px preview and a 4000px capture.
 
-Fixes [light-reports#29] — Datamosh returned five coloured bars rather than a glitched photograph.
+**It previews.** The old one could not, by construction — there was no compressed file to damage
+until the shutter had already gone, so you framed blind and found out afterwards. This is an
+ordinary shader on the ordinary path, so what you see is what you get, and it can no longer produce
+a file a decoder refuses.
+
+`Databend.kt` and its tests are gone with it. The port was faithful and the tests were good; the
+approach could not reach the target. Worth saying plainly rather than leaving it in the tree for
+somebody to wire back up.
+
+Fixes [light-reports#29] — Datamosh did not look like datamoshing.

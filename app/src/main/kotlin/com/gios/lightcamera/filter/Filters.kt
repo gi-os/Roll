@@ -703,6 +703,79 @@ half4 main(float2 xy) {
 """
 
     /**
+     * The mosh, drawn: macroblocks displaced in runs along the raster.
+     *
+     * **What a P-frame does, done on purpose.** A macroblock in a predicted frame carries a vector
+     * rather than a picture — "this block came from over there" — and an I-frame is what periodically
+     * resets that. Delete the I-frame and the vector keeps being applied to pixels it was never
+     * measured against, so the block is dragged across the frame, repeating, until something resets
+     * it. That drag is the whole look.
+     *
+     * Reproduced here in three parts:
+     *
+     *  - **Runs, not blocks.** The frame is cut into horizontal runs several macroblocks long, a
+     *    different length on every row, because a vector survives for as long as nothing resets it
+     *    and how long that is has no reason to line up between rows.
+     *  - **One source per run.** Every macroblock in a run samples the *same* source block, offset by
+     *    that run's vector. That is what makes it a smear rather than a shuffle: the same content is
+     *    repainted along the row, which is what you see in a real mosh.
+     *  - **Most runs are left alone.** A mosh where everything moves is noise. Roughly a third of the
+     *    runs take a vector and the rest keep the photograph, which is what leaves a subject standing
+     *    in the middle of it.
+     *
+     * The colour bleed is the second half of the look and comes free from the same mechanism: the
+     * channels are dragged by slightly different amounts, so an edge smears into fringes the way a
+     * chroma-subsampled frame does when its blocks stop lining up.
+     *
+     * Sized off `unitPx`, so a macroblock covers the same fraction of a 340px preview and a 4000px
+     * capture — without which the effect would be invisible at full resolution, which is the rule the
+     * whole file is built around.
+     */
+    private const val DATAMOSH = """
+half4 main(float2 xy) {
+    // Sixteen pixels at preview size, and the same fraction of the frame at any other.
+    float mb = max(3.0, unitPx() * 16.0);
+    float row = floor(xy.y / mb);
+
+    // How long this row's runs are, in macroblocks. Long runs read as a drag; short ones as chatter.
+    float runBlocks = 3.0 + floor(hash(float2(row, 11.0)) * 17.0);
+    float segLen = mb * runBlocks;
+    float seg = floor(xy.x / segLen);
+    float segStart = seg * segLen;
+
+    float3 here = tap(xy);
+    float pick = hash(float2(seg * 3.1, row * 1.7));
+    if (pick < 0.64) {
+        return half4(float4(here, 1.0));
+    }
+
+    // Where in its own macroblock this pixel sits. Adding this back to the run's source block is
+    // what paints the same block over and over along the run.
+    float2 inBlock = xy - floor(xy / mb) * mb;
+    float dx = (hash(float2(seg, row + 5.0)) - 0.5) * mb * 7.0;
+    float dy = (hash(float2(seg + 2.0, row)) - 0.5) * mb * 1.4;
+    float2 from = float2(segStart + dx, row * mb + dy) + inBlock;
+
+    // The channels drag by slightly different amounts, which is where the fringing comes from.
+    float spread = mb * 0.35 * (hash(float2(seg + 7.0, row)) - 0.5);
+    float3 dragged = float3(
+        tap(from + float2(spread, 0.0)).r,
+        tap(from).g,
+        tap(from - float2(spread, 0.0)).b
+    );
+
+    // Not all the way: a trace of the original under the smear is what keeps a photograph in it.
+    float3 c = mix(here, dragged, 0.82);
+
+    // The leading edge of a run stays bright, the way a freshly moshed block does before the
+    // residual catches up with it.
+    float edge = 1.0 - smoothstep(0.0, mb * 1.5, xy.x - segStart);
+    c = clamp(c + edge * 0.10, 0.0, 1.0);
+    return half4(float4(c, 1.0));
+}
+"""
+
+    /**
      * Preset: ten adjustments, and the plain photograph when they are all at zero.
      *
      * Ordered the way a darkroom would order them and not the way the data class lists them, because
@@ -865,14 +938,6 @@ half4 main(float2 xy) {
          * ever has a non-neutral one.
          */
         val grade: Grade = Grade.NEUTRAL,
-        /**
-         * Marks the one filter that is not a shader at all.
-         *
-         * Datamosh edits the encoded JPEG after everything else has run — see
-         * [com.gios.lightcamera.filter.Databend]. It therefore has no [agsl], cannot be previewed,
-         * and is applied by `Frames.bend` rather than by `ShaderRuntime`.
-         */
-        val databend: Boolean = false,
     ) {
         /** The whole shader, prelude included. */
         val source: String? get() = agsl?.let { PRELUDE + it }
@@ -902,14 +967,36 @@ half4 main(float2 xy) {
     val preset = Filter("none", "Preset", PRESET, adjustable = true)
 
     /**
-     * Datamosh. **The one filter with no shader and no preview.**
+     * Datamosh, and it is a shader now.
      *
-     * The viewfinder stays plain while you frame, because there is nothing to show: the damage is
-     * done to the compressed file, and no compressed file exists until the shutter has been pressed.
-     * An approximation was tried and dropped — a preview that shows a different set of artifacts
-     * from the ones you get is worse than a preview that admits it cannot show them.
+     * **Three releases were spent trying to get this out of the file instead of out of the pixels,
+     * and the approach could not have worked.** v2.46 through v2.51 datamoshed the encoded JPEG —
+     * quantisation tables, Huffman tables, the entropy stream — on the reasoning, written into the
+     * old `Databend`, that "you cannot get them by drawing, only by breaking". That is true of *JPEG*
+     * artifacts. It is not true of the thing people mean by datamoshing, and the two had been
+     * conflated.
+     *
+     * Datamoshing is a **video** technique. You delete an I-frame, and the P-frames that follow — which
+     * carry only *motion*, "this macroblock came from over there" — get applied to whatever pixels
+     * happened to be in the reference buffer. The frame melts along the motion of a scene it does not
+     * belong to. Every tool that does it, Datamosher-Pro included, works on video for that reason.
+     *
+     * A JPEG has no motion vectors. There is nothing in the file that says where a block came from,
+     * so there is nothing to misapply, and breaking the entropy stream cannot produce the effect
+     * however hard it is broken. What it produces instead is a broken *DC difference chain*: every
+     * block's average is stored relative to the one before it, so one bad seam recolours everything
+     * below it in raster order. Flat coloured bands over an untouched photograph — which is exactly
+     * what got reported, three times, and what the last three releases kept re-tuning.
+     *
+     * So this draws the motion. Blocks are displaced in **runs** along the raster, every macroblock
+     * in a run painted from the same source, which is what an un-reset motion vector does — a smear
+     * that drags sideways and repeats. It scales with the frame through [PRELUDE]'s `unitPx`, so a
+     * macroblock is the same fraction of the picture in a preview and in a 12MP capture.
+     *
+     * **And it previews.** The old one could not, by construction: there was no compressed file to
+     * damage until the shutter had already been pressed, so you framed blind and found out afterwards.
      */
-    val datamosh = Filter("datamosh", "Datamosh", null, databend = true)
+    val datamosh = Filter("datamosh", "Datamosh", DATAMOSH)
 
     /**
      * Which filter to actually run.
