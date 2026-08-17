@@ -557,14 +557,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Said when a locked dial is turned.
      *
-     * **Names the way out that cannot fail as well as the quick one.** The click is the quick one,
-     * and on a phone where something else has claimed the wheel system-wide it may never arrive —
-     * which in v2.49 left the dial locked with nothing able to open it. Settings is reached by
-     * touch, so it always works, and it belongs in the one line the person is actually reading at
-     * the moment the dial refuses to move.
+     * **Six words, because it is read mid-gesture.** You are looking at a dial that just refused to
+     * move and you want to know what to press — not where the setting lives, which is a thing to go
+     * and find later. Settings › Keys is still the way to turn the lock off for good; it does not
+     * belong in a notice that has to be read at a glance.
      */
     fun sayDialLocked() {
-        showNotice("Dial locked — click the wheel, or Settings › Keys")
+        showNotice("Click wheel to unlock")
     }
 
     /** Turning the setting off has to wake the dial, or the switch appears to do nothing. */
