@@ -136,8 +136,8 @@ You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `2.53.0`. CI adds the run number
-as the patch, so the release from the current `main` is `v2.53.x`. See
+**Current version:** `versionName` in `app/build.gradle.kts` is `2.54.0`. CI adds the run number
+as the patch, so the release from the current `main` is `v2.54.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 
 ## Controls
@@ -267,17 +267,21 @@ on the stock camera.
 
 - **Selfie** is the front lens and nothing else, which is what it is on the stock camera too. A
   double tap on the image switches lens as well.
-- **Video** records HD into `DCIM/Camera` through CameraX's `VideoCapture`. Roll binds it
-  *instead of* `ImageCapture` rather than alongside it, because only `LEVEL_3` hardware
-  guarantees all three use cases at once. Audio arrives when the permission does, and Roll asks
-  on entering the mode rather than at the moment you press record. Filters stay off in video: a
-  `RenderEffect` belongs to the view and never reaches the recorded stream, so a filtered preview
-  would promise something the file cannot deliver.
+- **Video** records HD through CameraX's `VideoCapture`. Roll binds it *instead of*
+  `ImageCapture` rather than alongside it, because only `LEVEL_3` hardware guarantees all three
+  use cases at once. Audio arrives when the permission does, and Roll asks on entering the mode
+  rather than at the moment you press record. Filters stay off in video: a `RenderEffect` belongs
+  to the view and never reaches the recorded stream, so a filtered preview would promise something
+  the file cannot deliver. The recorder writes to a plain file Roll owns and the clip is copied
+  into `DCIM/Camera` afterwards, off the capture path — the panel reads `SAVING` while that
+  happens, the camera is free the moment you stop, and you can record the next take immediately.
+  See `media/ClipSaver.kt`.
 - Filters and settings sit on the end of the same strip, so the band stays at four items.
 
 Roll hides the system bars, so the picture starts at the panel's edge. The image itself carries
 only three marks: the focus mark, the `AF-S` or `AF-C` badge (a record dot and a timer while
-filming), and a horizon line while the phone is crooked. Roll measures that line off the
+filming, and `SAVING` while a clip is still on its way to the roll), and a horizon line while the
+phone is crooked. Roll measures that line off the
 **nearest quarter turn**, so it is square whether you hold the phone upright or sideways.
 
 ## The viewfinder is in colour
@@ -586,7 +590,8 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v2.53.x` | this commit | **The locked-dial notice is six words.** It read "Dial locked — click the wheel, or Settings › Keys", which is a sentence to parse at the moment you are staring at a dial that just refused to move. It now says "Click wheel to unlock". Where the setting lives is something to go and find later, and it is still in Settings › Keys. |
+| `v2.54.x` | this commit | **A recording is saved in the background, and stopping one no longer stalls the phone.** Video was written straight into MediaStore with `MediaStoreOutputOptions`, which hands the muxer a descriptor on a MediaProvider path — served through its FUSE daemon since Android 11, so every write the encoder made for the length of the take went out through another process rather than straight to the filesystem, which an app's own directory does not. The stop then put the moov atom through that same descriptor and cleared `IS_PENDING`, and clearing it is what makes MediaProvider scan the container for its duration and build a thumbnail — inside the `update` call, with the camera session still live and the recorder calling back onto the main thread. Nothing lowered the recording flag until all of it had finished, so the panel, the mode strip and the next take were all waiting on it. That is what was reported as the screen freezing when you end a take. The recorder now writes a plain file in the app's own storage, which is a local muxer close and nothing else, and `ClipSaver` copies it into `DCIM/Camera` afterwards on a process-lifetime queue, one clip at a time, streamed through a 64 kB buffer rather than read into the heap. The camera is idle the instant the file closes, so the next take can start while the last one is still copying. A clip's timestamp is read out of its file name, because the file's own `lastModified` is when the take *ended*. A queued clip lives in `noBackupFilesDir`, which the system does not clear for space, and a clip the process died on is swept up and saved the next time the camera opens — more than a background assertion can promise, since none survives the process dying. The panel shows `SAVING` beside the record dot while the queue is busy, and says so once if a copy fails. |
+| `v2.53.x` | 85ee479 | **The locked-dial notice is six words.** It read "Dial locked — click the wheel, or Settings › Keys", which is a sentence to parse at the moment you are staring at a dial that just refused to move. It now says "Click wheel to unlock". Where the setting lives is something to go and find later, and it is still in Settings › Keys. |
 | `v2.52.x` | f88135e | **Datamosh is the motion, not the file — and it previews.** For six releases it edited the encoded JPEG, on a principle written into it that these artifacts can only be broken into existence, never drawn. That is true of JPEG artifacts and not of datamoshing, and the two had been conflated. Datamoshing is a video technique: delete an I-frame and the P-frames after it, which carry only motion, get applied to whatever pixels were left in the reference buffer. A JPEG has no motion vectors, so there is nothing to misapply — breaking its entropy stream instead breaks the DC difference chain, where each block's average is stored relative to the one before, so one bad seam recolours everything below it in raster order. Flat coloured bands over an untouched photograph, which is what kept being reported and what v2.48-v2.51 kept re-tuning on the wrong axis. Now the motion is drawn: horizontal runs a few macroblocks long, a different length per row, about a third taking a vector, every block in a run painted from the same source — which is what makes it drag and repeat rather than shuffle. Channels pull by different amounts so edges fringe, and a trace of the original stays underneath so a subject survives. Sized off `unitPx` like every other pattern. Being an ordinary shader it previews in the viewfinder, which the databend could never do, and it cannot produce a file a decoder refuses. `Databend.kt` and its tests are removed. |
 | `v2.51.x` | 9977d7c | **Datamosh tears the photograph instead of recolouring it.** It had been coming back as three or four flat coloured bars over an otherwise intact picture. Two constants were never scaled to the file: the port came from an ESP32 working on a thumbnail, where two to four transplants of up to 4096 bytes is most of the frame, and on a 12MP scan of several megabytes the same numbers are four tears of under a thousandth of the file each. A tear that short desynchronises the decoder for a few blocks and then it re-syncs, so the smear never starts — what survives is the DC difference chain inheriting one error per tear, and since that chain runs in raster order every block below a tear takes the same wrong average colour. Four tears, four bands. Intensity could not help, because it drove only the quantisation tables, which flatten detail and made the bands look painted on. The run is now a fraction of the scan and the count rises with intensity, so the tears overlap and the block displacement is visible across the frame. Verified off-device against a 12MP frame at every intensity `bend` produces, with forty seeds at maximum still inventing no end-of-image marker; a test pins that the damage scales with the file rather than sitting at a constant. |
 | `v2.50.x` | 144358f | **The dial lock is a setting, and it is off.** v2.49 could leave the filter dial locked with nothing on the phone able to open it. The lock's only escape was a click on the wheel, and the check that was meant to prevent a trap asked whether something was *bound* to the lock rather than whether a wheel click actually reaches the app — on a phone running LightControl, which binds the wheel system-wide, it may not. Turns arrived so the dial reported itself locked; clicks did not, so nothing could unlock it, and Settings is reached through the mode picker, which is reached with the wheel. The master switch is now Settings › Keys › Dial lock, off by default, and a row you tap rather than anything that depends on the wheel; turning it off wakes the dial immediately. With it on the behaviour is unchanged from v2.49 — asleep at every launch, a click wakes it, a second click puts it back, press-and-turn and an open strip still exempt — and the notice now names the settings row as well as the click. The torch is back on the wheel click: the lock claims the click while it is on rather than owning the binding, the same way a playing clip borrows the volume keys, so switching it off hands the click back on the next press. The lock is no longer offered in the key picker, which stops it being put on the last shutter or taken off the click. |

@@ -152,6 +152,7 @@ fun CameraScreen(
     val countdown by vm.countdown.collectAsState()
     val recording by engine.recording.collectAsState()
     val recordSeconds by vm.recordSeconds.collectAsState()
+    val savingClips by vm.savingClips.collectAsState()
     val scanned by vm.scan.collectAsState()
     val page by vm.page.collectAsState()
     val pageTurn by vm.pageTurn.collectAsState()
@@ -766,6 +767,18 @@ fun CameraScreen(
                         LightText(
                             " ${"%d:%02d".format(recordSeconds / 60, recordSeconds % 60)}",
                             LightTextVariant.Detail,
+                        )
+                    }
+                    // **A clip is written into the gallery after the recording ends**, so between
+                    // the stop and the file appearing in the roll there is a second or two in which
+                    // the camera is idle and the clip is nowhere visible. Without a mark there, a
+                    // take you had just stopped looked like a take that had gone missing. Not a
+                    // count: one clip or three is the same fact to the person holding the phone.
+                    if (savingClips > 0) {
+                        LightText(
+                            " SAVING",
+                            LightTextVariant.Detail,
+                            modifier = Modifier.padding(start = 6.dp),
                         )
                     }
                     if (torch) {

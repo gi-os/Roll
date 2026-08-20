@@ -276,6 +276,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _recordSeconds = MutableStateFlow(0)
     val recordSeconds: StateFlow<Int> = _recordSeconds.asStateFlow()
 
+    /**
+     * How many clips are still being copied into the gallery. Zero almost all of the time.
+     *
+     * Straight off the engine's queue rather than mirrored into a flow of its own, and read by the
+     * viewfinder for a `SAVING` readout beside the record dot. **Nothing in the camera waits on
+     * it** — that is the whole point of the queue — so it is a readout and never a gate: the
+     * shutter, the mode strip and the record button all ignore it.
+     *
+     * Declared above the `init` block, which collects the failures beside it. See the note there.
+     */
+    val savingClips: StateFlow<Int> = engine.clips.saving
+
     var audioGranted: Boolean = false
 
     /** While the dial is caught on None. See [Filters.NONE_DWELL_MS]. */
@@ -379,6 +391,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _recordSeconds.value = 0
             }
+        }
+        // A clip that could not be copied into the gallery. Said out loud, because the recorder
+        // gave every sign of having worked and the file is the only thing missing — and said from
+        // here rather than from the queue, which has no view model and outlives this one.
+        viewModelScope.launch {
+            engine.clips.failed.collect { showNotice("Couldn't save the clip") }
         }
     }
 

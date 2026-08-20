@@ -1,7 +1,6 @@
 package com.gios.lightcamera.camera
 
 import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
@@ -15,7 +14,6 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.Face
-import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.OrientationEventListener
@@ -36,7 +34,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
-import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
@@ -47,6 +45,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.gios.lightcamera.CaptureMode
 import com.gios.lightcamera.PhotoSize
+import com.gios.lightcamera.media.ClipSaver
 import com.gios.lightcamera.qr.QrAnalyzer
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -58,9 +57,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -99,6 +95,15 @@ class CapturedFrame(val jpeg: ByteArray, val rotationDegrees: Int, val mirrored:
 // @OptIn does not recognise — it compiles and warns that it has no effect.
 @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
 class CameraEngine(private val context: Context) {
+
+    /**
+     * Where a finished take goes, and the backlog of takes not in the gallery yet.
+     *
+     * Swept on construction: a clip the process died on is still sitting in its directory, and
+     * opening the camera is the moment to notice. Shared with the view model, which reads
+     * [ClipSaver.saving] for the readout — it is one queue per process, so both hold the same one.
+     */
+    val clips: ClipSaver = ClipSaver.of(context).also { it.sweep() }
 
     private val _faces = MutableStateFlow<List<FaceBox>>(emptyList())
     val faces: StateFlow<List<FaceBox>> = _faces.asStateFlow()
@@ -1050,23 +1055,21 @@ class CameraEngine(private val context: Context) {
      * a permission dialog in front of the thing you were trying to film, so the microphone is
      * asked for when you switch to video and never at the moment you press record.
      *
-     * `MediaStoreOutputOptions` rather than a file: the same reasoning as photographs. CameraX
-     * takes care of `IS_PENDING`, so a video killed halfway is not left half-visible in every
-     * gallery on the phone.
+     * **Recorded to a plain file this app owns, and copied into the gallery afterwards.** It used
+     * to go to `MediaStoreOutputOptions`, on the same reasoning as photographs — CameraX handles
+     * `IS_PENDING`, so nothing half-written is visible anywhere. That reasoning holds for a JPEG,
+     * which is one write, and not for a video: the descriptor is on a MediaProvider path, served
+     * through its FUSE daemon, and the encoder writes to it for the whole take. The stop then put
+     * the moov atom through that same descriptor and cleared `IS_PENDING`, which is what makes
+     * MediaProvider scan the container for its duration and build a thumbnail — with the camera
+     * session still live and this callback on the main thread. [ClipSaver] owns the copy and the
+     * `IS_PENDING` dance now, off the capture path.
      */
     fun startRecording(withAudio: Boolean): Boolean {
         val video = videoCapture ?: return false
         if (_recording.value) return false
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
-        }
-        val options = MediaStoreOutputOptions
-            .Builder(context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            .setContentValues(values)
-            .build()
+        val file = clips.newClip()
+        val options = FileOutputOptions.Builder(file).build()
         return runCatching {
             var pending = video.output.prepareRecording(context, options)
             if (withAudio) pending = pending.withAudioEnabled()
@@ -1074,9 +1077,23 @@ class CameraEngine(private val context: Context) {
                 when (event) {
                     is VideoRecordEvent.Start -> _recording.value = true
                     is VideoRecordEvent.Finalize -> {
+                        // Down first, and before the clip is handed over. This flag is what the
+                        // record button, the mode strip and [awaitIdle] are all waiting on, and
+                        // handing a clip to the queue is a channel send — so the camera is free
+                        // for the next take the moment the muxer closes its file, rather than
+                        // when the gallery has it.
                         _recording.value = false
                         activeRecording = null
                         if (event.hasError()) Log.e(TAG, "recording failed: ${event.error}")
+                        // **`hasError` is not the same as "there is no clip".** A take that hit a
+                        // size limit, ran the storage out or lost its source has still been muxed
+                        // up to that point and is worth keeping; `ERROR_NO_VALID_DATA` is the one
+                        // that means the file is a header and nothing else.
+                        if (event.error == VideoRecordEvent.Finalize.ERROR_NO_VALID_DATA) {
+                            clips.discard(file)
+                        } else {
+                            clips.enqueue(file)
+                        }
                     }
                 }
             }
@@ -1084,6 +1101,9 @@ class CameraEngine(private val context: Context) {
         }.onFailure {
             Log.e(TAG, "couldn't start recording", it)
             _recording.value = false
+            // Nothing ever wrote to it, and an empty file left in the queue directory would be
+            // swept up and offered to MediaStore on the next launch.
+            clips.discard(file)
         }.getOrDefault(false)
     }
 

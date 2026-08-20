@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -314,6 +315,66 @@ class MediaStoreRepo(private val context: Context) {
     }
 
     /**
+     * Move a recorded clip into the camera roll.
+     *
+     * The counterpart to [save] for video, and the reason [ClipSaver] exists: the recorder writes
+     * a plain file and this copies it in afterwards, off the capture path.
+     *
+     * **Streamed, never read into memory.** A minute of HD is around a hundred megabytes and the
+     * heap on this phone is a fraction of that, so the bytes go through a fixed buffer —
+     * `copyTo` with a buffer named here rather than the 8 kB default, which for a file this size
+     * is a hundred thousand write calls. A rename would be cheaper still and scoped storage does
+     * not allow one: an app may only put a file in DCIM by inserting a row and writing to the
+     * descriptor MediaProvider hands back.
+     *
+     * `DATE_TAKEN` is **read out of the file name**, not off the clock and not off the file. Off
+     * the clock a clip that sat in the queue — or waited for the next launch after the process
+     * died — would arrive in the roll dated the moment it was copied; off `lastModified` it would
+     * be dated the moment the take *ended*, which for a two-minute clip is two minutes late. The
+     * name is written by [ClipSaver.newClip] at the press, so it is the only record of when the
+     * recording began — see [ClipNames]. Anything that does not parse falls back to the file's own
+     * timestamp.
+     */
+    suspend fun saveClip(file: File): Uri? = withContext(Dispatchers.IO) {
+        if (!file.isFile || file.length() == 0L) return@withContext null
+        val takenAt = ClipNames.stampOf(file.name)
+            ?: file.lastModified().takeIf { it > 0L }
+            ?: System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Video.Media.DATE_TAKEN, takenAt)
+            put(MediaStore.Video.Media.DATE_ADDED, takenAt / 1000)
+            put(MediaStore.Video.Media.DATE_MODIFIED, takenAt / 1000)
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val resolver = context.contentResolver
+        val uri = runCatching { resolver.insert(videoCollection, values) }.getOrNull()
+            ?: return@withContext null
+        val ok = runCatching {
+            resolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { it.copyTo(out, COPY_BUFFER) }
+            } ?: error("no stream")
+        }.onFailure { Log.e(TAG, "clip copy failed", it) }.isSuccess
+        if (!ok) {
+            // The row goes with the bytes. A pending row left behind is a clip no gallery will
+            // ever show and nothing will ever clean up.
+            runCatching { resolver.delete(uri, null, null) }
+            return@withContext null
+        }
+        runCatching {
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) },
+                null,
+                null,
+            )
+        }
+        uri
+    }
+
+    /**
      * Ask the system to bin some photos.
      *
      * Trashing rather than deleting, and through the system dialog rather than quietly: the
@@ -350,6 +411,12 @@ class MediaStoreRepo(private val context: Context) {
         const val STRIP_PATH = "DCIM/Roll Strips"
 
         const val TAG = "MediaStoreRepo"
+
+        /**
+         * 64 kB, which is where sequential copy throughput stops improving on this flash and the
+         * syscall count is already negligible. Not a heap concern: one buffer, reused.
+         */
+        const val COPY_BUFFER = 64 * 1024
     }
 }
 
