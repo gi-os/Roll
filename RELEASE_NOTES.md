@@ -1,16 +1,16 @@
-## Roll v2.54 — the saving bar comes back for flash shots
+## Roll v2.55 — the readouts turn with the phone, and 3.5x stops lying
 
-**Press the shutter with the flash on and the panel said nothing at all.** No frozen frame, no bar,
-just a live viewfinder for the second and a half the capture takes, and then a photograph. It read
-as a shutter that had not fired.
+**`TORCH`, `3.5x`, `EV +1.0` were sideways every time you shot landscape.** The band is pinned
+sideways on purpose — turn the phone anticlockwise and the controls come round to the bottom edge,
+where a camera's controls belong. The readouts in the top corner were pinned with it, and they are
+not controls. They are words you read, and words on their side are words you tilt your head at.
+They now turn off the accelerometer like the scan sheet does, with the same 60° of hysteresis, so
+they stay upright whichever way you are holding the camera and do not flip while you compose.
 
-The bar was nested inside the held-frame branch, so the two arrived and left together. That held
-for as long as every still froze the panel — but a flash shot deliberately does not freeze it. The
-preview frame grabbed at the press predates the flash, so holding it would show a dark room and
-then save a lit one, and the freeze was dropped for that case. The bar went with it. The same gap
-opens whenever `previewView.bitmap` hands back null, which it does when the panel is not streaming.
-
-The bar now reads `shooting`, which is latched across the capture and the save, so it draws whether
-or not there is a frame over the preview. It is suppressed while a countdown is on screen: the
-Purikura strip keeps `shooting` up across all four frames, and the number already says what the
-camera is doing.
+**And the zoom readout was stale.** Come back to the viewfinder from the roll and the lens is at
+1x, but the corner still read `3.5x`, and went on reading it until you touched the zoom again. The
+ratio was being read back out of CameraX's `zoomState`, which lives on a `CameraInfo` that survives
+the unbind — so just after a rebind it still reports what the zoom was before, while the control
+underneath has already gone wide. Every path through that code is one where the zoom resets anyway,
+so it no longer asks: it sets 1x, on the state and on the control together, and the label goes away
+with the zoom.

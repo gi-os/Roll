@@ -777,44 +777,55 @@ fun CameraScreen(
                 // What is left is state you could not otherwise know: that it is recording, that
                 // the torch is on, that the lens is zoomed, that exposure is pushed, that a timer
                 // is armed. Each disappears the moment it goes back to normal.
-                Row(
-                    modifier = Modifier.padding(start = 10.dp, top = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (recording) {
-                        RecordDot()
-                        LightText(
-                            " ${"%d:%02d".format(recordSeconds / 60, recordSeconds % 60)}",
-                            LightTextVariant.Detail,
-                        )
-                    }
-                    if (torch) {
-                        LightText(
-                            " TORCH",
-                            LightTextVariant.Detail,
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                    if (zoom > 1.02f) {
-                        LightText(
-                            " ${engine.zoomLabel()}",
-                            LightTextVariant.Detail,
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                    if (ev != 0) {
-                        LightText(
-                            " EV ${engine.evLabel()}",
-                            LightTextVariant.Detail,
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                    if (timer.seconds > 0 && mode != CaptureMode.Video) {
-                        LightText(
-                            " ${timer.label}",
-                            LightTextVariant.Detail,
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
+                //
+                // **These turn with the phone, and the band does not.** The band is pinned sideways
+                // because that is where a camera's controls belong once you have turned the phone
+                // anticlockwise to shoot. These are not controls, they are five words you read —
+                // `TORCH`, `3.5x`, `EV +1.0` — and words on their side while you are shooting
+                // landscape are words you stop and tilt your head at. Same argument as the scan
+                // sheet: [RotatedToDevice] off the accelerometer, with the 60° of hysteresis in
+                // [rememberDeviceQuarter] so they do not flip while you are composing. Upright in
+                // portrait, upright held sideways, upright either way up.
+                RotatedToDevice(quarter = rememberDeviceQuarter(active = active), opaque = false) {
+                    Row(
+                        modifier = Modifier.padding(start = 10.dp, top = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (recording) {
+                            RecordDot()
+                            LightText(
+                                " ${"%d:%02d".format(recordSeconds / 60, recordSeconds % 60)}",
+                                LightTextVariant.Detail,
+                            )
+                        }
+                        if (torch) {
+                            LightText(
+                                " TORCH",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        if (zoom > 1.02f) {
+                            LightText(
+                                " ${engine.zoomLabel()}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        if (ev != 0) {
+                            LightText(
+                                " EV ${engine.evLabel()}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        if (timer.seconds > 0 && mode != CaptureMode.Video) {
+                            LightText(
+                                " ${timer.label}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
                     }
                 }
 

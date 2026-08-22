@@ -719,7 +719,20 @@ class CameraEngine(private val context: Context) {
     private fun readCameraLimits(bound: Camera) {
         val info = bound.cameraInfo
         _maxZoom.value = info.zoomState.value?.maxZoomRatio ?: 1f
-        _zoom.value = info.zoomState.value?.zoomRatio ?: 1f
+
+        // **1x, said rather than asked.** This used to read the ratio back out of `zoomState`, which
+        // is a `LiveData` on a `CameraInfo` that survives the unbind — so for a moment after a rebind
+        // it still reports the ratio from before, while the control underneath has already gone back
+        // to wide. That was the `3.5x` left sitting in the corner of an unzoomed viewfinder every
+        // time you came back from the roll: the lens was at 1x, the label was reading a stale
+        // `LiveData`, and nothing ever wrote over it because nothing else touches zoom until you do.
+        //
+        // Every path through here is one where losing the zoom is expected anyway — a resume, a lens
+        // swap, a mode change, a size change — so rather than trying to guess the truth, set it. The
+        // ratio is pushed at the control as well as into the state, so the two cannot disagree even
+        // if some future device does hold its zoom across a rebind.
+        _zoom.value = 1f
+        runCatching { bound.cameraControl.setZoomRatio(1f) }
         val exposure = info.exposureState
         if (exposure.isExposureCompensationSupported) {
             val range = exposure.exposureCompensationRange
