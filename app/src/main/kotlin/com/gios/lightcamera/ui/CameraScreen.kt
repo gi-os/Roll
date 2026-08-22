@@ -146,6 +146,10 @@ fun CameraScreen(
     // Read up here rather than beside the overlay that draws it: the exposure meter below has to
     // know a still is being held, and a `by` declared further down the function is not in scope.
     val held by vm.held.collectAsState()
+
+    // Latched across the capture and the save, and true for the shots that hold no frame — the
+    // saving bar below reads this rather than `held`, so a flash shot is not a silent wait.
+    val shooting by vm.shooting.collectAsState()
     val clippingOn by vm.prefs.clipping.collectAsState()
     val bindings by vm.prefs.bindings.collectAsState()
     val torch by engine.torch.collectAsState()
@@ -704,8 +708,24 @@ fun CameraScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    var progress by remember(heldFrame) { mutableFloatStateOf(0f) }
-                    LaunchedEffect(heldFrame) {
+                }
+
+                // **The bar is tied to the shutter, not to the held frame.** It used to be nested
+                // inside the `held != null` branch, so the two arrived and left together — which
+                // was fine until there were shots that hold nothing. With the flash on the frame is
+                // deliberately *not* frozen (the preview grab predates the flash and would be a
+                // plainly wrong picture), and `previewView.bitmap` can hand back null whenever the
+                // panel is not streaming. Either way the still took its usual second and a half
+                // with nothing on screen saying so: press, then nothing, then a photograph.
+                //
+                // `shooting` is latched across the capture *and* the save, so it covers the whole
+                // wait whether or not there is a frame over the preview. Suppressed during a
+                // countdown, because the Purikura strip keeps `shooting` up across all four frames
+                // and the number on screen is already the answer to "what is it doing".
+                val inFlight = heldFrame != null || (shooting && countdown == null)
+                if (inFlight) {
+                    var progress by remember(heldFrame, shooting) { mutableFloatStateOf(0f) }
+                    LaunchedEffect(heldFrame, shooting) {
                         val expected = stillMs.coerceIn(300L, 4_000L)
                         val started = System.currentTimeMillis()
                         while (progress < 0.9f) {
@@ -801,10 +821,7 @@ fun CameraScreen(
                 // The notice is drawn once, by `Shell`, above every overlay — drawn here as well
                 // it would appear twice whenever the viewfinder is the page underneath.
 
-                // No progress bar while the shutter works. There was a hairline across the
-                // bottom of the frame here, and it was the wrong answer twice over: it drew on
-                // the picture, which nothing else in this app is allowed to do, and it was
-                // apologising for a wait that v1.8 mostly removed. The blink is the feedback.
+                // The saving bar lives with the held frame above, not here.
             }
         }
 
