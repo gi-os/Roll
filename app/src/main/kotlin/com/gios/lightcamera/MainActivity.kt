@@ -27,6 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gios.light.common.hw.LocalWheelBus
 import com.gios.light.common.hw.WheelBus
 import com.gios.lightcamera.hw.LightControls
+import com.gios.lightcamera.hw.WheelClickWitness
 import com.gios.lightcamera.hw.ShutterRelease
 import com.gios.lightcamera.report.ReportContext
 import com.gios.lightcamera.report.Reports
@@ -106,6 +107,10 @@ class MainActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        // The wheel-click readout counts from the last time the camera came to the front, because
+        // "never, in the two minutes you have been in here" is the useful window and a timestamp
+        // from a session yesterday answers nothing. See [WheelClickWitness].
+        WheelClickWitness.watchFrom()
         if (reportRequest.value == null) shake?.start()
     }
 

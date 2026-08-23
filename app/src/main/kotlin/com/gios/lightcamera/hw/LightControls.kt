@@ -53,6 +53,11 @@ class LightControls(
             LightKey.WheelClick -> {
                 if (down) {
                     if (event.repeatCount == 0) {
+                        // Stamped before anything is decided about the press, because the
+                        // question this answers is only "did the key get here" — see
+                        // [WheelClickWitness]. A click swallowed upstream and a click that
+                        // arrived and did nothing look identical from the phone otherwise.
+                        WheelClickWitness.seen()
                         clickHeld = true
                         clickSpent = false
                     }

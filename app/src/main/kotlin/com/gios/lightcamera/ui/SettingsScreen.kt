@@ -39,6 +39,7 @@ import com.gios.lightcamera.hw.CameraKeyAdvice
 import com.gios.lightcamera.hw.Controls
 import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
+import com.gios.lightcamera.hw.WheelClickWitness
 import com.gios.lightcamera.send.Handoff
 import com.gios.lightcamera.ui.theme.LightIcons
 import com.gios.lightcamera.ui.theme.LightText
@@ -349,6 +350,9 @@ private fun ControlsTab(
     val slots by vm.prefs.bandSlots.collectAsState()
     val keyProblem = remember { CameraKeyAdvice.problem(context) }
     val cameraKeyWorks = keyProblem == null
+    // Read on every recomposition rather than remembered: you come to this screen, click the
+    // wheel, and look — a value captured when the tab opened would still say "never".
+    val clickWitness = WheelClickWitness.readout()
 
     if (keyProblem != null) {
         // Inverted, because a dead shutter is not a footnote.
@@ -391,6 +395,15 @@ private fun ControlsTab(
         Note(
             "A key set to Nothing is given back to the phone rather than eaten, so a volume key with no job here still changes the volume.",
         )
+    }
+    // **The one readout that tells two identical-looking faults apart.** The wheel click is the
+    // only control here another app decides whether you get: LightControl filters keys before the
+    // focused window and its factory default binds the click to the torch. So "the click does
+    // nothing" is either a key that never arrived or a key that arrived and did nothing visible,
+    // and from the phone those look the same. Click the wheel and read this row.
+    if (LightKeys.wheelLabelsPresent()) {
+        Section("Wheel click")
+        Note(clickWitness)
     }
     Setting("Wheel", if (wheel) "On" else "Off") { vm.prefs.setWheelEnabled(!wheel) }
     // **Reachable by touch, and that is the point of it rather than a convenience.** The lock
