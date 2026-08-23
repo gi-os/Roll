@@ -33,6 +33,7 @@ import com.gios.lightcamera.SelfTimer
 import com.gios.lightcamera.StampStyle
 import com.gios.lightcamera.camera.AfMode
 import com.gios.lightcamera.camera.FrameAspect
+import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.CameraKeyAdvice
 import com.gios.lightcamera.hw.Controls
@@ -297,6 +298,13 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context) {
             vm.prefs.setStampStyle(all[(all.indexOf(stampStyle) + 1) % all.size])
         }
     }
+
+    Section("Filters") {
+        Note(
+            "Which filters are on the wheel, and in what order. Tap a name to take it off — it stays in this list so you can put it back, it just stops being a notch you have to spin past. The arrows move it. Plain cannot be taken off: it is what the camera does when it is not doing anything, and Video, Simple and Reader are all it.\n\nThe grid and the wheel both read this, so they always agree. A filter added by a later version of Roll arrives at the bottom of the list switched on, rather than being hidden by an order saved before it existed.",
+        )
+    }
+    FilterList(vm)
 
     Section("Purikura") {
         Note(
@@ -629,6 +637,91 @@ private fun AboutTab(vm: CameraViewModel, context: android.content.Context, rule
  * heading it was before. Collapsed by default: the notes are for the once you wonder, not for every
  * time you come in to change the timer.
  */
+/**
+ * The whole catalog, switched on or off and in whatever order you put it.
+ *
+ * Drawn from [Filters.ordered] with nothing hidden, so a filter you switched off is still a row
+ * here — it has to be, or there would be no way to get it back. What "off" means is "not a notch
+ * on the wheel", which is the only thing anyone wants from this screen: the dial has no way to
+ * jump, so every filter you never shoot is something you spin past to reach one you do.
+ *
+ * Two arrows rather than a drag. A long-press-and-drag reorder inside a screen that is itself
+ * inside a vertical scroll is a gesture fight, and it would be the one control in the app that
+ * needs a finger held still on a phone you are usually holding one-handed.
+ */
+@Composable
+private fun FilterList(vm: CameraViewModel) {
+    val order by vm.prefs.filterOrder.collectAsState()
+    val off by vm.prefs.filtersOff.collectAsState()
+    val rows = remember(order) { Filters.ordered(order, emptySet()) }
+    val on = rows.count { it.id !in off }
+
+    rows.forEachIndexed { index, filter ->
+        val plain = filter.id == Filters.none.id
+        FilterRow(
+            label = filter.label,
+            on = plain || filter.id !in off,
+            plain = plain,
+            atTop = index == 0,
+            atBottom = index == rows.lastIndex,
+            onToggle = { vm.prefs.toggleFilter(filter.id) },
+            onUp = { vm.prefs.moveFilter(filter.id, -1) },
+            onDown = { vm.prefs.moveFilter(filter.id, 1) },
+        )
+    }
+
+    Note("$on of ${rows.size} on the wheel.")
+    Action("RESET TO DEFAULT", lighten = true) { vm.prefs.resetFilters() }
+}
+
+@Composable
+private fun FilterRow(
+    label: String,
+    on: Boolean,
+    plain: Boolean,
+    atTop: Boolean,
+    atBottom: Boolean,
+    onToggle: () -> Unit,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(
+            text = label,
+            variant = LightTextVariant.Copy,
+            lighten = !on,
+            modifier = Modifier
+                .weight(1f)
+                .lightClickable(enabled = !plain) { onToggle() }
+                .padding(vertical = 10.dp),
+        )
+        LightText(
+            // "Always" rather than a greyed-out "On": the row does not respond to a tap, and a
+            // control that looks like the others and does nothing is worse than one that says why.
+            text = if (plain) "ALWAYS" else if (on) "ON" else "OFF",
+            variant = LightTextVariant.Detail,
+            lighten = !on,
+        )
+        Arrow("↑", enabled = !atTop, onTap = onUp)
+        Arrow("↓", enabled = !atBottom, onTap = onDown)
+    }
+}
+
+@Composable
+private fun Arrow(glyph: String, enabled: Boolean, onTap: () -> Unit) {
+    LightText(
+        text = glyph,
+        variant = LightTextVariant.Button,
+        lighten = !enabled,
+        modifier = Modifier
+            .lightClickable(enabled = enabled) { onTap() }
+            .padding(start = 14.dp, top = 8.dp, bottom = 8.dp),
+    )
+}
+
 @Composable
 private fun Section(title: String, help: (@Composable () -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }

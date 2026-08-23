@@ -61,7 +61,16 @@ object Handoff {
          */
         data object Chooser : Outcome
 
-        data class Failed(val why: String) : Outcome
+        /**
+         * The send did not happen.
+         *
+         * [fault] separates the two kinds, and the distinction is the whole reason it exists: a
+         * send with nothing selected, or to a group with no thread, is the app correctly refusing
+         * something impossible. A `startActivity` that threw is the app being broken. Only the
+         * second is worth raising the SEND ERROR? chip over — a chip that appeared every time you
+         * tapped send on an empty selection would be a chip nobody reads.
+         */
+        data class Failed(val why: String, val fault: Boolean = false) : Outcome
     }
 
     /**
@@ -122,7 +131,7 @@ object Handoff {
         return runCatching { context.startActivity(chooser) }
             .fold(
                 onSuccess = { Outcome.Chooser },
-                onFailure = { Outcome.Failed("Nothing on the phone takes photos") },
+                onFailure = { Outcome.Failed("Nothing on the phone takes photos", fault = true) },
             )
     }
 
@@ -151,7 +160,7 @@ object Handoff {
                 onSuccess = { Outcome.Sent(LIGHT_CHAT) },
                 onFailure = {
                     Log.w(TAG, "group send failed: $it")
-                    Outcome.Failed("Couldn't open LightChat")
+                    Outcome.Failed("Couldn't open LightChat", fault = true)
                 },
             )
     }

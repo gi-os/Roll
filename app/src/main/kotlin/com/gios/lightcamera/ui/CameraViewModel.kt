@@ -468,7 +468,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val next = Filters.step(filter.value, by)
+        val next = Filters.step(filter.value, by, prefs.dial())
         prefs.setFilter(next.id)
         dialHeldUntil = now + Filters.dwellMs(next)
         // **No name flashed on screen.** The viewfinder is already showing you the filter — a

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.gios.lightcamera.media.Photo
+import com.gios.lightcamera.report.Trouble
 import com.gios.lightcamera.send.ContactsRepo
 import com.gios.lightcamera.send.Group
 import com.gios.lightcamera.send.Groups
@@ -270,7 +271,18 @@ fun SendSheet(
                                     onNotice("Nothing here can address a photo — pick an app")
                                     onClose()
                                 }
-                                is Handoff.Outcome.Failed -> onNotice(outcome.why)
+                                is Handoff.Outcome.Failed -> {
+                                    // A notice is 1.4 seconds of grey text at the bottom of the
+                                    // viewfinder, and the app says "Copied" and "Timer 3s" the
+                                    // same way — so a send that actually broke looked exactly
+                                    // like a send that worked. Anything that is our fault goes
+                                    // into Trouble as well, which is what raises the SEND ERROR?
+                                    // chip and offers to file it with a screenshot attached.
+                                    if (outcome.fault) {
+                                        Trouble.record("Sending photographs failed", outcome.why)
+                                    }
+                                    onNotice(outcome.why)
+                                }
                             }
                         },
                     )

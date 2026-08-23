@@ -261,6 +261,58 @@ class Prefs(context: Context) {
     val filterId: StateFlow<String> = _filterId.asStateFlow()
 
     /**
+     * Which filters are on the dial, and in what order. **This one is persisted** — and the
+     * contrast with [filterId] above is the point, not an inconsistency.
+     *
+     * Which filter is on right now is a decision about one photograph. Which filters exist at all
+     * is a decision about your camera, and it is exactly the kind of thing that is worth setting
+     * once. Twenty-two positions is a long spin to reach the four you shoot, and every one you
+     * never use is a notch between you and the one you want.
+     *
+     * Stored newline-joined for the same reason [recentRecipients] is: the order is the content.
+     * Both start empty, which means "never arranged" rather than "nothing on the dial" — see
+     * [Filters.ordered], which is where that reading lives.
+     */
+    private val _filterOrder = MutableStateFlow(readLines(FILTER_ORDER))
+    val filterOrder: StateFlow<List<String>> = _filterOrder.asStateFlow()
+
+    private val _filtersOff = MutableStateFlow(readLines(FILTERS_OFF).toSet())
+    val filtersOff: StateFlow<Set<String>> = _filtersOff.asStateFlow()
+
+    /** The dial as arranged, ready to hand to [Filters.step] or to draw. */
+    fun dial(): List<Filters.Filter> = Filters.ordered(_filterOrder.value, _filtersOff.value)
+
+    fun moveFilter(id: String, by: Int) {
+        val next = Filters.move(_filterOrder.value, id, by)
+        set(_filterOrder, next) { putString(FILTER_ORDER, next.joinToString("\n")) }
+    }
+
+    /**
+     * Switch one filter off the dial, or back on.
+     *
+     * [Filters.none] is refused rather than handled: the settings row for it is not tappable, so
+     * arriving here with it means something else called this, and quietly doing nothing is a
+     * better answer than a camera that cannot take a plain photograph.
+     */
+    fun toggleFilter(id: String) {
+        if (id == Filters.none.id) return
+        val next = _filtersOff.value.toMutableSet().apply { if (!add(id)) remove(id) }
+        // Taking the filter you are currently shooting off the dial leaves the viewfinder showing
+        // something you can no longer reach: the wheel steps past it and the grid does not draw
+        // it, but the preview keeps applying it until you turn. Step off it here instead.
+        if (id in next && _filterId.value == id) _filterId.value = Filters.none.id
+        set(_filtersOff, next) { putString(FILTERS_OFF, next.joinToString("\n")) }
+    }
+
+    fun resetFilters() {
+        set(_filterOrder, emptyList()) { remove(FILTER_ORDER) }
+        set(_filtersOff, emptySet()) { remove(FILTERS_OFF) }
+    }
+
+    private fun readLines(key: String): List<String> =
+        prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+
+    /**
      * Deliberately not persisted. A camera should open in the mode you take photographs in;
      * finding it still in video a day later, with the shutter recording instead of shooting, is
      * a photograph missed.
@@ -767,6 +819,8 @@ class Prefs(context: Context) {
         const val COLOUR = "colour"
         const val SEND_LIGHTCHAT = "sendLightChat"
         const val RECENT_RECIPIENTS = "recentRecipients"
+        const val FILTER_ORDER = "filterOrder"
+        const val FILTERS_OFF = "filtersOff"
         const val HISTOGRAM = "histogram"
         const val CLIPPING = "clipping"
         const val BURST = "burst"

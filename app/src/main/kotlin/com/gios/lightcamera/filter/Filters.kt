@@ -409,6 +409,42 @@ half4 main(float2 xy) {
 }
 """
 
+    /**
+     * A fisheye, meaning the projection rather than the word.
+     *
+     * [BULGE] is a bulge: a blob of magnification in the middle of a frame that stays full. This
+     * is what a lens actually does. The angle off the axis grows linearly with distance from the
+     * centre of the image circle — the equidistant projection every fisheye adapter approximates
+     * — while the rectilinear sensor underneath put whatever it saw at that angle out at
+     * `tan(angle)`. Sampling at `tan(r * FOV)` undoes the sensor's projection and imposes the
+     * lens's. Dividing by `tan(FOV)` pins the rim of the circle to the rim of the frame, so
+     * nothing is cropped: the middle is magnified and the edge is squeezed, which is the entire
+     * look. At `FOV = 1.15` (66 degrees off axis) the middle comes up about 1.9x -- rendered
+     * against a grid, 1.35 ate so much of the frame that the subject was all that was left, and
+     * 1.0 did not bow the straight lines enough to read as a lens at all.
+     *
+     * The black corners are not decoration. A fisheye adapter on a phone projects a circle onto a
+     * rectangle, and the circle is most of why the result reads as a lens rather than as a warp.
+     * It is inscribed in the short side, so a portrait frame gets bands and a square gets none.
+     *
+     * `min(r, 1.0)` matters more than it looks: a 3:4 frame reaches `r = 1.67` in the corners, and
+     * `tan(1.67 * 1.15)` is past the asymptote and negative, which would fold the corners back
+     * through the centre inside out. They are multiplied away a moment later, but NaN is not.
+     */
+    private const val FISHEYE = """
+half4 main(float2 xy) {
+    float2 ctr = size * 0.5;
+    float R = min(size.x, size.y) * 0.5;
+    float2 d = (xy - ctr) / R;
+    float r = length(d);
+    float k = tan(min(r, 1.0) * 1.15) / 2.2345;
+    float3 c = tap(ctr + d / max(r, 0.0001) * k * R);
+    float feather = unitPx() * 1.5 / R;
+    c = c * (1.0 - smoothstep(1.0 - feather, 1.0, r));
+    return half4(float4(c, 1.0));
+}
+"""
+
     /** The left half of the frame, and the left half of the frame again. */
     private const val MIRROR = """
 half4 main(float2 xy) {
@@ -1041,6 +1077,7 @@ half4 main(float2 xy) {
         Filter("glow", "Glow", GLOW),
         Filter("twirl", "Twirl", TWIRL),
         Filter("bulge", "Bulge", BULGE),
+        Filter("fisheye", "Fisheye", FISHEYE),
         Filter("mirror", "Mirror", MIRROR),
         Filter("kaleido", "Kaleido", KALEIDO),
         Filter("tunnel", "Tunnel", TUNNEL),
@@ -1050,11 +1087,70 @@ half4 main(float2 xy) {
 
     fun indexOf(filter: Filter): Int = all.indexOfFirst { it.id == filter.id }.coerceAtLeast(0)
 
-    /** Stepping wraps, because a physical dial should never dead-end. */
-    fun step(from: Filter, by: Int): Filter {
-        val size = all.size
-        val next = ((indexOf(from) + by) % size + size) % size
-        return all[next]
+    /**
+     * The dial as the user has arranged it: their order, minus what they switched off.
+     *
+     * [all] is the catalog and stays the catalog — this is the view of it that the wheel turns
+     * through and the grid draws. Twenty-two filters is a lot to spin past to reach the four you
+     * actually shoot, and the ones you never use are not neutral: they are what stands between
+     * you and the one you want, on a dial with no way to jump.
+     *
+     * Two rules, and the second is the one that matters:
+     *
+     *  1. **[none] can never be switched off.** [byId] falls back to it, the capture path forces
+     *     it, and Video, Simple and Reader modes are it. A dial that could lose it would be a
+     *     camera that could not take a plain photograph.
+     *  2. **A filter the saved order has never heard of goes on the end rather than vanishing.**
+     *     The order is stored as ids, so the alternative is that shipping a new filter hides it
+     *     from everyone who has ever touched this screen — the update arrives and nothing
+     *     happens, which is indistinguishable from a broken update.
+     *
+     * An empty [order] means "never arranged", which is [all] in the order it was written.
+     */
+    fun ordered(order: List<String>, off: Set<String>): List<Filter> {
+        val known = all.associateBy { it.id }
+        val seen = LinkedHashSet<String>()
+        val arranged = mutableListOf<Filter>()
+        order.forEach { id -> known[id]?.let { if (seen.add(id)) arranged += it } }
+        all.forEach { if (seen.add(it.id)) arranged += it }
+        return arranged.filter { it.id == none.id || it.id !in off }
+    }
+
+    /**
+     * Move one filter by [by] places, and hand back an order that names every filter.
+     *
+     * Deliberately reordering the **full** catalog rather than the visible list: positions have
+     * to survive being switched off and on again, and an order that only recorded what was
+     * showing would shuffle everything else the moment you hid something.
+     *
+     * Clamped rather than wrapped. The wheel wraps because it is a dial; a list you are editing
+     * with two arrows does not, or the top item leaps to the bottom under your thumb.
+     */
+    fun move(order: List<String>, id: String, by: Int): List<String> {
+        val ids = ordered(order, emptySet()).map { it.id }.toMutableList()
+        val at = ids.indexOf(id)
+        if (at < 0) return ids
+        val to = (at + by).coerceIn(0, ids.size - 1)
+        if (to == at) return ids
+        ids.removeAt(at)
+        ids.add(to, id)
+        return ids
+    }
+
+    /**
+     * Stepping wraps, because a physical dial should never dead-end.
+     *
+     * [within] is the arranged dial, defaulting to the whole catalog. A filter that is current
+     * but no longer on the dial — you switched it off with it selected — is not an error: the
+     * next turn lands on the end of the list you turn toward, rather than refusing to move.
+     */
+    fun step(from: Filter, by: Int, within: List<Filter> = all): Filter {
+        if (within.isEmpty()) return none
+        val size = within.size
+        val here = within.indexOfFirst { it.id == from.id }
+        if (here < 0) return if (by >= 0) within.first() else within.last()
+        val next = ((here + by) % size + size) % size
+        return within[next]
     }
 
     /**

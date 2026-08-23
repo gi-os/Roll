@@ -77,9 +77,15 @@ fun FilterGrid(
     val colours = LightThemeTokens.colors
     val current by vm.filter.collectAsState()
     val grade by vm.prefs.grade.collectAsState()
+    val order by vm.prefs.filterOrder.collectAsState()
+    val off by vm.prefs.filtersOff.collectAsState()
+    // The dial as the user arranged it in settings, not the whole catalog. The grid and the wheel
+    // have to agree about what is on the dial, or picking a filter here would put the wheel
+    // somewhere it cannot get back to.
+    val dial = remember(order, off) { Filters.ordered(order, off) }
     var frames by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
-    LaunchedEffect(previewView, grade) {
+    LaunchedEffect(previewView, grade, dial) {
         val renderer = withContext(Dispatchers.Default) {
             ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
         }
@@ -89,7 +95,7 @@ fun FilterGrid(
                 if (source != null) {
                     val seed = Random.nextFloat() * 1000f
                     val rendered = withContext(Dispatchers.Default) {
-                        Filters.all.associate { entry ->
+                        dial.associate { entry ->
                             // Resolved here too, or the Preset cell would be the one tile in the
                             // grid showing you something other than what picking it would give you.
                             val filter = Filters.forGrade(entry, grade)
@@ -135,7 +141,7 @@ fun FilterGrid(
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
         ) {
-            items(Filters.all, key = { it.id }) { filter ->
+            items(dial, key = { it.id }) { filter ->
                 val selected = filter.id == current.id
                 Column(
                     modifier = Modifier
