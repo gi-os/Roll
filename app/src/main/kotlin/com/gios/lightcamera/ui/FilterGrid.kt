@@ -83,9 +83,12 @@ fun FilterGrid(
     // have to agree about what is on the dial, or picking a filter here would put the wheel
     // somewhere it cannot get back to.
     val dial = remember(order, off) { Filters.ordered(order, off) }
+    // The cells are grabbed straight off the panel, so the directional filters need to be told
+    // which way up the world is — the same number the viewfinder behind this is using.
+    val turn by vm.engine.previewRotation.collectAsState()
     var frames by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
-    LaunchedEffect(previewView, grade, dial) {
+    LaunchedEffect(previewView, grade, dial, turn) {
         val renderer = withContext(Dispatchers.Default) {
             ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
         }
@@ -102,7 +105,7 @@ fun FilterGrid(
                             val bitmap = if (filter.agsl == null) {
                                 source
                             } else {
-                                renderer?.render(source, filter, seed) ?: source
+                                renderer?.render(source, filter, seed, turn = turn / 90) ?: source
                             }
                             entry.id to bitmap.asImageBitmap()
                         }
@@ -116,6 +119,14 @@ fun FilterGrid(
         }
     }
 
+    // **The whole screen turns with the phone.** Twenty-two filter names is the most text this app
+    // ever puts on the panel at once, and reading a grid of them sideways is the one place the
+    // portrait lock stops being a decision and starts being in the way. The band and the strips
+    // stay pinned because they are controls under a thumb; this is a page you read.
+    //
+    // Rotating the grid rather than each caption also gets the layout right: three columns across
+    // the long edge is what a landscape screen wants, and it comes out of `requiredSize` for free.
+    RotatedToDevice(quarter = rememberDeviceQuarter()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -180,6 +191,7 @@ fun FilterGrid(
                 }
             }
         }
+    }
     }
 }
 

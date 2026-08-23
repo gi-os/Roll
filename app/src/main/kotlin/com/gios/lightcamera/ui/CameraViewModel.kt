@@ -1325,7 +1325,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                             panel
                         } else {
                             runCatching {
-                                ShaderRuntime.applyToBitmap(panel, look, Random.nextFloat() * 1000f)
+                                // A raw panel grab, so it needs the same turn the live preview
+                                // gets. Without it the frame freezes into a different picture
+                                // from the one it froze, on the directional filters.
+                                ShaderRuntime.applyToBitmap(
+                                    panel,
+                                    look,
+                                    Random.nextFloat() * 1000f,
+                                    turn = engine.previewRotationDegrees() / 90,
+                                )
                             }.getOrDefault(panel)
                         }
                     }

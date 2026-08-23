@@ -247,10 +247,27 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
          * is above everything, which is what a notice is for.
          */
         val notice by vm.notice.collectAsState()
-        Notice(
-            text = notice,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
-        )
+        // **And it turns with the phone**, for the same reason the status readouts do. A notice is
+        // words you read — "Camera key held, see settings", "Nothing on the phone takes photos" —
+        // and words on their side while you are shooting landscape are words you stop and tilt
+        // your head at. The band and the strips stay pinned because they are controls, and a
+        // control belongs where your thumb already is; this is not one.
+        //
+        // Only while there is something to read: the sensor listener is not worth running for a
+        // message that is not on screen.
+        RotatedToDevice(
+            quarter = rememberDeviceQuarter(active = notice != null),
+            opaque = false,
+        ) {
+            // Its own Box: RotatedToDevice hands its content no BoxScope, and the alignment has to
+            // be measured inside the turned frame or "bottom" would still mean the panel's bottom.
+            Box(Modifier.fillMaxSize()) {
+                Notice(
+                    text = notice,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
+                )
+            }
+        }
 
         val developed by vm.developed.collectAsState()
         AnimatedVisibility(visible = developed != null, enter = fadeIn(), exit = fadeOut()) {

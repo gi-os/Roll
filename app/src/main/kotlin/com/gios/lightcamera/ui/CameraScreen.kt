@@ -315,6 +315,10 @@ fun CameraScreen(
                 // face is lying in it. The captured photograph is turned upright before the shader sees
                 // it, which is why the shutter passes no turn at all.
                 tune = vm.prefs.puriTune(turns = turn / 90),
+                // And the same number again for the frame itself. Mirror, Kaleido and Datamosh
+                // have a left and a right, and the panel image does not have the one the
+                // photograph will — see Filters.TURN.
+                turn = turn / 90,
             ),
         )
     }

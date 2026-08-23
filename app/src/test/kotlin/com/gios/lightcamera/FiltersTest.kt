@@ -104,15 +104,21 @@ class FiltersTest {
         // declaring one of these without the flag means it is never written and the shader reads
         // whatever the last filter left in it.
         val gradeUniforms = setOf("gradeA", "gradeB", "gradeC")
+        // And `turn` for a filter with a left and a right. Same contract again, and it is the one
+        // most worth pinning: a directional shader that declares the uniform without the flag
+        // never has it written, so it silently reads whatever the last filter left there and
+        // folds the picture somewhere nobody asked for.
+        val turnUniforms = setOf("turn")
         shaders.forEach { filter ->
             val declared = Regex("uniform\\s+\\w+\\s+(\\w+)\\s*;")
                 .findAll(filter.source!!)
                 .map { it.groupValues[1] }
                 .toSet()
-            val expected = when {
-                filter.facesAware -> always + faceUniforms
-                filter.adjustable -> always + gradeUniforms
-                else -> always
+            val expected = buildSet {
+                addAll(always)
+                if (filter.facesAware) addAll(faceUniforms)
+                if (filter.adjustable) addAll(gradeUniforms)
+                if (filter.turnAware) addAll(turnUniforms)
             }
             assertEquals("${filter.id} declares the wrong uniforms", expected, declared)
         }
@@ -210,5 +216,40 @@ class FiltersTest {
     fun `an unknown id falls back to None rather than crashing`() {
         assertEquals(Filters.none.id, Filters.byId("nope").id)
         assertEquals(Filters.none.id, Filters.byId(null).id)
+    }
+
+    /**
+     * The filters with a left and a right, named.
+     *
+     * Pinned as a list rather than left to whoever adds the next filter, because the failure is
+     * silent: an orientation-dependent shader without the flag looks perfectly right in portrait
+     * and folds the picture ninety degrees out in every landscape photograph, and the viewfinder
+     * agrees with it right up until the file lands.
+     */
+    @Test
+    fun `the directional filters know which way up the world is`() {
+        assertEquals(
+            listOf("datamosh", "mirror", "kaleido"),
+            Filters.all.filter { it.turnAware }.map { it.id },
+        )
+        Filters.all.filter { it.turnAware }.forEach { filter ->
+            assertTrue(
+                "SHADER is turn-aware but never reads the frame's turn: " + filter.id,
+                filter.agsl!!.contains("toUp(") || filter.agsl!!.contains("upSize("),
+            )
+        }
+    }
+
+    /** And the reverse: nothing uses the upright helpers without asking to be handed the turn. */
+    @Test
+    fun `only a turn-aware filter may use the upright helpers`() {
+        Filters.all.filterNot { it.turnAware }.forEach { filter ->
+            val body = filter.agsl ?: return@forEach
+            assertTrue(
+                "SHADER works upright but is not flagged turnAware: " + filter.id,
+                !body.contains("toUp(") && !body.contains("fromUp(") &&
+                    !body.contains("tapUp(") && !body.contains("upSize("),
+            )
+        }
     }
 }

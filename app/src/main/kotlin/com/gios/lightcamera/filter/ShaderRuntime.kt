@@ -74,6 +74,18 @@ object ShaderRuntime {
      * time, because a `RuntimeShader` keeps its uniforms between draws and a face left over from the
      * last frame would go on warping an empty room.
      */
+    /**
+     * Which way up the world is, for the shaders that have a left and a right.
+     *
+     * Gated on the flag for the same reason [setFaces] is: setting a uniform a shader does not
+     * declare throws. Zero from every caller working on pixels that are already upright — which
+     * is both capture paths — and the real turn only from the panel-space ones.
+     */
+    private fun setTurn(shader: RuntimeShader, filter: Filters.Filter, turn: Int) {
+        if (!filter.turnAware) return
+        shader.setFloatUniform("turn", (((turn % 4) + 4) % 4).toFloat())
+    }
+
     private fun setFaces(
         shader: RuntimeShader,
         filter: Filters.Filter,
@@ -148,6 +160,8 @@ object ShaderRuntime {
         seed: Float,
         faces: List<FaceQuad> = emptyList(),
         tune: FaceTune = FaceTune(),
+        /** Quarter turns clockwise to upright. Non-zero here: the panel is portrait-locked. */
+        turn: Int = 0,
     ): RenderEffect? {
         if (width <= 0 || height <= 0) return null
         // A Preset with nothing set is not a filter, and the caller reads null as "clear the
@@ -161,6 +175,7 @@ object ShaderRuntime {
             val shader = shader(filter) ?: return@runCatching null
             shader.setFloatUniform("size", width.toFloat(), height.toFloat())
             shader.setFloatUniform("seed", seed)
+            setTurn(shader, filter, turn)
             setFaces(shader, filter, faces, tune)
             setGrade(shader, filter)
             RenderEffect.createRuntimeShaderEffect(shader, "src")
@@ -182,6 +197,12 @@ object ShaderRuntime {
         seed: Float,
         faces: List<FaceQuad> = emptyList(),
         tune: FaceTune = FaceTune(),
+        /**
+         * Quarter turns clockwise to upright. **Zero from the capture paths**, which have already
+         * baked the turn into the pixels — see `Frames`. Non-zero only from the callers holding a
+         * raw panel grab: the frozen frame and the grid's thumbnails.
+         */
+        turn: Int = 0,
     ): Bitmap {
         if (filter.agsl == null) return source
         // The same short-circuit as the preview's, and here it is worth more: this is on the
@@ -195,7 +216,7 @@ object ShaderRuntime {
         // setup and teardown around it were most of the time the filtered path spent on the GPU.
         synchronized(pool) {
             val renderer = pooled(source.width, source.height) ?: return source
-            return runCatching { renderer.render(source, filter, seed, faces, tune) }
+            return runCatching { renderer.render(source, filter, seed, faces, tune, turn) }
                 .onFailure { Log.e(TAG, "pooled render failed", it) }
                 .getOrNull() ?: source
         }
@@ -292,13 +313,16 @@ object ShaderRuntime {
             seed: Float,
             faces: List<FaceQuad> = emptyList(),
             tune: FaceTune = FaceTune(),
+            turn: Int = 0,
         ): Bitmap? = runCatching {
             val shader = shader(filter, owned) ?: return@runCatching null
             // The bitmap is sampled in its own pixel space, so `size` here is the image and
             // every pattern in the shader scales to it. Same numbers the preview uses,
-            // which is what makes the capture match the viewfinder.
+            // which is what makes the capture match the viewfinder — as long as both are
+            // describing the same way up, which is what `turn` is for.
             shader.setFloatUniform("size", width.toFloat(), height.toFloat())
             shader.setFloatUniform("seed", seed)
+            setTurn(shader, filter, turn)
             setFaces(shader, filter, faces, tune)
             setGrade(shader, filter)
             val bitmapShader = BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)

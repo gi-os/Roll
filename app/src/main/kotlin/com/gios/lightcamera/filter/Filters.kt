@@ -66,6 +66,52 @@ half4 grey(float g) {
 """
 
     /**
+     * Prepended to the shaders that have a left and a right, on top of [PRELUDE].
+     *
+     * **The bug this exists for.** The preview shader runs on the panel image, and the panel is
+     * portrait-locked — so held sideways the scene lies on its side in it. The capture shader runs
+     * on a bitmap that has already been turned upright, so `size.x` and `size.y` are the other way
+     * round and `xy.x` runs along what was the panel's vertical axis. For a filter that only reads
+     * luminance, none of that matters. For Mirror it matters completely: the fold you framed runs
+     * one way on the panel and the other way in the file, and the photograph you get is not the
+     * one you were looking at.
+     *
+     * So a directional shader is told which way up the world is and does its work there.
+     * [toUp]/[fromUp] convert between the image's own pixels and upright ones, [upSize] gives the
+     * frame's dimensions once upright, and `turn` is quarter turns **clockwise** — the same number
+     * and the same sign as `CameraEngine.previewRotationDegrees()`, divided by ninety.
+     *
+     * Which means the capture path passes zero, because by the time the shader sees those pixels
+     * the turn has already been baked into them. Only the panel-space callers — the live preview,
+     * the frozen frame and the filter grid's thumbnails — pass a real one. Purikura solved the
+     * same problem the same way with `faceTurn`; this is that idea for the frame rather than for
+     * a face.
+     */
+    private const val TURN = """
+uniform float turn;
+
+float2 upSize() { return (mod(turn, 2.0) == 1.0) ? float2(size.y, size.x) : size; }
+
+float2 toUp(float2 p) {
+    float t = mod(turn, 4.0);
+    if (t == 1.0) return float2(size.y - p.y, p.x);
+    if (t == 2.0) return float2(size.x - p.x, size.y - p.y);
+    if (t == 3.0) return float2(p.y, size.x - p.x);
+    return p;
+}
+
+float2 fromUp(float2 q) {
+    float t = mod(turn, 4.0);
+    if (t == 1.0) return float2(q.y, size.y - q.x);
+    if (t == 2.0) return float2(size.x - q.x, size.y - q.y);
+    if (t == 3.0) return float2(size.x - q.y, q.x);
+    return q;
+}
+
+float3 tapUp(float2 q) { return tap(fromUp(q)); }
+"""
+
+    /**
      * Grain, halation and a vignette. The default, and the reason the app is called Roll.
      *
      * The grain is modulated by the midtones because that is where silver halide actually
@@ -445,26 +491,40 @@ half4 main(float2 xy) {
 }
 """
 
-    /** The left half of the frame, and the left half of the frame again. */
+    /**
+     * The left half of the frame, and the left half of the frame again.
+     *
+     * Folded across the world's vertical, not the image's — see [TURN]. A fold has a direction,
+     * and getting it from `size.x` meant it ran down the panel in the viewfinder and across the
+     * picture in the file the moment you turned the phone.
+     */
     private const val MIRROR = """
 half4 main(float2 xy) {
-    float half_w = size.x * 0.5;
-    float x = half_w - abs(xy.x - half_w);
-    return half4(float4(tap(float2(x, xy.y)), 1.0));
+    float2 s = upSize();
+    float2 q = toUp(xy);
+    float halfW = s.x * 0.5;
+    q.x = halfW - abs(q.x - halfW);
+    return half4(float4(tapUp(q), 1.0));
 }
 """
 
-    /** Six segments folded around the centre. */
+    /**
+     * Six segments folded around the centre.
+     *
+     * Same reason as [MIRROR] for working upright: `atan(d.y, d.x)` measures from the image's own
+     * +x, so the six wedges swing round by ninety degrees when the phone turns and the pattern
+     * you framed is not the pattern you get.
+     */
     private const val KALEIDO = """
 half4 main(float2 xy) {
-    float2 ctr = size * 0.5;
-    float2 d = xy - ctr;
+    float2 s = upSize();
+    float2 ctr = s * 0.5;
+    float2 d = toUp(xy) - ctr;
     float r = length(d);
     float a = atan(d.y, d.x);
     float seg = 1.0471976;
     a = abs(mod(a, seg) - seg * 0.5);
-    float2 p = ctr + float2(cos(a), sin(a)) * r;
-    return half4(float4(tap(p), 1.0));
+    return half4(float4(tapUp(ctr + float2(cos(a), sin(a)) * r), 1.0));
 }
 """
 
@@ -964,6 +1024,14 @@ half4 main(float2 xy) {
          */
         val mono: Boolean = false,
         /**
+         * The look has a left and a right, so it is told which way up the world is. See [TURN].
+         *
+         * A flag rather than something every shader gets, for the same reason [facesAware] is
+         * one: setting a uniform a shader does not declare throws, and SkSL strips a uniform that
+         * nothing reads. Only the filters that use `turn` may be handed it.
+         */
+        val turnAware: Boolean = false,
+        /**
          * The ten adjustments, carried on the filter rather than passed beside it.
          *
          * **This is why nothing between the shutter and the shader had to change.** A grade is
@@ -976,7 +1044,7 @@ half4 main(float2 xy) {
         val grade: Grade = Grade.NEUTRAL,
     ) {
         /** The whole shader, prelude included. */
-        val source: String? get() = agsl?.let { PRELUDE + it }
+        val source: String? get() = agsl?.let { PRELUDE + (if (turnAware) TURN else "") + it }
     }
 
     /**
@@ -1032,7 +1100,7 @@ half4 main(float2 xy) {
      * **And it previews.** The old one could not, by construction: there was no compressed file to
      * damage until the shutter had already been pressed, so you framed blind and found out afterwards.
      */
-    val datamosh = Filter("datamosh", "Datamosh", DATAMOSH)
+    val datamosh = Filter("datamosh", "Datamosh", DATAMOSH, turnAware = true)
 
     /**
      * Which filter to actually run.
@@ -1078,8 +1146,8 @@ half4 main(float2 xy) {
         Filter("twirl", "Twirl", TWIRL),
         Filter("bulge", "Bulge", BULGE),
         Filter("fisheye", "Fisheye", FISHEYE),
-        Filter("mirror", "Mirror", MIRROR),
-        Filter("kaleido", "Kaleido", KALEIDO),
+        Filter("mirror", "Mirror", MIRROR, turnAware = true),
+        Filter("kaleido", "Kaleido", KALEIDO, turnAware = true),
         Filter("tunnel", "Tunnel", TUNNEL),
     )
 
