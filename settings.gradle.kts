@@ -11,7 +11,7 @@ dependencyResolutionManagement {
         // In CI: GPR_USER / GPR_TOKEN if a dedicated secret is set, otherwise the run's own
         // GITHUB_ACTOR / GITHUB_TOKEN.
         maven {
-            url = uri("https://maven.pkg.github.com/gi-os/light-common")
+            url = uri("https://maven.pkg.github.com/gi-os/BrightCommon")
             credentials {
                 // takeUnless(String::isBlank), not `?:` — an unset repository secret arrives
                 // as an empty string rather than as null, so a plain elvis chain would hand
