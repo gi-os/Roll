@@ -829,17 +829,22 @@ half4 main(float2 xy) {
      */
     private const val DATAMOSH = """
 half4 main(float2 xy) {
+    // Every coordinate below is upright. A codec's macroblocks run along the *picture's* scan
+    // lines, so a smear that dragged down the frame in the file and across it in the viewfinder
+    // was not one look at two sizes, it was two looks. See TURN.
+    float2 p = toUp(xy);
+
     // Sixteen pixels at preview size, and the same fraction of the frame at any other.
     float mb = max(3.0, unitPx() * 16.0);
-    float row = floor(xy.y / mb);
+    float row = floor(p.y / mb);
 
     // How long this row's runs are, in macroblocks. Long runs read as a drag; short ones as chatter.
     float runBlocks = 3.0 + floor(hash(float2(row, 11.0)) * 17.0);
     float segLen = mb * runBlocks;
-    float seg = floor(xy.x / segLen);
+    float seg = floor(p.x / segLen);
     float segStart = seg * segLen;
 
-    float3 here = tap(xy);
+    float3 here = tapUp(p);
     float pick = hash(float2(seg * 3.1, row * 1.7));
     if (pick < 0.64) {
         return half4(float4(here, 1.0));
@@ -847,7 +852,7 @@ half4 main(float2 xy) {
 
     // Where in its own macroblock this pixel sits. Adding this back to the run's source block is
     // what paints the same block over and over along the run.
-    float2 inBlock = xy - floor(xy / mb) * mb;
+    float2 inBlock = p - floor(p / mb) * mb;
     float dx = (hash(float2(seg, row + 5.0)) - 0.5) * mb * 7.0;
     float dy = (hash(float2(seg + 2.0, row)) - 0.5) * mb * 1.4;
     float2 from = float2(segStart + dx, row * mb + dy) + inBlock;
@@ -855,9 +860,9 @@ half4 main(float2 xy) {
     // The channels drag by slightly different amounts, which is where the fringing comes from.
     float spread = mb * 0.35 * (hash(float2(seg + 7.0, row)) - 0.5);
     float3 dragged = float3(
-        tap(from + float2(spread, 0.0)).r,
-        tap(from).g,
-        tap(from - float2(spread, 0.0)).b
+        tapUp(from + float2(spread, 0.0)).r,
+        tapUp(from).g,
+        tapUp(from - float2(spread, 0.0)).b
     );
 
     // Not all the way: a trace of the original under the smear is what keeps a photograph in it.
@@ -865,7 +870,7 @@ half4 main(float2 xy) {
 
     // The leading edge of a run stays bright, the way a freshly moshed block does before the
     // residual catches up with it.
-    float edge = 1.0 - smoothstep(0.0, mb * 1.5, xy.x - segStart);
+    float edge = 1.0 - smoothstep(0.0, mb * 1.5, p.x - segStart);
     c = clamp(c + edge * 0.10, 0.0, 1.0);
     return half4(float4(c, 1.0));
 }
