@@ -255,10 +255,16 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
         //
         // Only while there is something to read: the sensor listener is not worth running for a
         // message that is not on screen.
-        RotatedToDevice(
-            quarter = rememberDeviceQuarter(active = notice != null),
-            opaque = false,
-        ) {
+        // **Watched all the time, not only while a notice is up.** Gating the sensor on
+        // `notice != null` looked like the thrifty version and was the broken one: the listener
+        // registers when the message appears, so the first frame of every notice is drawn at
+        // whatever quarter was last known — zero, on the first one after launch — and then snaps.
+        // "Click wheel to unlock" is the notice you are most likely to see first, and a message
+        // that is the wrong way up for the moment you read it is the whole complaint.
+        //
+        // The readouts already keep one accelerometer listener alive the entire time the camera
+        // is up. A second at SENSOR_DELAY_UI is not the thing to economise on.
+        RotatedToDevice(quarter = rememberDeviceQuarter(), opaque = false) {
             // Its own Box: RotatedToDevice hands its content no BoxScope, and the alignment has to
             // be measured inside the turned frame or "bottom" would still mean the panel's bottom.
             Box(Modifier.fillMaxSize()) {
