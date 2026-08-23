@@ -101,7 +101,7 @@ class FilterDialTest {
         // Off: it leaves the dial but keeps its slot in the order.
         assertFalse("tunnel" in ids(order, setOf("tunnel")))
         // On: it comes back where it was.
-        assertEquals("tunnel", ids(order, emptySet()).first().id)
+        assertEquals("tunnel", ids(order, emptySet()).first())
     }
 
     @Test
