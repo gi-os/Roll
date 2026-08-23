@@ -272,6 +272,34 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var filterLocked = false
 
+    /**
+     * The filter the photograph in flight is being made with, held from the press until the file
+     * lands. Null when nothing is in flight.
+     *
+     * **This is what lets the dial move while the shutter is open.** In Pro the filter is applied
+     * to the bytes about 1.8 seconds after your finger, so reading the dial at *that* moment meant
+     * a notch turned inside the window baked a look you were not framing into the file — and the
+     * dial was simply closed for those 1.8 seconds to prevent it. Which is the wrong trade: the
+     * one moment you most want to set up the next shot is the moment you have just taken one, and
+     * a camera that ignores the wheel for two seconds after every press reads as a camera that
+     * missed the input.
+     *
+     * Pinning at the press answers both. The photograph keeps the look it was framed with, and
+     * the wheel is free the whole time.
+     *
+     * Declared above `init` with [filterLocked], for the reason documented there.
+     */
+    private var shootingWith: Filters.Filter? = null
+
+    /**
+     * The look this photograph belongs to: pinned if one is in flight, the dial otherwise.
+     *
+     * Every read inside a shooting coroutine goes through here rather than through `filter.value`,
+     * and that is the whole of the mechanism — a stray `filter.value` in the capture path is a
+     * photograph that changes its mind halfway through.
+     */
+    private fun lookForShot(): Filters.Filter = shootingWith ?: filter.value
+
     /** Seconds into the current take, for the readout. */
     private val _recordSeconds = MutableStateFlow(0)
     val recordSeconds: StateFlow<Int> = _recordSeconds.asStateFlow()
@@ -419,15 +447,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * discarded.
      */
     fun stepFilter(by: Int) {
-        if (shotInFlight()) {
-            // **The dial is closed while the shutter is open.** In Pro the filter is applied to the
-            // bytes *after* the sensor answers, about 1.8 seconds after your finger — so a notch
-            // turned inside that window would bake a look you were not framing into the file, and
-            // the held frame on the panel would be showing you the old one while it happened. No
-            // haptic, for the same reason as below: nothing here is broken.
-            showNotice("Taking the photograph")
-            return
-        }
+        // **The dial stays open while the shutter is.** It used to be closed for the 1.8 seconds a
+        // Pro capture takes, because the filter was read off the dial when the sensor answered and
+        // a notch inside that window baked a look you were not framing into the file. The fix for
+        // that belongs at the press, not on the wheel: [shootingWith] pins the look at your finger,
+        // so the photograph keeps what it was framed with and the dial is yours again immediately.
+        //
+        // Which matters more than it sounds. The moment you have just taken a photograph is the
+        // moment you are most likely to be setting up the next one, and a wheel that ignores two
+        // seconds of turning after every press reads as a wheel that dropped the input rather than
+        // as a camera being careful.
         if (filterLocked) {
             // No haptic: a notch that buzzes and does nothing reads as a broken dial, and here
             // nothing is broken — the filter is deliberately not this photograph's to choose.
@@ -454,8 +483,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // waste it — so a turn out of Simple lands on Pro with no filter, and carries on into the filters
         // from there. A turn back at None returns to Simple. One dial, one line: Simple, None, Film, Mono,
         // and so on.
+        //
+        // **The two ends of the track stay closed mid-capture**, which is not an oversight left
+        // over from the old rule. These two notches change the *mode*, which rebinds the camera and
+        // moves the next shot onto a different capture path. A filter the shot in flight is no
+        // longer reading is one thing; the camera being rebound underneath it is another.
         if (prefs.mode.value.isSimple) {
             if (by <= 0) return
+            if (shotInFlight()) {
+                showNotice("Taking the photograph")
+                return
+            }
             setMode(CaptureMode.Photo)
             prefs.setFilter(Filters.none.id)
             dialHeldUntil = now + Filters.NONE_DWELL_MS
@@ -463,6 +501,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Only walks into Simple when Simple is switched on; otherwise None is the end of the track.
         if (by < 0 && filter.value.id == Filters.none.id && prefs.simpleMode.value) {
+            if (shotInFlight()) {
+                showNotice("Taking the photograph")
+                return
+            }
             setMode(CaptureMode.Simple)
             dialHeldUntil = now + Filters.NONE_DWELL_MS
             return
@@ -477,12 +519,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setFilter(id: String) {
-        // Same rule as the wheel, and it has to be here as well rather than only in the grid:
-        // the grid is one caller of this and a capture request is another.
-        if (shotInFlight()) {
-            showNotice("Taking the photograph")
-            return
-        }
+        // Open during a capture, like the wheel above and for the same reason — the shot in flight
+        // is holding its own look in [shootingWith] and cannot be changed out from under itself.
         if (filterLocked) return
         // Chosen deliberately from the grid, so the dial has no business holding on to it.
         dialHeldUntil = 0L
@@ -1231,6 +1269,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             showNotice("Roll finished — develop it")
             return
         }
+        shootingWith = filter.value
         _shooting.value = true
         viewModelScope.launch {
             try {
@@ -1253,8 +1292,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // size setting governs the photographs where resolution is a real quantity, and the
                 // ones where it isn't just take the panel.
                 if (prefs.photoSize.value.isPreviewGrab ||
-                    filter.value.lowRes ||
-                    filter.value.facesAware
+                    lookForShot().lowRes ||
+                    lookForShot().facesAware
                 ) {
                     if (!shootPanelFrame(click = true)) showNotice("Nothing on the viewfinder yet")
                     return@launch
@@ -1281,7 +1320,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     // same shader runs over the held frame, at panel size, where it is a few
                     // milliseconds.
                     _held.value = engine.previewFrame()?.let { panel ->
-                        val look = filter.value
+                        val look = lookForShot()
                         if (look.agsl == null) {
                             panel
                         } else {
@@ -1330,7 +1369,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     return@launch
                 }
-                val activeFilter = filter.value
+                val activeFilter = lookForShot()
                 val aspect = prefs.aspect.value
                 // A fresh seed per frame, so two shots of the same scene don't carry
                 // identical grain — and so the grain in the file is not the grain that
@@ -1352,6 +1391,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 _held.value = null
                 _countdown.value = null
                 _shooting.value = false
+                shootingWith = null
             }
         }
     }
@@ -1368,7 +1408,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun shootPanelFrame(click: Boolean): Boolean {
         val grabbed = grabBestFrame() ?: return false
         if (click) _shutterTick.tryEmit(Unit)
-        val activeFilter = filter.value
+        val activeFilter = lookForShot()
         val seed = Random.nextFloat() * 1000f
         val turn = engine.previewRotationDegrees()
         val aspect = prefs.aspect.value
@@ -1495,6 +1535,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * rewrite a Pro setting.
      */
     private fun shootSimple() {
+        shootingWith = Filters.none
         _shooting.value = true
         viewModelScope.launch {
             try {
@@ -1590,6 +1631,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 reportShutterFailure(failure)
             } finally {
                 _shooting.value = false
+                shootingWith = null
             }
         }
     }
@@ -1607,6 +1649,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * every panel looks like a mistake rather than a set.
      */
     private fun shootStrip(layout: PuriStrip.Layout) {
+        shootingWith = filter.value
         _shooting.value = true
         viewModelScope.launch {
             val bitmaps = ArrayList<Bitmap>(PuriStrip.SHOTS)
@@ -1640,7 +1683,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                         return@launch
                     }
                     _shutterTick.tryEmit(Unit)
-                    val activeFilter = filter.value
+                    val activeFilter = lookForShot()
                     val faces = FaceQuads.of(engine.faces.value, grabbed.width, grabbed.height)
                     // **No date on the panels.** A booth prints it once, in the margin of the strip,
                     // because the four photographs are one object — four copies of the same date down a
@@ -1707,6 +1750,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 bitmaps.forEach { it.recycle() }
                 _countdown.value = null
                 _shooting.value = false
+                shootingWith = null
                 refreshRoll()
             }
         }

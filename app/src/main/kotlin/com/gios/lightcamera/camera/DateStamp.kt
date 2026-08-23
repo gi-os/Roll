@@ -44,6 +44,22 @@ import java.util.Calendar
 object DateStamp {
 
     /**
+     * How big the stamp is against the size the three styles were originally drawn at.
+     *
+     * One number rather than three denominators. The dot matrix, the quartz display and the
+     * camcorder overlay are three date backs on notionally the same camera, and shrinking them by
+     * different amounts is how they stop looking like it.
+     *
+     * 0.85 — fifteen percent off what shipped through 2.55. Full size, the stamp was competing
+     * with the photograph rather than sitting in the corner of one; a real date back is a couple of
+     * centimetres of display reflected into a 35mm frame and reads as small.
+     *
+     * Everything downstream is a multiple of the base unit, insets included, so the stamp moves
+     * closer to the corner as it shrinks rather than leaving a gap the old size used to fill.
+     */
+    private const val SCALE = 0.85f
+
+    /**
      * The two colours a stamp is drawn in: the lit element and the bloom beneath it.
      *
      * Packed ARGB, and packed by hand rather than by `Color.argb`, so that [inkFor] is arithmetic
@@ -190,7 +206,7 @@ object DateStamp {
 
         // One glyph is seven cells tall, and the whole stamp about a twenty-fifth of the frame —
         // measured off photographs from a Canon Sure Shot, which is as principled as this gets.
-        val cell = (minOf(target.width, target.height) / 175f).coerceAtLeast(1.5f)
+        val cell = (minOf(target.width, target.height) / 175f * SCALE).coerceAtLeast(1.5f)
         val glyphW = 5 * cell
         val glyphH = 7 * cell
         val gap = cell
@@ -248,7 +264,7 @@ object DateStamp {
         // centimetres of LCD reflected into the corner of a 35mm frame. The digit is now about a
         // fiftieth of the long edge, with the classic LCD proportions: near twice as tall as it is
         // wide, bars a fifth of the width.
-        val unit = (maxOf(target.width, target.height) / 720f).coerceAtLeast(0.7f)
+        val unit = (maxOf(target.width, target.height) / 720f * SCALE).coerceAtLeast(0.7f)
         val digitH = unit * 13f
         val digitW = digitH * 0.55f
         val thick = digitW * 0.19f
@@ -385,7 +401,7 @@ object DateStamp {
         // A character generator drew this into a video line, so it was small — about a
         // twenty-fifth of the frame, not a fifteenth — and the keyline was one pixel of video,
         // which is a hairline here rather than the heavy slab of the first attempt.
-        val size = maxOf(target.width, target.height) / 34f
+        val size = maxOf(target.width, target.height) / 34f * SCALE
         val outline = Paint().apply {
             isAntiAlias = true
             // **Condensed**, because the character generators in camcorders were: the digits are
