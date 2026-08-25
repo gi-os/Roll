@@ -140,10 +140,10 @@ fun RollScreen(
     // Trashing through the system dialog, the same way the viewer does: the roll shows photos
     // this app did not create, so deleting must ask. The sender is launched once per tap and
     // the roll refreshes itself on the way back in.
-    val scope = rememberCoroutineScope()
+    val trashScope = rememberCoroutineScope()
     val trash = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
-    ) { scope.launch { vm.refreshRoll() } }
+    ) { trashScope.launch { vm.refreshRoll() } }
 
     val gridState = rememberLazyGridState()
     WheelScroll(gridState, active = active, reverse = true)
