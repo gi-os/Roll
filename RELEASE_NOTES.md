@@ -1,82 +1,17 @@
-## Roll v2.58 — the new key is withdrawn; this installs over what you have
+## Roll v2.59 — multi-select can delete again
 
-**No uninstall. This is an ordinary update.** v2.57 was signed with a brand-new certificate, which
-meant it could only be installed by removing the app first and losing Roll's settings and any unfinished film roll.
-That cost was not worth what it bought, so it has been withdrawn. v2.58 is signed with the same
-certificate every release before v2.57 used, and it installs straight over the copy on your phone.
+**Long-press several photographs in the roll and there was no way to bin them.** The selection bar
+offered a close and a share, and nothing else. Trash lived only in the single-photo viewer, so a
+set of photographs could be sent together but had to be deleted one at a time — each one opened,
+each one binned through its own system dialog. The README already promised "send or delete several
+at once"; the delete half of that was never wired up.
 
-If you already uninstalled and installed v2.57, this one will not go over it — uninstall once more
-and install v2.58, and that is the end of it.
+The selection bar now has a trash button next to share. It hands every selected photograph to the
+system's trash dialog in one request — the same `MediaStore.createTrashRequest` the viewer uses,
+just with a list of Uris instead of one. The dialog still asks, because the roll shows photographs
+this app did not create, and trashing still means trashing rather than quietly deleting: nothing
+about the safety model changed, only that the button now sits where the count of selected
+photographs is. The roll refreshes itself on the way back in, and the selection clears as the
+binned photographs leave the roll.
 
-**What this does and does not fix.** The signing key is no longer committed to this repository and
-the file is gitignored, so a fresh clone does not hand it out. But it is still in this repository's
-git history and always will be, so treat it as public: anyone determined enough can still build an
-APK this phone would accept as an update. Closing that for real needs an APK Signature Scheme v3
-rotation — signing with a new key while carrying a proof-of-rotation signed by the old one, which
-Android accepts as a normal update — and that is a separate change, done carefully, not bundled in
-behind an uninstall.
-
-Everything else in v2.57 stands and is still here.
-
-## Roll v2.57 — a new signing key, and a stranger can no longer choose where a photograph lands
-
-**Withdrawn.** The key change described below was reverted in v2.58; see the top of this file. The rest of this release stands.
-**Uninstall Roll before you install this one.** Every release up to v2.56 was signed with a key
-that was committed to this repository with its password written three lines under it. Anybody who
-cloned the repo could build an APK that Android would accept as an update to yours, and that is
-the whole of the trust model for a sideloaded app. The key has been replaced with a 4096-bit one
-that exists only as a CI secret, and the old one is gone.
-
-Android identifies an app by package name *and* signing certificate, so there is no gentle way
-through this: v2.57 will not install over v2.56. `adb install -r` and Obtainium both stop with
-`INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall once, install v2.57, and updates go back to being
-ordinary from here on. Your photographs are in the shared gallery and are not touched by the
-uninstall. Roll's settings and any film roll you have not finished are in app storage and are.
-
-**Another app could pick the file Roll wrote to.** Roll answers `IMAGE_CAPTURE`, and the caller
-names the destination in `EXTRA_OUTPUT`. Roll took that at its word and opened a stream on it —
-with Roll's identity, not the caller's. The activity is exported and shows over the lock screen,
-so an app holding no permission at all could point a capture at Roll's own database, at another
-app's file, at anything Roll could reach, and have Roll overwrite it with a JPEG.
-
-The destination now has to be a `content:` Uri, it cannot belong to one of Roll's own providers,
-and the caller has to have proved it may write there — either by attaching the write grant to the
-intent, which is what a well-behaved caller already does, or by holding the grant itself. A
-caller that fails all of that gets the photograph filed to the gallery as an ordinary shot rather
-than written somewhere it had no business naming.
-
-**Everything CI runs is pinned to a commit.** The build job holds the signing key, so the actions
-it calls are pinned by SHA rather than by a tag anyone upstream can move.
-
-## Roll v2.56 — the roll is in colour too
-
-**Colour stopped at the viewfinder.** With the adb grant given, the camera and the full-screen
-viewer both lifted LightOS's greyscale, and the roll — a grid of nothing but colour photographs —
-was the one picture surface left in monochrome. Swipe up from a frame you had just taken in colour
-and the same frame was grey in the grid above it.
-
-The roll now holds colour on the same terms as the viewfinder: it is on whenever the grid is the
-page you are looking at, and off the moment you leave the app. `ColorMode` already counted holders
-rather than flipping a flag, so the camera and the roll overlapping mid-swipe costs nothing and
-there is no flicker at the hand-off.
-
-**The Colour setting says what it now means.** "Viewfinder" is called **Pictures** — the
-viewfinder, the roll and the viewer — and **Whole app** is what adds settings and the send picker
-on top. Off is unchanged. The stored value did not change, so an existing choice carries over.
-
-## Roll v2.55 — the readouts turn with the phone, and 3.5x stops lying
-
-**`TORCH`, `3.5x`, `EV +1.0` were sideways every time you shot landscape.** The band is pinned
-sideways on purpose — turn the phone anticlockwise and the controls come round to the bottom edge,
-where a camera's controls belong. The readouts in the top corner were pinned with it, and they are
-not controls. They are words you read, and words on their side are words you tilt your head at.
-They now turn off the accelerometer like the scan sheet does, with the same 60° of hysteresis, so
-they stay upright whichever way you are holding the camera and do not flip while you compose.
-
-**And the zoom readout was stale.** Come back to the viewfinder from the roll and the lens is at
-1x, but the corner still read `3.5x`, and went on reading it until you touched the zoom again. The
-ratio was being read back out of CameraX's `zoomState`, which lives on a `CameraInfo` that survives
-the unbind — so just after a rebind it still reports what the zoom was before, while the control
-underneath has already gone wide. Every path through that code is one where the zoom resets anyway,
-so it no longer asks: it sets 1x, on the state and on the control together, and the label goes away
-with the zoom.
+Fixes [light-reports#52] — no delete option when multiple photos were selected in the roll.

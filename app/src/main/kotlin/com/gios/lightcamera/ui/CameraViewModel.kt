@@ -1854,6 +1854,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun trashRequest(photo: Photo) = repo.trashRequest(listOf(photo.uri))
 
+    fun trashRequest(photos: List<Photo>) = repo.trashRequest(photos.map { it.uri })
+
     /* ---------------- notices ---------------- */
 
     private var noticeToken = 0

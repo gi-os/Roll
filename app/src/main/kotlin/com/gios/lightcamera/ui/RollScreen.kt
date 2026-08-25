@@ -1,6 +1,9 @@
 package com.gios.lightcamera.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +53,7 @@ import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
 import com.gios.lightcamera.ui.theme.lightCombinedClickable
+import kotlinx.coroutines.launch
 
 /** One row of the flattened roll: either a photo or the day it was taken. */
 private sealed interface RollEntry {
@@ -131,6 +136,14 @@ fun RollScreen(
     // showing (`beyondViewportPageCount = 1`), so without it a left-over selection would swallow
     // the back press on the camera page and nothing visible would happen.
     BackHandler(enabled = selecting && active) { selected = emptySet() }
+
+    // Trashing through the system dialog, the same way the viewer does: the roll shows photos
+    // this app did not create, so deleting must ask. The sender is launched once per tap and
+    // the roll refreshes itself on the way back in.
+    val scope = rememberCoroutineScope()
+    val trash = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { scope.launch { vm.refreshRoll() } }
 
     val gridState = rememberLazyGridState()
     WheelScroll(gridState, active = active, reverse = true)
@@ -296,6 +309,20 @@ fun RollScreen(
                 Spacer(Modifier.weight(1f))
                 LightText("${selected.size} SELECTED", LightTextVariant.Detail)
                 Spacer(Modifier.weight(1f))
+                ChromeIcon(
+                    icon = LightIcons.Trash,
+                    onClick = {
+                        val chosen = photos.filter { it.id in selected }
+                        if (chosen.isNotEmpty()) {
+                            val sender = vm.trashRequest(chosen)
+                            if (sender != null) {
+                                trash.launch(IntentSenderRequest.Builder(sender).build())
+                            } else {
+                                vm.showNotice("Can't bin those")
+                            }
+                        }
+                    },
+                )
                 ChromeIcon(
                     icon = LightIcons.Share,
                     onClick = {
