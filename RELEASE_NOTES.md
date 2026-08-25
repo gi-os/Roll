@@ -1,3 +1,32 @@
+## Roll v2.57 — a new signing key, and a stranger can no longer choose where a photograph lands
+
+**Uninstall Roll before you install this one.** Every release up to v2.56 was signed with a key
+that was committed to this repository with its password written three lines under it. Anybody who
+cloned the repo could build an APK that Android would accept as an update to yours, and that is
+the whole of the trust model for a sideloaded app. The key has been replaced with a 4096-bit one
+that exists only as a CI secret, and the old one is gone.
+
+Android identifies an app by package name *and* signing certificate, so there is no gentle way
+through this: v2.57 will not install over v2.56. `adb install -r` and Obtainium both stop with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall once, install v2.57, and updates go back to being
+ordinary from here on. Your photographs are in the shared gallery and are not touched by the
+uninstall. Roll's settings and any film roll you have not finished are in app storage and are.
+
+**Another app could pick the file Roll wrote to.** Roll answers `IMAGE_CAPTURE`, and the caller
+names the destination in `EXTRA_OUTPUT`. Roll took that at its word and opened a stream on it —
+with Roll's identity, not the caller's. The activity is exported and shows over the lock screen,
+so an app holding no permission at all could point a capture at Roll's own database, at another
+app's file, at anything Roll could reach, and have Roll overwrite it with a JPEG.
+
+The destination now has to be a `content:` Uri, it cannot belong to one of Roll's own providers,
+and the caller has to have proved it may write there — either by attaching the write grant to the
+intent, which is what a well-behaved caller already does, or by holding the grant itself. A
+caller that fails all of that gets the photograph filed to the gallery as an ordinary shot rather
+than written somewhere it had no business naming.
+
+**Everything CI runs is pinned to a commit.** The build job holds the signing key, so the actions
+it calls are pinned by SHA rather than by a tag anyone upstream can move.
+
 ## Roll v2.56 — the roll is in colour too
 
 **Colour stopped at the viewfinder.** With the adb grant given, the camera and the full-screen

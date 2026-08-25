@@ -8,3 +8,5 @@
 /captures
 .externalNativeBuild
 .cxx
+# The release key is a CI secret. The workflow writes it here; nothing commits it.
+keystore/*.jks

@@ -2,6 +2,7 @@ package com.gios.lightcamera
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
@@ -70,6 +71,33 @@ private data class ReportRequest(
     val shot: Bitmap?,
     val failure: com.gios.lightcamera.report.Failure? = null,
 )
+
+/**
+ * The half of the `IMAGE_CAPTURE` output check that needs nothing but the `Uri`.
+ *
+ * Split out from [MainActivity.intentCaptureOutput] so it can be tested on the JVM: the rest of
+ * that function needs a live `Context` and a real caller on the other end of a binder call.
+ */
+internal object CaptureTarget {
+
+    /**
+     * `file:` is refused because a path is not a grant. A caller naming a filesystem location
+     * is asking Roll to reach it under Roll's own identity, which is a different thing from
+     * handing over access the caller holds; `content:` at least came through the framework,
+     * where a grant can exist and be checked.
+     *
+     * An authority of ours is refused from the other side of the same argument. The `stars`
+     * provider and the LightSync backup provider are Roll's private storage, and a capture
+     * pointed at either is an outside app asking Roll to overwrite its own files. Both are
+     * declared in the manifest as the application id plus a suffix, so testing the prefix
+     * catches both — and catches any provider added later without anyone remembering this.
+     */
+    fun isWritableTarget(scheme: String?, authority: String?, packageName: String): Boolean {
+        if (scheme != "content") return false
+        if (authority.isNullOrEmpty()) return false
+        return !authority.startsWith(packageName)
+    }
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -330,11 +358,38 @@ class MainActivity : ComponentActivity() {
      * a bitmap in an `Intent` extra has been a `TransactionTooLargeException` waiting to
      * happen since 2010, and the callers that rely on it are asking for a photograph they can
      * barely see.
+     *
+     * A caller that names somewhere it cannot itself write is refused for a sharper reason.
+     * This activity is exported and `showWhenLocked`, so the `Uri` arrives from an app that
+     * needed no permission to send it, and the stream is opened later with *Roll's* identity —
+     * which means anything Roll can write, an unprivileged app could otherwise overwrite just
+     * by naming it here. The proof we ask for is the write grant the caller attached to the
+     * `Intent`: the framework only lets an app pass on access it already holds, so a `Uri` that
+     * arrived carrying `FLAG_GRANT_WRITE_URI_PERMISSION` is one the caller could have written
+     * itself. Where the flag is absent we ask the framework about the *caller's* uid rather
+     * than our own — `Binder.getCallingUid()` outside a binder transaction is this process, and
+     * "may Roll write there" is the question that was never worth asking. [CaptureTarget] holds
+     * the two shapes rejected before any of that.
      */
     private fun intentCaptureOutput(): Uri? {
+        val request = intent ?: return null
         if (!isCaptureAction()) return null
         @Suppress("DEPRECATION")
-        return intent?.getParcelableExtra<Uri>(MediaStore.EXTRA_OUTPUT)
+        val uri = request.getParcelableExtra<Uri>(MediaStore.EXTRA_OUTPUT) ?: return null
+        if (!CaptureTarget.isWritableTarget(uri.scheme, uri.authority, packageName)) return null
+        if (request.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0) return uri
+
+        val caller = callingActivity?.packageName ?: callingPackage ?: return null
+        val callerUid = runCatching {
+            packageManager.getPackageUid(caller, PackageManager.PackageInfoFlags.of(0L))
+        }.getOrNull() ?: return null
+        val granted = checkUriPermission(
+            uri,
+            -1,
+            callerUid,
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        ) == PackageManager.PERMISSION_GRANTED
+        return if (granted) uri else null
     }
 
     private fun isCaptureAction(): Boolean = when (intent?.action) {

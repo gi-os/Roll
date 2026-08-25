@@ -118,26 +118,38 @@ the camera button straight to `com.gios.lightcamera`.
 
 ### Updating
 
-CI signs every build with the same committed key. The fingerprint is in
-`signing-fingerprint.txt`, and CI checks it. A later release therefore installs over an earlier
-one with `adb install -r`, and it keeps your settings. You can also point
-[Obtainium](https://github.com/ImranR98/Obtainium) at this repo. It then offers you each new
-release, which on most days means a new one.
+CI signs every build with the same key. That key is a repository secret, not a file in this
+repo; its fingerprint is in `signing-fingerprint.txt` and CI checks every APK against it. A later
+release therefore installs over an earlier one with `adb install -r`, and it keeps your settings.
+You can also point [Obtainium](https://github.com/ImranR98/Obtainium) at this repo. It then offers
+you each new release, which on most days means a new one.
+
+**v2.57 breaks that once.** Every release up to v2.56 was signed with a key committed to this
+repository with its password three lines under it, which meant anyone could build an APK the
+phone would accept as an update to yours. The key has been replaced and the old one is gone.
+Android identifies an app by package name *and* signing certificate, so v2.57 will not install
+over v2.56 — `adb install -r` and Obtainium both fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+Uninstall Roll once, then install v2.57 fresh. Photographs are in the shared gallery and are not
+touched; Roll's own settings and any unfinished film roll are, because they live in app storage.
 
 ### Build it yourself
 
 ```sh
 git clone https://github.com/gi-os/Roll.git
 cd LightCamera
-./gradlew :app:assembleRelease
+./gradlew :app:assembleDebug
 ```
+
+`assembleRelease` works too, but without `KEYSTORE_PASSWORD` and the keystore in
+`keystore/lightcamera.jks` it produces an *unsigned* APK — the release key is a CI secret and is
+not in this repo. A debug build is the one to want locally.
 
 You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `2.55.0`. CI adds the run number
-as the patch, so the release from the current `main` is `v2.55.x`. See
+**Current version:** `versionName` in `app/build.gradle.kts` is `2.57.0`. CI adds the run number
+as the patch, so the release from the current `main` is `v2.57.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 
 ## Controls

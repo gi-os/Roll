@@ -35,7 +35,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 1
-        versionName = "2.56.0"
+        versionName = "2.57.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
@@ -44,12 +44,28 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // The release key used to live in this repository with its password written three lines
+    // under it, which meant anyone at all could build an APK that Android would accept as an
+    // update to this one. It is a CI secret now: the workflow decodes it to
+    // `keystore/lightcamera.jks`, and that path is git-ignored so a local build cannot put one
+    // back by accident.
+    //
+    // A build without the secret still works and still produces an installable APK — it is
+    // signed with the local debug key instead and will not update over a release. That is the
+    // right way round: a build that announces it is not the real one beats a build that
+    // silently signs itself with a key everybody has.
+    val keystoreFile = rootProject.file("keystore/lightcamera.jks")
+    val keystorePassword: String = System.getenv("KEYSTORE_PASSWORD") ?: ""
+    val canSignRelease = keystoreFile.exists() && keystorePassword.isNotEmpty()
+
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("../keystore/lightcamera.jks")
-            storePassword = "lightcamera"
-            keyAlias = "lightcamera"
-            keyPassword = "lightcamera"
+        if (canSignRelease) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                keyAlias = "lightcamera"
+                keyPassword = keystorePassword
+            }
         }
     }
 
@@ -58,8 +74,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Same committed key as debug, so either APK upgrades over the other.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (canSignRelease) signingConfigs.getByName("release") else null
         }
     }
     compileOptions {
