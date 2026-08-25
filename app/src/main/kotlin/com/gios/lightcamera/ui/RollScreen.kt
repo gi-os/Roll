@@ -89,6 +89,16 @@ fun RollScreen(
     val loading by vm.loadingRoll.collectAsState()
     val scope by vm.prefs.scope.collectAsState()
     val roll by vm.roll.collectAsState()
+    val colour by vm.prefs.colour.collectAsState()
+
+    // **The roll is photographs too.** It used to be the one picture surface in the app that
+    // stayed grey: the viewfinder and the viewer both held colour, and swiping up to the grid
+    // dropped it, so a wall of colour photographs was drawn in monochrome while the frame you
+    // had just taken was in colour one flick below. Held on `active` so the pager keeping this
+    // page composed behind the viewfinder (`beyondViewportPageCount = 1`) doesn't hold colour
+    // for a screen nobody is looking at. `ColorMode` counts holders, so overlapping with the
+    // camera's own hold across a swipe is fine.
+    ColourEffect(enabled = active && colour != com.gios.lightcamera.Colour.Off)
 
     val entries = remember(photos) { flatten(photos) }
 

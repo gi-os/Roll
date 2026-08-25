@@ -316,9 +316,9 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context) {
     Section("Colour") {
         Note(
             if (ColorMode.granted(context)) {
-                "The panel is a full-colour AMOLED — Light's black and white is the accessibility daltonizer pinned to monochromacy. Roll lifts it while the camera is up and puts it back when you leave."
+                "The panel is a full-colour AMOLED — Light's black and white is the accessibility daltonizer pinned to monochromacy. Roll lifts it wherever a photograph is on screen — the viewfinder, the roll and the full-screen viewer — and puts it back when you leave the app."
             } else {
-                "Needs one adb grant, then the viewfinder is in colour:\n\nadb shell pm grant com.gios.lightcamera android.permission.WRITE_SECURE_SETTINGS\n\nUntil then everything stays grey, which is harmless — the write is simply refused."
+                "Needs one adb grant, then the viewfinder and the roll are in colour:\n\nadb shell pm grant com.gios.lightcamera android.permission.WRITE_SECURE_SETTINGS\n\nUntil then everything stays grey, which is harmless — the write is simply refused."
             },
         )
     }

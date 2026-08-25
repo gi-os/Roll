@@ -67,16 +67,21 @@ enum class BandSlot(val label: String) {
  *
  * See `ui/ColorMode.kt`. [Viewfinder] is the default because a camera showing you a grey
  * version of the colour photograph it is about to save is misrepresenting the picture — and
- * because half the filters in this app are about colour.
+ * because half the filters in this app are about colour. The same argument covers every
+ * photograph the app draws, so [Viewfinder] holds colour for the roll as well; it is the
+ * chrome, not the pictures, that [Always] adds.
  */
 enum class Colour(val label: String) {
     /** Leave the phone as Light set it. */
     Off("Off"),
 
-    /** Colour while the viewfinder or a photograph is on screen; grey everywhere else. */
-    Viewfinder("Viewfinder"),
+    /**
+     * Colour wherever a photograph is: the viewfinder, the roll and the full-screen viewer.
+     * Grey everywhere else — settings, the send picker, and the rest of the phone.
+     */
+    Viewfinder("Pictures"),
 
-    /** Colour for the whole app, the roll included. */
+    /** Colour for the whole app, settings and the send picker included. */
     Always("Whole app"),
 }
 

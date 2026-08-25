@@ -1,3 +1,19 @@
+## Roll v2.56 — the roll is in colour too
+
+**Colour stopped at the viewfinder.** With the adb grant given, the camera and the full-screen
+viewer both lifted LightOS's greyscale, and the roll — a grid of nothing but colour photographs —
+was the one picture surface left in monochrome. Swipe up from a frame you had just taken in colour
+and the same frame was grey in the grid above it.
+
+The roll now holds colour on the same terms as the viewfinder: it is on whenever the grid is the
+page you are looking at, and off the moment you leave the app. `ColorMode` already counted holders
+rather than flipping a flag, so the camera and the roll overlapping mid-swipe costs nothing and
+there is no flicker at the hand-off.
+
+**The Colour setting says what it now means.** "Viewfinder" is called **Pictures** — the
+viewfinder, the roll and the viewer — and **Whole app** is what adds settings and the send picker
+on top. Off is unchanged. The stored value did not change, so an existing choice carries over.
+
 ## Roll v2.55 — the readouts turn with the phone, and 3.5x stops lying
 
 **`TORCH`, `3.5x`, `EV +1.0` were sideways every time you shot landscape.** The band is pinned
