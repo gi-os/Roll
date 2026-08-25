@@ -626,8 +626,6 @@ covers the 27x31 grid, the type scale and the haptics. See `LICENSE-light-sdk`.
 
 ## Bright\*
 
-*The Light Phone III ships one camera app, no way to replace it, and an SDK that forbids camera access outright. Roll is a plain APK for exactly that reason.*
-
 26 open-source apps for the **Light Phone III** — camera, music, maps, messages,
 reading, transit, games. The phone has no app store, so they install by sideload: scan one
 code from **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)** and BrightMarket keeps them updated.
