@@ -1,5 +1,26 @@
+## Roll v2.58 — the new key is withdrawn; this installs over what you have
+
+**No uninstall. This is an ordinary update.** v2.57 was signed with a brand-new certificate, which
+meant it could only be installed by removing the app first and losing Roll's settings and any unfinished film roll.
+That cost was not worth what it bought, so it has been withdrawn. v2.58 is signed with the same
+certificate every release before v2.57 used, and it installs straight over the copy on your phone.
+
+If you already uninstalled and installed v2.57, this one will not go over it — uninstall once more
+and install v2.58, and that is the end of it.
+
+**What this does and does not fix.** The signing key is no longer committed to this repository and
+the file is gitignored, so a fresh clone does not hand it out. But it is still in this repository's
+git history and always will be, so treat it as public: anyone determined enough can still build an
+APK this phone would accept as an update. Closing that for real needs an APK Signature Scheme v3
+rotation — signing with a new key while carrying a proof-of-rotation signed by the old one, which
+Android accepts as a normal update — and that is a separate change, done carefully, not bundled in
+behind an uninstall.
+
+Everything else in v2.57 stands and is still here.
+
 ## Roll v2.57 — a new signing key, and a stranger can no longer choose where a photograph lands
 
+**Withdrawn.** The key change described below was reverted in v2.58; see the top of this file. The rest of this release stands.
 **Uninstall Roll before you install this one.** Every release up to v2.56 was signed with a key
 that was committed to this repository with its password written three lines under it. Anybody who
 cloned the repo could build an APK that Android would accept as an update to yours, and that is
