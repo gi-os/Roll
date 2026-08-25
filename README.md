@@ -12,9 +12,9 @@ Filters, film-roll mode, QR scanning, hardware face detection, and the wheel as 
 Scan the code above with **BrightMarket** installed to open Roll there and
 install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
-**[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
+**[brightmarket.gzl.dev](https://brightmarket.gzl.dev)**.
 
-[**⬇ Download the latest APK**](https://github.com/gi-os/LightCamera/releases/latest) · free,
+[**⬇ Download the latest APK**](https://github.com/gi-os/Roll/releases/latest) · free,
 open source, no account. The app opens a network connection only when you send a bug report.
 
 <table>
@@ -87,7 +87,7 @@ file, unzip it, and run `adb` from that folder. On a Mac, run
 **3. Install the APK.**
 
 1. Download `LightCamera-v<version>.apk` from
-   [Releases](https://github.com/gi-os/LightCamera/releases/latest).
+   [Releases](https://github.com/gi-os/Roll/releases/latest).
 2. Install it:
 
 ```sh
@@ -127,7 +127,7 @@ release, which on most days means a new one.
 ### Build it yourself
 
 ```sh
-git clone https://github.com/gi-os/LightCamera.git
+git clone https://github.com/gi-os/Roll.git
 cd LightCamera
 ./gradlew :app:assembleRelease
 ```
@@ -518,7 +518,7 @@ crash log if there is one. It also carries a screenshot from the moment you shoo
 you can untick that row. Ignore the chip and it fades, and deletes nothing. This is the fastest
 way to get something fixed, because it carries details a description never does.
 
-You can also [open an issue](https://github.com/gi-os/LightCamera/issues). Settings shows the
+You can also [open an issue](https://github.com/gi-os/Roll/issues). Settings shows the
 first lines of the last crash, which is worth pasting in. A sideloaded app on the LPIII is
 otherwise a black box.
 
@@ -620,3 +620,21 @@ change.
 The icons and the design tokens come from
 [`lightphone/light-sdk`](https://github.com/lightphone/light-sdk), MIT, © The Light Phone. That
 covers the 27x31 grid, the type scale and the haptics. See `LICENSE-light-sdk`.
+
+<!-- bright-footer:begin -->
+---
+
+## Bright\*
+
+*The Light Phone III ships one camera app, no way to replace it, and an SDK that forbids camera access outright. Roll is a plain APK for exactly that reason.*
+
+26 open-source apps for the **Light Phone III** — camera, music, maps, messages,
+reading, transit, games. The phone has no app store, so they install by sideload: scan one
+code from **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)** and BrightMarket keeps them updated.
+
+**Roll** (you are here) · [BrightMusic](https://github.com/gi-os/BrightMusic) · [BrightWay](https://github.com/gi-os/BrightWay) · [BrightChat](https://github.com/gi-os/BrightChat) · [BrightControl](https://github.com/gi-os/BrightControl) · [BrightRemote](https://github.com/gi-os/BrightRemote) · [browse all 26 →](https://brightmarket.gzl.dev)
+
+The Light Phone does not sponsor or endorse any of these. Built by
+[Giovanni Lupo](https://github.com/gi-os) — if this one is useful to you, a ⭐ helps the next
+person find it.
+<!-- bright-footer:end -->
