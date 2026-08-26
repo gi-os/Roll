@@ -45,6 +45,9 @@ object ColorMode {
     private const val ENABLED = "accessibility_display_daltonizer_enabled"
     private const val MODE = "accessibility_display_daltonizer"
 
+    /** Daltonizer mode 0, simulate monochromacy — the one LightOS pins. Its "off" is -1. */
+    private const val MONOCHROMACY = 0
+
     /**
      * The daltonizer mode to put back — LightOS pins 0, simulate monochromacy. Non-null
      * exactly while we are holding the phone in colour.
@@ -86,10 +89,31 @@ object ColorMode {
         ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_SECURE_SETTINGS) ==
             PackageManager.PERMISSION_GRANTED
 
-    /** True if the phone is in colour right now, whoever put it there. */
+    /**
+     * True if the phone is in colour right now, whoever put it there.
+     *
+     * Two settings, not one. The daltonizer's own "off" is mode **-1**; mode 0 is *simulate
+     * monochromacy*, and that pair — enabled 1, mode 0 — is what LightOS pins the phone to. So
+     * a screen is in colour either because the correction is switched off, or because it is
+     * switched on and set to something that is not monochromacy. Anything else holding the
+     * phone in colour by moving the mode off 0 and leaving `enabled` at 1 does exactly the
+     * second, and reading only the enabled flag calls that a grey phone.
+     *
+     * Reading a secure setting needs no permission — only writing does — so this answers
+     * honestly whether or not the adb grant was ever given.
+     */
     fun phoneIsColour(context: Context): Boolean =
-        runCatching { Settings.Secure.getInt(context.contentResolver, ENABLED, 0) != 1 }
-            .getOrDefault(false)
+        runCatching {
+            val resolver = context.contentResolver
+            isColour(
+                enabled = Settings.Secure.getInt(resolver, ENABLED, 0),
+                mode = Settings.Secure.getInt(resolver, MODE, MONOCHROMACY),
+            )
+        }.getOrDefault(false)
+
+    /** [phoneIsColour] without a `Context`: what the two settings mean read together. */
+    internal fun isColour(enabled: Int, mode: Int): Boolean =
+        enabled != 1 || mode != MONOCHROMACY
 
     private fun lift(context: Context) {
         val resolver = context.contentResolver

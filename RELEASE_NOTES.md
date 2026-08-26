@@ -1,17 +1,25 @@
-## Roll v2.59 — multi-select can delete again
+## Roll v2.60 — the colour notice reads the whole setting
 
-**Long-press several photographs in the roll and there was no way to bin them.** The selection bar
-offered a close and a share, and nothing else. Trash lived only in the single-photo viewer, so a
-set of photographs could be sent together but had to be deleted one at a time — each one opened,
-each one binned through its own system dialog. The README already promised "send or delete several
-at once"; the delete half of that was never wired up.
+**Roll opened with "Colour needs an adb grant — see settings" on a phone that was sitting there in
+full colour.** BrightControl was holding the daltonizer off monochromacy, the viewfinder came up in
+colour exactly as it should, and Roll still announced that colour was unavailable. Settings › Look ›
+Colour printed the adb line underneath, which made the notice look like the truth rather than a bug.
 
-The selection bar now has a trash button next to share. It hands every selected photograph to the
-system's trash dialog in one request — the same `MediaStore.createTrashRequest` the viewer uses,
-just with a list of Uris instead of one. The dialog still asks, because the roll shows photographs
-this app did not create, and trashing still means trashing rather than quietly deleting: nothing
-about the safety model changed, only that the button now sits where the count of selected
-photographs is. The roll refreshes itself on the way back in, and the selection clears as the
-binned photographs leave the roll.
+The check was reading half of the setting. Android's colour correction is two secure settings, not
+one: `accessibility_display_daltonizer_enabled`, a flag, and `accessibility_display_daltonizer`, a
+mode. The daltonizer's own off is mode **-1**. Mode **0** is *simulate monochromacy* — a correction
+that is switched on and takes all the colour out — and enabled 1 with mode 0 is the pair LightOS
+pins the phone to. `ColorMode.phoneIsColour` looked only at the flag, so it answered "grey" for any
+state with the flag set, including the one where something else had left the flag alone and moved
+the mode instead. That is the ordinary way to override the daltonizer, and it is the way
+BrightControl does it.
 
-Fixes [light-reports#52] — no delete option when multiple photos were selected in the roll.
+`phoneIsColour` now reads both and means what its name says: the screen is in colour if the
+correction is off, or if it is on and set to anything that is not monochromacy. Reading a secure
+setting has never needed a permission — only writing does — so the answer is honest whether or not
+the adb grant was ever given. The same predicate now backs the Settings › Look › Colour note, which
+had been branching on the grant alone and so kept printing an adb line at somebody reading it on a
+colour screen. A unit test pins each state, the report's included. Lift and restore are untouched:
+they already stepped aside for a phone that was in colour when Roll arrived, and still do.
+
+Fixes [light-reports#54] — Roll asked for an adb grant on a phone already in colour.

@@ -148,8 +148,8 @@ You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `2.59.0`. CI adds the run number
-as the patch, so the release from the current `main` is `v2.59.x`. See
+**Current version:** `versionName` in `app/build.gradle.kts` is `2.60.0`. CI adds the run number
+as the patch, so the release from the current `main` is `v2.60.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 
 ## Controls
@@ -598,7 +598,8 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v2.59.x` | this commit | **Multi-select can delete again.** Long-press several photographs and the selection bar offered close and share but no way to bin them — trash lived only in the single-photo viewer, so a set could be sent together but only deleted one at a time. The bar now has a trash button that hands every selected photograph to the system's trash dialog in one request, the same `createTrashRequest` the viewer uses. |
+| `v2.60.x` | this commit | **The colour notice reads the whole setting.** Roll asked for an adb grant at startup on a phone BrightControl was already holding in colour. Android's colour correction is two secure settings and `phoneIsColour` read only the flag — but the daltonizer's off is mode `-1`, and LightOS pins enabled 1 with mode 0, *simulate monochromacy*, so anything that overrides it by moving the mode leaves the flag set and looked grey. It now reads both, and the Settings › Look › Colour note uses the same answer instead of the grant alone. |
+| `v2.59.x` | 5e64ec5 | **Multi-select can delete again.** Long-press several photographs and the selection bar offered close and share but no way to bin them — trash lived only in the single-photo viewer, so a set could be sent together but only deleted one at a time. The bar now has a trash button that hands every selected photograph to the system's trash dialog in one request, the same `createTrashRequest` the viewer uses. |
 | `v2.55.x` | 772bd9e | **The viewfinder readouts turn with the phone, and the zoom label stops lying.** `TORCH`, `3.5x` and `EV` sat in the corner pinned sideways with the band, which is right for controls and wrong for words you read — they were on their side every time you shot landscape. They now use `RotatedToDevice` off the accelerometer, same as the scan sheet, hysteresis and all. Separately, the zoom readout was read back out of CameraX's `zoomState`, a `LiveData` on a `CameraInfo` that survives the unbind: after a rebind it reports the old ratio while the control has already gone wide, so the corner read `3.5x` over an unzoomed picture until you touched the zoom again. Every path through that code resets the zoom anyway, so it now sets 1x on the state and the control rather than asking. |
 | `v2.54.x` | 179e9e3 | **The saving bar comes back for flash shots.** The bar was nested inside the held-frame branch, so it only ever drew when the panel froze. A flash shot deliberately does not freeze — the preview frame grabbed at the press predates the flash, so holding it would show a dark room and then save a lit one — and the bar went with the freeze. Same gap whenever `previewView.bitmap` returns null. It now reads `shooting`, latched across the capture and the save, and is suppressed during a countdown so the Purikura strip still shows only its number. |
 | `v2.53.x` | 85ee479 | **The locked-dial notice is six words.** It read "Dial locked — click the wheel, or Settings › Keys", which is a sentence to parse at the moment you are staring at a dial that just refused to move. It now says "Click wheel to unlock". Where the setting lives is something to go and find later, and it is still in Settings › Keys. |
