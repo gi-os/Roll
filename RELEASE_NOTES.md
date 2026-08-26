@@ -1,3 +1,27 @@
+## Roll v2.61 — reporting moved into light-common
+
+Nothing about the camera changed. Shake-to-report — the sensor, the corner chip, the crash-log
+offer, the screenshot, the queue and the sheet — was six files, a UI sheet of its own and a
+hundred-odd lines of `MainActivity`. It is one `ReportOverlay()` now, and it is the same code
+BrightChat, BrightTip and eleven others have been running.
+
+Roll is where `Screenshot.kt` was written, and the reason all three of the apps still carrying a
+local copy could not move: swapping without it would have quietly dropped the picture from every
+issue they file. It went into light-common 1.4.0 unchanged — `PixelCopy` off our own window, no
+permission, greyscaled down a 360/280/200px ladder into the issue body — and is now the version
+every app uses.
+
+New here as a result:
+
+- **BUG or IDEA.** A shake can file a feature request, not only a fault.
+- **An optional phone number**, remembered between reports, so an unreproducible one can be
+  answered with a question.
+- **A report says which phone filed it**, as an eight-hex install id and a `mine`/`field` label.
+
+The chip is still bottom-start, off the shutter and the album. The accelerometer still runs only
+while Roll is in front, which matters more here than anywhere: a camera is carried, pointed and
+moved for a living, so the four-second chip is what keeps a misread gesture cheap.
+
 ## Roll v2.60 — the colour notice reads the whole setting
 
 **Roll opened with "Colour needs an adb grant — see settings" on a phone that was sitting there in
