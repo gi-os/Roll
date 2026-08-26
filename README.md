@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="" width="72" align="left" />
+
 # Roll
 
 **A replacement camera and gallery for the Light Phone III.**
