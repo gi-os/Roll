@@ -457,11 +457,12 @@ fun CameraScreen(
                                 .padding(horizontal = 6.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // **In Pro the slot names the filter, not the mode.** "PRO" is a label for a
+                            // **In Pro and Selfie the slot names the filter, not the mode.** "PRO" is a label for a
                             // thing you already know — you can see the chrome — whereas which filter is on is
                             // the one piece of state you cannot read off the picture with certainty, and it is
-                            // the thing the wheel changes. Video, Selfie and Simple keep their own names,
-                            // because in those the mode *is* the news.
+                            // the thing the wheel changes. Selfie shares the same need: the wheel cycles filters
+                            // and the active one is invisible without the label. Video and Simple keep their
+                            // own names, because in those the mode *is* the news.
                             LightText(
                                 // **The filter's name, unless there isn't one to report.** Which
                                 // filter is on is the one piece of state you cannot read off the
@@ -469,7 +470,7 @@ fun CameraScreen(
                                 // slot is Preset, and "PRESET" sitting in the band says nothing —
                                 // it is the default, and whether anything is set is the Adjust
                                 // chip's job to show. So that case falls back to the mode.
-                                text = if (mode == CaptureMode.Photo && !presetOffered) {
+                                text = if ((mode == CaptureMode.Photo || mode == CaptureMode.Selfie) && !presetOffered) {
                                     filter.label.uppercase()
                                 } else {
                                     mode.bandLabel

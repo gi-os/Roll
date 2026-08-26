@@ -1,25 +1,10 @@
-## Roll v2.60 — the colour notice reads the whole setting
+## Roll v2.60 — the filter name now shows in Selfie mode
 
-**Roll opened with "Colour needs an adb grant — see settings" on a phone that was sitting there in
-full colour.** BrightControl was holding the daltonizer off monochromacy, the viewfinder came up in
-colour exactly as it should, and Roll still announced that colour was unavailable. Settings › Look ›
-Colour printed the adb line underneath, which made the notice look like the truth rather than a bug.
+**The mode-picker band showed "SELFIE" even when the wheel had landed on a named filter — the one
+piece of state you couldn't read off the picture.** Pro mode has always put the filter label in
+that slot because the wheel cycles through filters and the active one is otherwise invisible. Selfie
+has the same wheel and the same filters, but the condition that decided what to print only ever
+checked for Photo. Now both modes show the filter name there, the same way Pro always did. Video and
+Simple still keep their own labels: they have no dial.
 
-The check was reading half of the setting. Android's colour correction is two secure settings, not
-one: `accessibility_display_daltonizer_enabled`, a flag, and `accessibility_display_daltonizer`, a
-mode. The daltonizer's own off is mode **-1**. Mode **0** is *simulate monochromacy* — a correction
-that is switched on and takes all the colour out — and enabled 1 with mode 0 is the pair LightOS
-pins the phone to. `ColorMode.phoneIsColour` looked only at the flag, so it answered "grey" for any
-state with the flag set, including the one where something else had left the flag alone and moved
-the mode instead. That is the ordinary way to override the daltonizer, and it is the way
-BrightControl does it.
-
-`phoneIsColour` now reads both and means what its name says: the screen is in colour if the
-correction is off, or if it is on and set to anything that is not monochromacy. Reading a secure
-setting has never needed a permission — only writing does — so the answer is honest whether or not
-the adb grant was ever given. The same predicate now backs the Settings › Look › Colour note, which
-had been branching on the grant alone and so kept printing an adb line at somebody reading it on a
-colour screen. A unit test pins each state, the report's included. Lift and restore are untouched:
-they already stepped aside for a phone that was in colour when Roll arrived, and still do.
-
-Fixes [light-reports#54] — Roll asked for an adb grant on a phone already in colour.
+Fixes [light-reports#118] — the mode band printed "SELFIE" over a selected filter.
