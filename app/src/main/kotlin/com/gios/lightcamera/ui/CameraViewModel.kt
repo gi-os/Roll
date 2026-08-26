@@ -39,7 +39,7 @@ import com.gios.lightcamera.media.MediaStoreRepo
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.media.RollScope
 import com.gios.lightcamera.media.Thumbs
-import com.gios.lightcamera.report.Trouble
+import com.gios.light.common.report.Trouble
 import com.gios.lightcamera.roll.FilmRoll
 import com.gios.lightcamera.roll.Roll
 import com.gios.lightcamera.ui.theme.LightHaptics

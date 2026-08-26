@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.gios.lightcamera.media.Photo
-import com.gios.lightcamera.report.Trouble
+import com.gios.light.common.report.Trouble
 import com.gios.lightcamera.send.ContactsRepo
 import com.gios.lightcamera.send.Group
 import com.gios.lightcamera.send.Groups
