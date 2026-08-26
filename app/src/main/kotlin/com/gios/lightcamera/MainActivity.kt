@@ -24,7 +24,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gios.light.common.hw.LocalWheelBus
-import com.gios.light.common.report.ReportContext
 import com.gios.light.common.report.ReportOverlay
 import com.gios.light.common.hw.WheelBus
 import com.gios.lightcamera.hw.LightControls
