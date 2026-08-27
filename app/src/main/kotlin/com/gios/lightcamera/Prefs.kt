@@ -10,6 +10,7 @@ import com.gios.lightcamera.filter.Grade
 import com.gios.lightcamera.filter.FaceTune
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.camera.PuriStrip
+import com.gios.lightcamera.camera.Ring
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
@@ -639,6 +640,28 @@ class Prefs(context: Context) {
     fun setBurst(value: Boolean) = set(_burst, value) { putBoolean(BURST, value) }
 
     /**
+     * How far behind the press the shutter is allowed to reach, in milliseconds. Zero is off.
+     *
+     * **The frame you wanted is usually slightly before the one you got.** You see the expression,
+     * then decide, then your thumb moves; by then it is a third of a second later. A ring of recent
+     * frames lets the shutter reach back to where the photograph actually was.
+     *
+     * Off by default, and not because it is unfinished. It costs power continuously — the frames
+     * have to be arriving all the time for any of them to be there when you press — and it changes
+     * *which moment* you get, which is wrong for anything you are timing deliberately.
+     */
+    private val _preRollMs = MutableStateFlow(prefs.getInt(PRE_ROLL, 0))
+    val preRollMs: StateFlow<Int> = _preRollMs.asStateFlow()
+
+    fun setPreRollMs(value: Int) {
+        val safe = value.coerceIn(0, Ring.MAX_PRE_ROLL_MS.toInt())
+        set(_preRollMs, safe) { putInt(PRE_ROLL, safe) }
+    }
+
+    /** The offered settings, so the picker and the clamp cannot disagree. */
+    val preRollChoices: List<Int> = listOf(0, 80, 160, Ring.MAX_PRE_ROLL_MS.toInt())
+
+    /**
      * **Which files one press writes.**
      *
      * A set rather than a mode, because these are not alternatives: a negative and a print are
@@ -873,6 +896,7 @@ class Prefs(context: Context) {
         const val CLIPPING = "clipping"
         const val BURST = "burst"
         const val FORMATS = "captureFormats"
+        const val PRE_ROLL = "preRollMs"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

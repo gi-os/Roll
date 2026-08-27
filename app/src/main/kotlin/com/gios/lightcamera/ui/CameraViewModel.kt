@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,6 +19,7 @@ import com.gios.lightcamera.camera.FaceBox
 import com.gios.lightcamera.camera.FlashMode
 import com.gios.lightcamera.camera.FrameAspect
 import com.gios.lightcamera.camera.Frames
+import com.gios.lightcamera.camera.Ring
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
@@ -50,6 +52,8 @@ import com.gios.lightcamera.roll.Roll
 import com.gios.lightcamera.ui.theme.LightHaptics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -438,6 +442,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.photoSize.collect { engine.setPhotoSize(it, prefs.flash.value) }
         }
+        viewModelScope.launch { prefs.preRollMs.collect { updatePreRoll(it) } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
         // what the shutter does with it, so it has to be settled before the press rather than at it.
         viewModelScope.launch {
@@ -1685,6 +1690,44 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * The frames already in hand when the button is pressed.
+     *
+     * **Filled from the panel, not from a second stream off the ISP.** `CameraEngine` binds an
+     * `ImageAnalysis` only in QR mode, deliberately: a second full-rate consumer costs power on
+     * every frame whether or not anything reads it. The panel is a frame source that is already
+     * running, so the ring reads back from it and the camera pipeline is untouched.
+     *
+     * Every frame that leaves this ring without being used is recycled by the ring itself. Eight
+     * panel bitmaps is most of a hundred megabytes, and leaving that to the collector is an
+     * out-of-memory two photographs later.
+     */
+    private val preRollRing = Ring<Bitmap>(Ring.DEFAULT_CAPACITY) { frame ->
+        runCatching { frame.recycle() }
+    }
+
+    private var preRollJob: Job? = null
+
+    /**
+     * Keep the ring filling while it is wanted and the viewfinder is up.
+     *
+     * Stopped and emptied the moment it is switched off, because a ring nobody is going to read is
+     * a hundred megabytes and a readback thirty times a second for nothing.
+     */
+    private fun updatePreRoll(millis: Int) {
+        preRollJob?.cancel()
+        preRollJob = null
+        preRollRing.clear()
+        if (millis <= 0) return
+        preRollJob = viewModelScope.launch {
+            while (isActive) {
+                val frame = engine.previewFrame()
+                if (frame != null) preRollRing.add(frame, SystemClock.elapsedRealtime())
+                delay(PRE_ROLL_GAP_MS)
+            }
+        }
+    }
+
+    /**
      * The frame to make the photograph out of — the newest, or the sharpest of a short burst.
      *
      * **Why the burst happens after the press and not before it.** The textbook version keeps a ring
@@ -1700,6 +1743,24 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * quick as it ever was.
      */
     private suspend fun grabBestFrame(): Bitmap? {
+        // **The ring first, because it costs nothing at the press.** If frames have been arriving
+        // all along there is no reason to go and fetch more: reach back to the moment asked for,
+        // or take the sharpest of what is held. This is the version of "sharpest of eight" that
+        // does not spend a quarter of a second collecting the eight.
+        val preRoll = prefs.preRollMs.value
+        if (preRoll > 0 && preRollRing.size > 0) {
+            val picked = if (prefs.burst.value) {
+                preRollRing.takeBest { frame -> sharpnessOf(frame) }
+            } else {
+                preRollRing.nearest(SystemClock.elapsedRealtime(), preRoll.toLong())
+            }
+            if (picked != null) {
+                // Whatever was not taken is released, and the ring starts again from now — the
+                // frames behind this photograph belong to a moment that has been spent.
+                preRollRing.clear()
+                return picked
+            }
+        }
         if (!prefs.burst.value) return engine.previewFrame()
         var best: Bitmap? = null
         var bestScore = -1f
@@ -1708,15 +1769,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             // frame it starts from should still be the one that was on the panel at the press.
             if (index > 0) delay(BURST_GAP_MS)
             val frame = engine.previewFrame() ?: return@repeat
-            val score = withContext(Dispatchers.Default) {
-                runCatching {
-                    val small = Bitmap.createScaledBitmap(frame, SCORE_W, SCORE_H, true)
-                    val pixels = IntArray(SCORE_W * SCORE_H)
-                    small.getPixels(pixels, 0, SCORE_W, 0, 0, SCORE_W, SCORE_H)
-                    if (small != frame) small.recycle()
-                    Sharpness.of(pixels, SCORE_W, SCORE_H)
-                }.getOrDefault(-1f)
-            }
+            val score = withContext(Dispatchers.Default) { sharpnessOf(frame) }
             if (score > bestScore) {
                 // The loser is released here rather than left to the collector: these are
                 // panel-sized bitmaps and eight of them is most of a hundred megabytes.
@@ -1732,6 +1785,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // try, because a single failed readback mid-burst should not lose the photograph.
         return best ?: engine.previewFrame()
     }
+
+    /**
+     * How sharp a frame is, on the scale [Sharpness] defines.
+     *
+     * Comparable within one press and meaningless across two, which is exactly what picking the
+     * best of a ring needs. Scored small: the difference between a sharp frame and a smeared one
+     * survives a downscale, and scoring at panel size would cost more than the photograph.
+     */
+    private fun sharpnessOf(frame: Bitmap): Float = runCatching {
+        val small = Bitmap.createScaledBitmap(frame, SCORE_W, SCORE_H, true)
+        val pixels = IntArray(SCORE_W * SCORE_H)
+        small.getPixels(pixels, 0, SCORE_W, 0, 0, SCORE_W, SCORE_H)
+        if (small != frame) small.recycle()
+        Sharpness.of(pixels, SCORE_W, SCORE_H)
+    }.getOrDefault(-1f)
 
     /**
      * A failed shutter, said out loud.
@@ -2138,6 +2206,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** A little over one frame at 30fps, so each grab is a different frame rather than the same one. */
         const val BURST_GAP_MS = 34L
+
+        /**
+         * How often the ring takes a frame off the panel.
+         *
+         * The same interval as the burst, so the reach the setting offers is honest: eight frames
+         * at 34ms is about 270ms of buffer, which is why the longest pre-roll on offer is 250.
+         * Faster would fill the ring with near-duplicates and read the panel for nothing.
+         */
+        const val PRE_ROLL_GAP_MS = 34L
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96

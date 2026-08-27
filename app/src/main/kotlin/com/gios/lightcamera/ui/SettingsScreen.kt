@@ -259,7 +259,13 @@ private fun FrameTab(vm: CameraViewModel) {
 
     Section("Shutter") {
         Note(
-            "Keeping the sharpest of a short burst costs nothing at the shutter — the frames are already arriving for the viewfinder, so this picks between ones the camera had rather than asking it for more. It only applies where the photograph comes off the panel, which is Simple and every coarse filter.",
+            "Reach back keeps the last few frames as they arrive, so the shutter can take the one from " +
+                "just before you pressed — you see the expression, then decide, then your thumb moves, and " +
+                "by then it is a third of a second later. It costs power the whole time it is on, and it " +
+                "changes which moment you get, so it is wrong for anything you are timing deliberately.\n\n" +
+                "With both on, the sharpest of the frames already held is taken, which is the version of " +
+                "the burst below that costs nothing at the press.\n\n" +
+                "Keeping the sharpest of a short burst costs nothing at the shutter — the frames are already arriving for the viewfinder, so this picks between ones the camera had rather than asking it for more. It only applies where the photograph comes off the panel, which is Simple and every coarse filter.",
         )
     }
     val burst by vm.prefs.burst.collectAsState()
@@ -268,6 +274,11 @@ private fun FrameTab(vm: CameraViewModel) {
         vm.prefs.setTimer(all[(all.indexOf(timer) + 1) % all.size])
     }
     Setting("Sharpest of eight", if (burst) "On" else "Off") { vm.prefs.setBurst(!burst) }
+    val preRoll by vm.prefs.preRollMs.collectAsState()
+    Setting("Reach back", if (preRoll <= 0) "Off" else "${preRoll}ms") {
+        val all = vm.prefs.preRollChoices
+        vm.prefs.setPreRollMs(all[(all.indexOf(preRoll).coerceAtLeast(0) + 1) % all.size])
+    }
     Setting("Sounds", if (sounds) "Focus beep" else "Off") { vm.prefs.setSounds(!sounds) }
 
     Section("Exposure") {

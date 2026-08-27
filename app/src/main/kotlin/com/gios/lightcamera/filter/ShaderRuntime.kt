@@ -153,6 +153,74 @@ object ShaderRuntime {
      * rather than as a failure. A compile error also lands here as null — better an
      * unfiltered viewfinder than a black one.
      */
+    /**
+     * Focus peaking: the edges the lens is currently resolving, marked on the viewfinder.
+     *
+     * **Manual focus without peaking is guessing**, and on a 3.92" panel it is guessing badly —
+     * the difference between sharp and nearly sharp is a few pixels nobody can see at arm's
+     * length. Zone focus without this would be a control that asks you to trust a number.
+     *
+     * **Peaks are inverted rather than coloured**, which is the one decision here worth explaining.
+     * The usual answer is a bright colour, and a bright colour has no contrast against a bright
+     * subject — a white shirt peaks white on white. It also assumes colour, and this panel is grey
+     * unless Roll has lifted it. Inverting the pixel guarantees contrast against whatever it lands
+     * on, in colour and in grey, with no threshold on brightness to tune.
+     *
+     * The gradient is a two-tap difference rather than a full Sobel: this runs on every preview
+     * frame, three taps of `src.eval` is a third of the cost of nine, and the extra accuracy would
+     * be invisible at this size.
+     */
+    /**
+     * How much local contrast counts as an edge.
+     *
+     * Low enough to catch a face in soft light, high enough that sensor noise in a dark room does
+     * not light the whole frame up — which is the failure mode that makes people turn peaking off
+     * and never turn it back on.
+     */
+    private const val PEAKING_THRESHOLD = 0.06f
+
+    private const val PEAKING_AGSL = """
+        uniform shader src;
+        uniform float2 size;
+        uniform float threshold;
+
+        half4 main(float2 p) {
+            half4 c = src.eval(p);
+            half3 w = half3(0.299, 0.587, 0.114);
+            half l = dot(c.rgb, w);
+            half lx = dot(src.eval(p + float2(1.0, 0.0)).rgb, w);
+            half ly = dot(src.eval(p + float2(0.0, 1.0)).rgb, w);
+            half g = abs(l - lx) + abs(l - ly);
+            if (g > half(threshold)) {
+                return half4(half3(1.0) - c.rgb, c.a);
+            }
+            return c;
+        }
+    """
+
+    private val peakingShader: RuntimeShader? by lazy {
+        runCatching { RuntimeShader(PEAKING_AGSL) }
+            .onFailure { Log.e(TAG, "peaking shader would not compile", it) }
+            .getOrNull()
+    }
+
+    /**
+     * The peaking pass, or null when it cannot run.
+     *
+     * Null is not an error to the caller: it reads as "no peaking", and a viewfinder with no
+     * peaking is still a viewfinder. Losing the picture over an overlay would not be.
+     */
+    fun peakingEffect(width: Int, height: Int, threshold: Float = PEAKING_THRESHOLD): RenderEffect? {
+        if (width <= 0 || height <= 0) return null
+        return runCatching {
+            val shader = peakingShader ?: return@runCatching null
+            shader.setFloatUniform("size", width.toFloat(), height.toFloat())
+            shader.setFloatUniform("threshold", threshold)
+            RenderEffect.createRuntimeShaderEffect(shader, "src")
+        }.onFailure { Log.e(TAG, "peaking effect failed", it) }.getOrNull()
+    }
+
+
     fun effectFor(
         filter: Filters.Filter,
         width: Int,

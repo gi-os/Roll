@@ -74,6 +74,7 @@ import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Zooms
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
+import android.graphics.RenderEffect
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.Channel
@@ -292,6 +293,9 @@ fun CameraScreen(
     val puriSeed by vm.puriSeed.collectAsState()
     // Which way up the photograph will be, from the same number the shutter uses.
     val turn by vm.engine.previewRotation.collectAsState()
+    // Peaking rides with zone focus rather than having a switch of its own: it exists to answer
+    // "is this in focus", and with autofocus running the camera has already answered.
+    val peaking by vm.engine.zoneFocus.collectAsState()
     LaunchedEffect(
         liveFilter,
         seed,
@@ -304,23 +308,39 @@ fun CameraScreen(
         puriChin,
         puriSlim,
         turn,
+        peaking,
     ) {
+        val look = ShaderRuntime.effectFor(
+            filter = liveFilter,
+            width = frameWidth,
+            height = frameHeight,
+            seed = seed,
+            faces = faceQuads,
+            // The preview image is still in the panel's frame, so the shader needs to know how the
+            // face is lying in it. The captured photograph is turned upright before the shader sees
+            // it, which is why the shutter passes no turn at all.
+            tune = vm.prefs.puriTune(turns = turn / 90),
+            // And the same number again for the frame itself. Mirror, Kaleido and Datamosh
+            // have a left and a right, and the panel image does not have the one the
+            // photograph will — see Filters.TURN.
+            turn = turn / 90,
+        )
+        // **Peaking goes on last, over the filter rather than under it.** It marks what the *lens*
+        // is resolving, so in principle it belongs on the unfiltered frame — but a chain is one
+        // effect and the edges survive every filter here, while running it first would mean the
+        // filter then smearing the marks. It is also only ever on in zone focus: peaking with
+        // autofocus running is a viewfinder full of marks telling you what the camera already did.
+        val peak = if (peaking) {
+            ShaderRuntime.peakingEffect(frameWidth, frameHeight)
+        } else {
+            null
+        }
         previewView.setRenderEffect(
-            ShaderRuntime.effectFor(
-                filter = liveFilter,
-                width = frameWidth,
-                height = frameHeight,
-                seed = seed,
-                faces = faceQuads,
-                // The preview image is still in the panel's frame, so the shader needs to know how the
-                // face is lying in it. The captured photograph is turned upright before the shader sees
-                // it, which is why the shutter passes no turn at all.
-                tune = vm.prefs.puriTune(turns = turn / 90),
-                // And the same number again for the frame itself. Mirror, Kaleido and Datamosh
-                // have a left and a right, and the panel image does not have the one the
-                // photograph will — see Filters.TURN.
-                turn = turn / 90,
-            ),
+            when {
+                peak != null && look != null -> RenderEffect.createChainEffect(peak, look)
+                peak != null -> peak
+                else -> look
+            },
         )
     }
     DisposableEffect(Unit) { onDispose { previewView.setRenderEffect(null) } }

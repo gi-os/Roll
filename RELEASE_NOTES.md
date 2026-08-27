@@ -1,3 +1,29 @@
+## Roll v2.64 — focus peaking, and a shutter that reaches backwards
+
+**Focus peaking.** Zone focus without it asks you to trust a number; with it the edges the lens is
+actually resolving are marked on the viewfinder. It comes on with zone focus rather than having a
+switch of its own — peaking while autofocus is running is a screen full of marks telling you what
+the camera already did.
+
+Peaks are **inverted rather than coloured**, which is the one decision here worth explaining. The
+usual answer is a bright colour, and a bright colour has no contrast against a bright subject: a
+white shirt peaks white on white. It also assumes colour, and this panel is grey unless Roll has
+lifted it. Inverting the pixel guarantees contrast against whatever it lands on.
+
+**Reach back.** Settings -> FRAME -> Shutter. The last few frames are kept as they arrive, so the
+shutter can take the one from just before you pressed. You see the expression, then decide, then
+your thumb moves, and by then it is a third of a second later and gone.
+
+Off by default and it says why: it costs power the whole time it is on, and it changes *which*
+moment you get, which is wrong for anything you are timing deliberately. The frames come off the
+panel rather than a second stream off the camera — a second full-rate consumer of the ISP costs
+power on every frame whether anything reads it or not, which is why QR mode is the only thing here
+that binds one.
+
+**With Reach back and Sharpest of eight both on**, the sharpest of the frames already held is taken.
+That is the version of the burst that costs nothing at the press: no quarter of a second spent
+collecting eight frames, because they were already there.
+
 ## Roll v2.63 — the wheel becomes a real dial
 
 **Manual exposure, and the two modes between manual and automatic.** Auto, Shutter priority, ISO
