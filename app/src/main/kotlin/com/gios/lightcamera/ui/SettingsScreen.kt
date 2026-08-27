@@ -47,6 +47,7 @@ import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
 import com.gios.lightcamera.media.CaptureFormat
+import com.gios.lightcamera.camera.ExposureMode
 
 /**
  * Which page of settings is showing.
@@ -268,6 +269,42 @@ private fun FrameTab(vm: CameraViewModel) {
     }
     Setting("Sharpest of eight", if (burst) "On" else "Off") { vm.prefs.setBurst(!burst) }
     Setting("Sounds", if (sounds) "Focus beep" else "Off") { vm.prefs.setSounds(!sounds) }
+
+    Section("Exposure") {
+        Note(
+            "Auto is the camera deciding both halves. The two priority modes hand you one of them " +
+                "and leave the other to the meter — hold the shutter open and the sensitivity " +
+                "follows, or pin the sensitivity and the shutter follows. Camera2 has no " +
+                "half-manual exposure, so this is built from the metered pair rather than asked " +
+                "for, which is why it needs a moment of Auto first to have something to hold.\n\n" +
+                "Flat turns off noise reduction, edge enhancement and the tone curve. What comes " +
+                "back is demosaiced and white-balanced and nothing else: low contrast, and far " +
+                "better to grade than something already contrast-stretched. It also makes the " +
+                "filters better, because a shader is otherwise grading a grade.\n\n" +
+                "Zone focus sets the lens by distance instead of pointing it at something. The " +
+                "distances are worked out from this lens rather than copied — hyperfocal falls " +
+                "out of focal length, aperture and sensor size, and is a different number on the " +
+                "selfie camera.",
+        )
+    }
+    val exposureMode by vm.engine.exposureMode.collectAsState()
+    val flat by vm.engine.flat.collectAsState()
+    val lensCorrection by vm.engine.lensCorrection.collectAsState()
+    val zone by vm.engine.zoneFocus.collectAsState()
+    Setting("Exposure", exposureMode.label) {
+        val all = ExposureMode.entries
+        vm.engine.setExposureMode(all[(all.indexOf(exposureMode) + 1) % all.size])
+        // The wheel must not be left holding a half the new mode does not hold.
+        vm.settleChannel()
+    }
+    Setting("Flat profile", if (flat) "On" else "Off") { vm.engine.setFlat(!flat) }
+    Setting("Lens correction", if (lensCorrection) "On" else "Off") {
+        vm.engine.setLensCorrection(!lensCorrection)
+    }
+    Setting("Zone focus", if (zone) "On" else "Off") {
+        vm.engine.setZoneFocus(!zone)
+        vm.settleChannel()
+    }
 
     Section("Files") {
         Note(

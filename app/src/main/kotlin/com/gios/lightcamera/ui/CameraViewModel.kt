@@ -26,6 +26,7 @@ import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Beeps
 import com.gios.lightcamera.hw.Binding
+import com.gios.lightcamera.hw.Channel
 import com.gios.lightcamera.hw.Controls
 import com.gios.lightcamera.hw.PressAction
 import com.gios.lightcamera.ocr.Found
@@ -141,6 +142,44 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         Captures.of(scoped)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * What the wheel is holding.
+     *
+     * Kept here rather than in `Prefs` on purpose: this is where you *are*, not what you have
+     * chosen. Coming back to the camera with the wheel still on Shutter from yesterday — in a mode
+     * that no longer holds the shutter — is a control pointing at nothing.
+     */
+    private val _channel = MutableStateFlow(Channel.Filter)
+    val channel: StateFlow<Channel> = _channel.asStateFlow()
+
+    /** The channels that mean something right now. See [Channel.available]. */
+    fun channelsAvailable(): List<Channel> = Channel.available(
+        exposure = engine.exposureMode.value,
+        zoneFocus = engine.zoneFocus.value,
+        filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
+    )
+
+    /** One click of the wheel: step to the next thing it could be holding, and say so. */
+    fun cycleChannel() {
+        val available = channelsAvailable()
+        val next = Channel.next(_channel.value, available)
+        _channel.value = next
+        showNotice(next.label)
+    }
+
+    /**
+     * Keep the wheel pointing at something real.
+     *
+     * Leaving a priority mode takes its half of the exposure off the dial, and the wheel must not
+     * be left holding it — turning a dead channel is how a physical control loses trust.
+     */
+    fun settleChannel() {
+        val available = channelsAvailable()
+        if (_channel.value !in available) {
+            _channel.value = available.firstOrNull() ?: Channel.Zoom
+        }
+    }
 
     /** The other formats of the photograph on screen, or null when there is only the one file. */
     fun groupOf(photo: Photo): CaptureGroup? =
@@ -667,6 +706,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             PressAction.Exposure -> openStripOrSayWhyNot(Strip.Exposure)
             PressAction.Zoom -> openStripOrSayWhyNot(Strip.Zoom)
             PressAction.DialLock -> toggleDialLock()
+            PressAction.Channel -> cycleChannel()
             PressAction.Nothing -> Unit
         }
     }

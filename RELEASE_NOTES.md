@@ -1,3 +1,38 @@
+## Roll v2.63 — the wheel becomes a real dial
+
+**Manual exposure, and the two modes between manual and automatic.** Auto, Shutter priority, ISO
+priority, Manual. Camera2 has no half-manual auto-exposure -- `CONTROL_AE_MODE` is on or off -- so
+the priority modes are built rather than requested: the metered pair is read back out of every
+capture result, and the free half is re-derived against it each time the held half moves. Hold the
+shutter open and the sensitivity follows it down.
+
+ISO past the sensor's ceiling is applied as gain after the raw readout rather than asked for as a
+sensitivity the hardware does not have, which is refused outright and reads on the phone as a
+shutter that did nothing.
+
+**The flat profile.** Noise reduction, edge enhancement and the tone curve, off. What comes back is
+demosaiced and white-balanced and nothing else. White balance is deliberately left alone: a frame
+with none is not flat, it is green. It also makes the eighteen filters better, because a shader was
+otherwise grading a grade.
+
+Lens correction is now its own switch, defaulted on, rather than something the flat profile turns
+off behind your back -- on a wide phone lens that is a bowed horizon in every frame.
+
+**Zone focus, with the distances worked out from this lens.** Hyperfocal falls out of focal length,
+aperture and sensor size, all of which the camera will tell you; a constant is right for one phone
+and an assertion everywhere else, and plainly wrong on the selfie camera. The readout says what is
+sharp -- `3.4 m · sharp 1.7 m–∞` -- because zone focusing without that is guessing. The dial rests
+at 0.3, 0.5, 1, 2, 5 metres, hyperfocal and infinity, and never offers a stop closer than the lens
+can actually focus.
+
+**The wheel holds one channel at a time.** Filter, EV, shutter, ISO, focus, zoom -- named on the
+band, stepped by a click. Bind it in Settings -> KEYS; the torch keeps the click by default, because
+a camera whose light you cannot reach is a worse camera. Channels appear only when they mean
+something: there is no shutter dial in Auto, because the camera owns the shutter there.
+
+**Nothing changed live rebinds the camera.** All of this goes through the running capture session,
+not the use case, so a dial is a dial rather than a black viewfinder several times a second.
+
 ## Roll v2.62 — RAW
 
 **The negative, from the same exposure as the print.** Turn on RAW in Settings -> FRAME -> Files

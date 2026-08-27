@@ -76,6 +76,7 @@ import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Binding
+import com.gios.lightcamera.hw.Channel
 import com.gios.lightcamera.hw.CameraKeyAdvice
 import com.gios.lightcamera.hw.Controls
 import com.gios.lightcamera.hw.DialAction
@@ -1586,6 +1587,32 @@ private fun turnDial(
         DialAction.Zoom -> {
             engine.stepZoom(notches)
             vm.showNotice(engine.zoomLabel())
+        }
+        // **One binding, whatever the wheel is currently holding.** The channel is named on the
+        // band, so this is never a guess about what a turn will do — and every branch reports what
+        // it changed, because a dial you cannot see needs to say so.
+        DialAction.Channel -> when (vm.channel.value) {
+            Channel.Filter -> vm.stepFilter(if (notches > 0) 1 else -1)
+            Channel.Exposure -> {
+                engine.stepEv(notches)
+                vm.showNotice("EV ${engine.evLabel()}")
+            }
+            Channel.Shutter -> {
+                engine.stepShutter(notches)
+                vm.showNotice(engine.exposureLabel.value)
+            }
+            Channel.Iso -> {
+                engine.stepIso(notches)
+                vm.showNotice(engine.exposureLabel.value)
+            }
+            Channel.Focus -> {
+                engine.stepFocus(notches)
+                vm.showNotice(engine.focusLabel.value)
+            }
+            Channel.Zoom -> {
+                engine.stepZoom(notches)
+                vm.showNotice(engine.zoomLabel())
+            }
         }
         DialAction.Nothing -> Unit
     }

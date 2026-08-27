@@ -15,14 +15,17 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.Face
+import android.hardware.camera2.params.TonemapCurve
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.OrientationEventListener
 import android.view.Surface
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -736,6 +739,10 @@ class CameraEngine(private val context: Context) {
             val bound = provider.bindToLifecycle(owner, cameraSelector, preview, second)
             camera = bound
             readCameraLimits(bound)
+            // A rebind builds a new session, and session capture options do not survive one. Any
+            // manual exposure or flat profile in force has to be put back or it silently reverts
+            // to auto with the readout still claiming otherwise.
+            applyCaptureOptions()
             _ready.value = true
         }.onFailure {
             Log.e(TAG, "bind failed", it)
@@ -773,6 +780,50 @@ class CameraEngine(private val context: Context) {
                 modes.contains(CameraMetadata.STATISTICS_FACE_DETECT_MODE_FULL) ->
                     CameraMetadata.STATISTICS_FACE_DETECT_MODE_FULL
                 else -> CameraMetadata.STATISTICS_FACE_DETECT_MODE_OFF
+            }
+            // **The lens, so the focus distances are this camera's rather than another phone's.**
+            // Hyperfocal falls out of focal length, aperture and sensor size; hard-coding it is
+            // right for one device and an assertion everywhere else, and plainly wrong on the
+            // selfie camera, which is a different lens.
+            focalLengthMm =
+                ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+            aperture =
+                ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull() ?: 0f
+            ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.let {
+                sensorWidthMm = it.width
+                sensorHeightMm = it.height
+            }
+            // Minimum focus distance is reported in diopters, so the largest value is the closest
+            // the lens will go. Zero means a fixed-focus lens, where there is nothing to set.
+            closestFocusM = ch.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+                ?.takeIf { it > 0f }
+                ?.let { 1f / it }
+                ?: 0.1f
+            hyperfocalM = ZoneFocus.hyperfocalMetres(
+                focalLengthMm,
+                aperture,
+                sensorWidthMm,
+                sensorHeightMm,
+            )
+            focusStops = ZoneFocus.stops(hyperfocalM, closestFocusM)
+            focusIndex = focusIndex.coerceIn(0, focusStops.lastIndex)
+
+            // The manual ranges, read once per bind. Asked of the camera rather than assumed:
+            // a request outside them is refused outright, which on the phone reads as a shutter
+            // that did nothing rather than as an exposure that was out of reach.
+            ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let {
+                shutterRange = it.lower..it.upper
+            }
+            ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let {
+                isoRange = it.lower..it.upper
+                sensorMaxIso = it.upper
+            }
+            // The boosted ceiling, where the hardware offers one: past the sensor's own maximum,
+            // sensitivity is gain applied after the raw readout rather than at it.
+            ch.get(CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE)?.let { boost ->
+                isoRange = isoRange.first..(sensorMaxIso.toLong() * boost.upper / 100)
+                    .toInt()
+                    .coerceAtLeast(sensorMaxIso)
             }
             Hardware(
                 sensorOrientation = ch.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90,
@@ -827,7 +878,23 @@ class CameraEngine(private val context: Context) {
         ) {
             readAf(result)
             readFaces(result)
+            readMeter(result)
         }
+    }
+
+    /**
+     * What the meter settled on, kept for the moment somebody takes hold of the exposure.
+     *
+     * **This is how a priority mode exists at all.** Camera2 has no half-manual auto-exposure, so
+     * holding the shutter while the camera picks the sensitivity means knowing what the camera
+     * *would* have picked — and the only place that number exists is the capture result. Read
+     * continuously while the meter is in charge and frozen the moment it is not, so the pair being
+     * balanced against is the last one the scene actually produced.
+     */
+    private fun readMeter(result: TotalCaptureResult) {
+        if (_exposureMode.value.manualAe) return
+        result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { meteredShutterNanos = it }
+        result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { meteredIso = it }
     }
 
     private fun readAf(result: TotalCaptureResult) {
@@ -963,6 +1030,250 @@ class CameraEngine(private val context: Context) {
         if (!FaceMapper.movedEnoughToRefocus(previous, current, viewWidth, viewHeight)) return
         val target = current ?: return
         focusAt(target.centreX, target.centreY, lock = false)
+    }
+
+    /* ---------------- manual exposure and the flat profile ---------------- */
+
+    /**
+     * What the photographer is holding, and the two halves they are holding it at.
+     *
+     * Stored as indices into [Exposure.SHUTTER_STOPS] and [Exposure.ISO_STOPS] rather than as
+     * values, so a dial cannot land between stops and so a stale index from an older build clamps
+     * instead of throwing.
+     */
+    private val _exposureMode = MutableStateFlow(ExposureMode.Auto)
+    val exposureMode: StateFlow<ExposureMode> = _exposureMode.asStateFlow()
+
+    private var shutterIndex = Exposure.SHUTTER_STOPS.indexOf(60L).coerceAtLeast(0)
+    private var isoIndex = Exposure.ISO_STOPS.indexOf(400).coerceAtLeast(0)
+
+    /** What the camera is actually exposing at, for the readout. Empty until a frame arrives. */
+    private val _exposureLabel = MutableStateFlow("")
+    val exposureLabel: StateFlow<String> = _exposureLabel.asStateFlow()
+
+    /** False when the pair asked for cannot be delivered — said out loud rather than taken. */
+    private val _exposureReachable = MutableStateFlow(true)
+    val exposureReachable: StateFlow<Boolean> = _exposureReachable.asStateFlow()
+
+    /** The last pair the meter settled on, so leaving Auto starts where the meter was. */
+    @Volatile private var meteredShutterNanos: Long = Exposure.stopToNanos(60)
+
+    @Volatile private var meteredIso: Int = 400
+
+    private var shutterRange: LongRange = 1_000L..100_000_000L
+    private var isoRange: IntRange = 50..3200
+    private var sensorMaxIso: Int = 3200
+
+    /**
+     * The flat capture profile.
+     *
+     * **What Zero does to every photograph, offered as a choice and pointed at the file rather
+     * than the viewfinder.** Noise reduction, edge enhancement and the tone curve are the ISP
+     * deciding what a photograph should look like; turning them off gives back a frame that has
+     * been demosaiced and white-balanced and nothing else — flat, low contrast, and far better to
+     * grade than something already contrast-stretched.
+     *
+     * It also makes the eighteen filters better, which is the part no camera without them can
+     * have: a shader currently works on an image the ISP has already S-curved, so Film and Dither
+     * are grading a grade. Feeding them a linear frame is the difference.
+     */
+    private val _flat = MutableStateFlow(false)
+    val flat: StateFlow<Boolean> = _flat.asStateFlow()
+
+    /**
+     * Zone focus: the lens set by distance rather than by pointing it at something.
+     *
+     * Off by default. Autofocus is right for almost every photograph anyone takes on a phone; this
+     * is for the one case it is wrong for, which is a street where the subject arrives after the
+     * moment you would have had to focus.
+     */
+    private val _zoneFocus = MutableStateFlow(false)
+    val zoneFocus: StateFlow<Boolean> = _zoneFocus.asStateFlow()
+
+    private val _focusLabel = MutableStateFlow("")
+    val focusLabel: StateFlow<String> = _focusLabel.asStateFlow()
+
+    private var focusStops: List<Float> = listOf(ZoneFocus.DEFAULT_HYPERFOCAL_M)
+    private var focusIndex = 0
+
+    /** Read off the lens at each bind, and the reason the distances are not a constant. */
+    private var focalLengthMm = 0f
+    private var aperture = 0f
+    private var sensorWidthMm = 0f
+    private var sensorHeightMm = 0f
+    private var closestFocusM = 0.1f
+    private var hyperfocalM = ZoneFocus.DEFAULT_HYPERFOCAL_M
+
+    /** Lens distortion correction, split out of the flat profile and on by default. */
+    private val _lensCorrection = MutableStateFlow(true)
+    val lensCorrection: StateFlow<Boolean> = _lensCorrection.asStateFlow()
+
+    fun setExposureMode(mode: ExposureMode) {
+        if (mode == _exposureMode.value) return
+        // Leaving Auto starts at the stop nearest whatever the meter had settled on, so the
+        // viewfinder does not jump three stops the moment you take hold of it.
+        if (_exposureMode.value == ExposureMode.Auto) {
+            shutterIndex = Exposure.nearestShutterIndex(meteredShutterNanos)
+            isoIndex = Exposure.nearestIsoIndex(meteredIso)
+        }
+        _exposureMode.value = mode
+        applyCaptureOptions()
+    }
+
+    fun stepShutter(notches: Int) {
+        shutterIndex = Exposure.stepIndex(Exposure.SHUTTER_STOPS.size, shutterIndex, notches)
+        applyCaptureOptions()
+    }
+
+    fun stepIso(notches: Int) {
+        isoIndex = Exposure.stepIndex(Exposure.ISO_STOPS.size, isoIndex, notches)
+        applyCaptureOptions()
+    }
+
+    fun setFlat(on: Boolean) {
+        if (on == _flat.value) return
+        _flat.value = on
+        applyCaptureOptions()
+    }
+
+    fun setZoneFocus(on: Boolean) {
+        if (on == _zoneFocus.value) return
+        _zoneFocus.value = on
+        if (on) {
+            // Start where the lens already was, so switching in does not rack focus across the
+            // room before you have touched anything.
+            focusIndex = ZoneFocus.nearestStop(focusStops, hyperfocalM)
+        }
+        applyCaptureOptions()
+        updateFocusLabel()
+    }
+
+    fun stepFocus(notches: Int) {
+        if (!_zoneFocus.value) return
+        focusIndex = Exposure.stepIndex(focusStops.size, focusIndex, notches)
+        applyCaptureOptions()
+        updateFocusLabel()
+    }
+
+    private fun updateFocusLabel() {
+        if (!_zoneFocus.value) {
+            _focusLabel.value = ""
+            return
+        }
+        val metres = focusStops.getOrElse(focusIndex) { hyperfocalM }
+        _focusLabel.value = ZoneFocus.label(
+            metres,
+            ZoneFocus.depthOfField(metres, hyperfocalM, focalLengthMm),
+        )
+    }
+
+    fun setLensCorrection(on: Boolean) {
+        if (on == _lensCorrection.value) return
+        _lensCorrection.value = on
+        applyCaptureOptions()
+    }
+
+    /**
+     * Push the manual settings at the running camera.
+     *
+     * **Through `Camera2CameraControl`, not through the builder, and that is the whole reason this
+     * is usable.** Capture request options set on an `ImageCapture.Builder` are fixed at bind
+     * time, so a dial that changed them would rebind the camera on every notch — a black
+     * viewfinder for a moment, several times a second. `Camera2CameraControl` sets them on the
+     * session that is already running, which is what makes the wheel a dial rather than a menu.
+     *
+     * Everything is set together on every change, because these options *replace* the set rather
+     * than merging into it: applying the shutter alone would silently drop the flat profile.
+     */
+    private fun applyCaptureOptions() {
+        val control = camera?.cameraControl ?: return
+        val mode = _exposureMode.value
+        val builder = CaptureRequestOptions.Builder()
+
+        if (mode.manualAe) {
+            val (shutter, iso) = Exposure.rebalance(
+                meteredShutterNanos = meteredShutterNanos,
+                meteredIso = meteredIso,
+                heldShutterNanos = if (mode.holdsShutter) Exposure.shutterAt(shutterIndex) else null,
+                heldIso = if (mode.holdsIso) Exposure.isoAt(isoIndex) else null,
+                shutterRange = shutterRange,
+                isoRange = isoRange,
+            )
+            val (sensorIso, boost) = Exposure.splitIso(iso, sensorMaxIso)
+            builder
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CameraMetadata.CONTROL_AE_MODE_OFF,
+                )
+                .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, shutter)
+                .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, sensorIso)
+            if (boost > 100) {
+                builder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST,
+                    boost,
+                )
+            }
+            _exposureReachable.value = Exposure.withinRange(shutter, iso, shutterRange, isoRange)
+            _exposureLabel.value = "${Exposure.shutterLabel(shutter)} · ${Exposure.isoLabel(iso)}"
+        } else {
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_MODE,
+                CameraMetadata.CONTROL_AE_MODE_ON,
+            )
+            _exposureReachable.value = true
+            _exposureLabel.value = ""
+        }
+
+        if (_flat.value) {
+            builder
+                .setCaptureRequestOption(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    CameraMetadata.NOISE_REDUCTION_MODE_OFF,
+                )
+                .setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
+                .setCaptureRequestOption(
+                    CaptureRequest.HOT_PIXEL_MODE,
+                    CameraMetadata.HOT_PIXEL_MODE_OFF,
+                )
+                // A straight line from black to white: the tone curve, declined. White balance is
+                // deliberately left alone — a frame with no white balance is not flat, it is green.
+                .setCaptureRequestOption(
+                    CaptureRequest.TONEMAP_MODE,
+                    CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE,
+                )
+                .setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, LINEAR_TONEMAP)
+        }
+
+        // **Focus off the meter entirely, at a distance.** `CONTROL_AF_MODE_OFF` is what makes
+        // `LENS_FOCUS_DISTANCE` mean anything — with autofocus running the lens simply moves back.
+        // Infinity is zero diopters, which is why the conversion is its own function rather than a
+        // division sitting here waiting to divide by zero.
+        if (_zoneFocus.value) {
+            val metres = focusStops.getOrElse(focusIndex) { hyperfocalM }
+            builder
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    ZoneFocus.metresToDiopters(metres),
+                )
+        }
+
+        // Split out of the flat profile and defaulted on. Turning distortion correction off is a
+        // choice about the lens, not about the tone curve, and on a wide phone lens leaving it off
+        // is a bowed horizon in every frame.
+        if (!_lensCorrection.value) {
+            builder.setCaptureRequestOption(
+                CaptureRequest.DISTORTION_CORRECTION_MODE,
+                CameraMetadata.DISTORTION_CORRECTION_MODE_OFF,
+            )
+        }
+
+        runCatching {
+            Camera2CameraControl.from(control).setCaptureRequestOptions(builder.build())
+        }.onFailure { Log.e(TAG, "could not apply capture options", it) }
     }
 
     /* ---------------- zoom, exposure, torch ---------------- */
@@ -1310,6 +1621,19 @@ class CameraEngine(private val context: Context) {
 
         /** ~11% per notch: nine notches to double, so a full 8x rack is a deliberate spin. */
         const val ZOOM_PER_NOTCH = 1.08f
+
+        /**
+         * A straight line from black to white, per channel.
+         *
+         * Two points is a whole curve: `TonemapCurve` interpolates between them, so (0,0) to (1,1)
+         * is the identity — the tone mapping stage present and declining to do anything, which is
+         * the only way to switch it off. `TONEMAP_MODE_OFF` does not exist.
+         */
+        val LINEAR_TONEMAP = TonemapCurve(
+            floatArrayOf(0f, 0f, 1f, 1f),
+            floatArrayOf(0f, 0f, 1f, 1f),
+            floatArrayOf(0f, 0f, 1f, 1f),
+        )
 
         const val FACE_PUBLISH_MS = 66L
 

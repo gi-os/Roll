@@ -51,6 +51,16 @@ enum class PressAction(val label: String) {
     Timer("Self timer"),
     Exposure("Exposure strip"),
     Zoom("Zoom strip"),
+
+    /**
+     * Step what the wheel is holding: filter, then exposure, then focus, then zoom.
+     *
+     * **The torch keeps the click by default and this does not take it.** A camera whose light you
+     * can no longer reach is a worse camera, and the wheel already has two gestures. This is here
+     * to be *chosen* — put it on the click and the torch moves to a volume key, which is a trade
+     * the person making it can see. See [com.gios.lightcamera.hw.Channel].
+     */
+    Channel("Wheel channel"),
     /**
      * Lock the dial, or unlock it. See [Controls.dialLive].
      *
@@ -80,6 +90,16 @@ enum class DialAction(val label: String) {
     Filter("Filter"),
     Exposure("Exposure"),
     Zoom("Zoom"),
+
+    /**
+     * **One binding that cycles what the wheel is holding, rather than four bindings.**
+     *
+     * There is one wheel and more than one thing worth putting on it — filters, exposure
+     * compensation, shutter, sensitivity, focus distance. Binding each to its own gesture runs out
+     * of gestures immediately; this makes the wheel a dial with a *selected* channel, named on the
+     * band so it is never a guess, and a click steps the channel.
+     */
+    Channel("Channel"),
     Nothing("Nothing"),
     ;
 
