@@ -54,6 +54,7 @@ import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
 import com.gios.lightcamera.ui.theme.lightCombinedClickable
 import kotlinx.coroutines.launch
+import com.gios.lightcamera.map.Locations
 
 /** One row of the flattened roll: either a photo or the day it was taken. */
 private sealed interface RollEntry {
@@ -97,7 +98,19 @@ fun RollScreen(
     val colour by vm.prefs.colour.collectAsState()
     // Read only where it is used. The map is the one scope that needs coordinates, and reading
     // them is a file opened and an EXIF header parsed per photograph.
+    val context = androidx.compose.ui.platform.LocalContext.current
     val located by vm.located.collectAsState()
+    var locationGranted by remember {
+        mutableStateOf(Locations.canReadLocations(context) && Locations.canTag(context))
+    }
+    val askLocation = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ ->
+        // Re-queried rather than read out of the result map, for the reason documented on the
+        // media launcher in Shell: the map omits what was already granted.
+        locationGranted = Locations.canReadLocations(context) && Locations.canTag(context)
+        if (locationGranted) vm.relocateRoll()
+    }
 
     // **The roll is photographs too.** It used to be the one picture surface in the app that
     // stayed grey: the viewfinder and the viewer both held colour, and swiping up to the grid
@@ -191,6 +204,35 @@ fun RollScreen(
             // **The map takes the whole pane in place of the grid.** It is a scope, not a
             // destination: the same photographs are underneath and a tap opens the same viewer, so
             // it belongs here rather than behind a mode of its own.
+            //
+            // The permission gate is here and not buried in the reads, because the reads fail
+            // *silently* — reading a coordinate without ACCESS_MEDIA_LOCATION returns null for
+            // every photograph on the phone, which looks exactly like a roll with no locations.
+            // The one screen that needs the grant is the one that asks for it, the same shape as
+            // the media gate above.
+            scope == RollScope.Map && !locationGranted -> Column(
+                modifier = Modifier.fillMaxSize().padding(28.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                LightText("The map needs two permissions.", LightTextVariant.Subheading)
+                LightText(
+                    "Location, to write where a photograph was taken. And photo location " +
+                        "access, because Android strips coordinates out of anything it hands " +
+                        "an app — without it every photograph reads as unlocated, including " +
+                        "ones this app tagged itself.",
+                    LightTextVariant.Paragraph,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                LightText(
+                    "ALLOW",
+                    LightTextVariant.Button,
+                    modifier = Modifier.padding(top = 24.dp)
+                        .lightClickable { askLocation.launch(Locations.wanted()) },
+                )
+            }
+
             scope == RollScope.Map -> MapScreen(
                 located = located,
                 tiles = vm.tiles,

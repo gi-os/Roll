@@ -48,6 +48,9 @@ import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
 import com.gios.lightcamera.media.CaptureFormat
 import com.gios.lightcamera.camera.ExposureMode
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import com.gios.lightcamera.map.Locations
 
 /**
  * Which page of settings is showing.
@@ -174,6 +177,7 @@ private fun TabRow(current: SettingsTab, onPick: (SettingsTab) -> Unit) {
 
 @Composable
 private fun FrameTab(vm: CameraViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val aspect by vm.prefs.aspect.collectAsState()
     val photoSize by vm.prefs.photoSize.collectAsState()
     val chrome by vm.prefs.chrome.collectAsState()
@@ -302,20 +306,18 @@ private fun FrameTab(vm: CameraViewModel) {
     val flat by vm.engine.flat.collectAsState()
     val lensCorrection by vm.engine.lensCorrection.collectAsState()
     val zone by vm.engine.zoneFocus.collectAsState()
+    // Written to prefs, not to the engine: the collector in the view model carries them over, and
+    // prefs is what survives a relaunch. The engine flows below are still what is *read*, so the
+    // labels report the camera rather than the wish.
     Setting("Exposure", exposureMode.label) {
         val all = ExposureMode.entries
-        vm.engine.setExposureMode(all[(all.indexOf(exposureMode) + 1) % all.size])
-        // The wheel must not be left holding a half the new mode does not hold.
-        vm.settleChannel()
+        vm.prefs.setExposureMode(all[(all.indexOf(exposureMode) + 1) % all.size])
     }
-    Setting("Flat profile", if (flat) "On" else "Off") { vm.engine.setFlat(!flat) }
+    Setting("Flat profile", if (flat) "On" else "Off") { vm.prefs.setFlat(!flat) }
     Setting("Lens correction", if (lensCorrection) "On" else "Off") {
-        vm.engine.setLensCorrection(!lensCorrection)
+        vm.prefs.setLensCorrection(!lensCorrection)
     }
-    Setting("Zone focus", if (zone) "On" else "Off") {
-        vm.engine.setZoneFocus(!zone)
-        vm.settleChannel()
-    }
+    Setting("Zone focus", if (zone) "On" else "Off") { vm.prefs.setZoneFocus(!zone) }
 
     Section("Location") {
         Note(
@@ -330,8 +332,24 @@ private fun FrameTab(vm: CameraViewModel) {
         )
     }
     val tagLocation by vm.prefs.tagLocation.collectAsState()
-    Setting("Tag photographs", if (tagLocation) "On" else "Off") {
-        vm.prefs.setTagLocation(!tagLocation)
+    // The toggle asks for the grant it needs, at the moment it starts needing it. The setting
+    // defaulted on with nothing anywhere requesting the permission, so it read "On" while
+    // Locations.lastKnown returned null on every shot — a switch reporting a state that was not
+    // happening.
+    val askTag = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ -> }
+    Setting(
+        "Tag photographs",
+        when {
+            !tagLocation -> "Off"
+            Locations.canTag(context) -> "On"
+            else -> "Needs permission"
+        },
+    ) {
+        val next = !tagLocation
+        vm.prefs.setTagLocation(next)
+        if (next && !Locations.canTag(context)) askTag.launch(Locations.wanted())
     }
 
     Section("Files") {

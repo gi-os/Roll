@@ -1,3 +1,50 @@
+## Roll v2.68 — seven found in review, none by a crash report
+
+A deliberate audit of everything the last five nightlies added, hunting the class of bug that
+passes every test and fails on the phone. Seven, in order of how much they mattered:
+
+**Reach back handed the shutter a recycled frame.** Taking a frame from the ring and clearing the
+ring were two calls, and the clear released everything it held — including the frame it had just
+handed out. A crash on the very next draw, with Reach back on and burst off, which is the default
+pairing. Taking now removes what it returns before releasing the rest, and there is a test whose
+name is the bug.
+
+**The map was dead on arrival.** Every location permission was declared in the manifest and
+requested nowhere, and every code path checks and quietly does nothing when the check fails — right
+at the shutter, wrong as a whole: a map that is always empty, a tagging switch that reads "On"
+while tagging nothing, and no line anywhere saying why. The map now asks for what it needs on its
+own screen, the same shape as the roll's photo-access gate, and the tagging toggle asks the moment
+it is switched on.
+
+**Trashing a multi-format capture left its other files behind.** Delete a RAW+JPEG photograph and
+only the JPEG went: the negative then became the group's best remaining file and the "deleted"
+photograph reappeared on the roll. The trash now takes every file of every selected capture into
+the one system dialog, so the count it shows is the count of files.
+
+**RAW captures were never tagged**, so they could never appear on the map. Same class as the
+permission fault: silent, and found by reading rather than by shooting.
+
+**The map held every tile it had ever shown.** A long pan across a city accumulated hundreds of
+bitmaps with nothing to evict them — the out-of-memory would have arrived an afternoon later, in
+whatever allocation happened to be next. Tiles now leave with the viewport; the disk cache makes
+panning back instant anyway.
+
+**The Reach back loop never slept.** It read the panel thirty times a second for as long as the
+process lived, camera bound or not. It now idles while the camera is down, and empties the ring —
+frames from before a pause are of some earlier scene, and "nearest the requested moment" across a
+gap would have saved one as though it were now.
+
+**Exposure, flat profile, lens correction and zone focus forgot themselves at every launch.** They
+were engine state and nothing wrote them down. They are settings now, restored at start.
+
+**And one promise kept:** the settings have always said the sharpest-of-eight applies to "Simple and
+every coarse filter", and Reach back said the same — but Simple read the panel directly, so neither
+did anything in the mode most people shoot in. Both work in Simple now.
+
+**Known limit, stated rather than hidden:** the priority exposure modes balance against the meter's
+last reading from before you took hold. Walk from sunlight into a room and the held half stays
+right while the derived half stays where the daylight put it — switch through Auto to re-meter.
+
 ## Roll v2.67 — the shutter is quick again, and four fixes
 
 **Saving got slow, and that was a regression I introduced.** Location tagging wrote the coordinate

@@ -207,6 +207,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var locateJob: Job? = null
 
+    /** Re-read the roll's coordinates — called when a permission has just been granted. */
+    fun relocateRoll() = locateRoll()
+
     /**
      * The frames already in hand when the button is pressed.
      *
@@ -512,6 +515,27 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             prefs.photoSize.collect { engine.setPhotoSize(it, prefs.flash.value) }
         }
         viewModelScope.launch { prefs.preRollMs.collect { updatePreRoll(it) } }
+        // The chosen camera state, replayed into the engine at every launch — these are session
+        // options on the capture request, so nothing else remembers them. settleChannel afterwards,
+        // because a restored mode changes which channels the wheel may hold.
+        viewModelScope.launch {
+            prefs.flat.collect { engine.setFlat(it) }
+        }
+        viewModelScope.launch {
+            prefs.lensCorrection.collect { engine.setLensCorrection(it) }
+        }
+        viewModelScope.launch {
+            prefs.zoneFocus.collect {
+                engine.setZoneFocus(it)
+                settleChannel()
+            }
+        }
+        viewModelScope.launch {
+            prefs.exposureMode.collect {
+                engine.setExposureMode(it)
+                settleChannel()
+            }
+        }
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
@@ -1681,6 +1705,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             if (pair.raw != null && prefs.sounds.value) beeps.saved()
             return
         }
+        // This path never tagged at all — found in review, not on a phone: every RAW capture was
+        // absent from the map and nothing said so. Stamped here only when nothing below is going
+        // to rewrite the file, and again after the rewrite when something is; a stamp before a
+        // rewrite is replaced along with the bytes it was written into.
+        val willRewrite = lookForShot().agsl != null ||
+            prefs.aspect.value != FrameAspect.Full ||
+            stampTime(lookForShot()) != null ||
+            prefs.wantsLossless()
+        if (!willRewrite) stampLocation(jpegUri)
 
         val activeFilter = lookForShot()
         val wantPng = prefs.wantsLossless()
@@ -1700,6 +1733,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (original == null) {
             showNotice("Saved, but couldn't develop it")
+            // Undeveloped, but saved — so it still gets its coordinate. Nothing below runs.
+            stampLocation(jpegUri)
             return
         }
 
@@ -1721,6 +1756,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         val rewritten = repo.rewrite(jpegUri, processed.jpeg)
         if (!rewritten) showNotice("Couldn't develop the JPEG")
+        // After the rewrite, which replaces the whole file: a coordinate written before it would
+        // have gone with the bytes it lived in.
+        stampLocation(jpegUri)
 
         if (wantPng) {
             val png = processed.png
@@ -1755,8 +1793,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         if (millis <= 0) return
         preRollJob = viewModelScope.launch {
             while (isActive) {
+                // **The camera being down empties the ring and slows the loop.** Two reasons, one
+                // each. Emptied: frames from before a pause are stale, and "nearest the requested
+                // moment" across a gap picks the newest stale frame — a photograph of some earlier
+                // scene, saved as though it were now. Slowed: this loop used to spin at 30Hz for
+                // as long as the process lived, panel or no panel, which is a battery cost for a
+                // viewfinder that is not on screen.
+                if (!engine.ready.value) {
+                    preRollRing.clear()
+                    delay(PRE_ROLL_IDLE_MS)
+                    continue
+                }
                 val frame = engine.previewFrame()
-                if (frame != null) preRollRing.add(frame, SystemClock.elapsedRealtime())
+                if (frame == null) {
+                    delay(PRE_ROLL_IDLE_MS)
+                    continue
+                }
+                preRollRing.add(frame, SystemClock.elapsedRealtime())
                 delay(PRE_ROLL_GAP_MS)
             }
         }
@@ -1784,17 +1837,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // does not spend a quarter of a second collecting the eight.
         val preRoll = prefs.preRollMs.value
         if (preRoll > 0 && preRollRing.size > 0) {
+            // Both forms remove what they return and release the rest. Not nearest() then
+            // clear(): clear() evicts everything it holds, including a frame just handed out,
+            // and a recycled bitmap given to the caller is a crash on the next draw.
             val picked = if (prefs.burst.value) {
                 preRollRing.takeBest { frame -> sharpnessOf(frame) }
             } else {
-                preRollRing.nearest(SystemClock.elapsedRealtime(), preRoll.toLong())
+                preRollRing.takeNearest(SystemClock.elapsedRealtime(), preRoll.toLong())
             }
-            if (picked != null) {
-                // Whatever was not taken is released, and the ring starts again from now — the
-                // frames behind this photograph belong to a moment that has been spent.
-                preRollRing.clear()
-                return picked
-            }
+            if (picked != null) return picked
         }
         if (!prefs.burst.value) return engine.previewFrame()
         var best: Bitmap? = null
@@ -1888,7 +1939,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // there is nothing to capture. Panel resolution — real for sending and for looking at, not
                 // for cropping or printing. A still costs 1.8 s on this hardware and that is what Pro is for.
                 val startedAt = System.nanoTime()
-                val grabbed = engine.previewFrame()
+                // Through [grabBestFrame], not straight off the panel: the settings text has
+                // always said the burst applies to "Simple and every coarse filter", and Reach
+                // back's description makes the same promise — but this path read the panel
+                // directly, so neither setting did anything in the mode most people shoot in.
+                // With both off, grabBestFrame *is* a straight panel read.
+                val grabbed = grabBestFrame()
                 if (grabbed == null) {
                     showNotice("Nothing on the viewfinder yet")
                     return@launch
@@ -2254,9 +2310,30 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------------- deleting ---------------- */
 
-    fun trashRequest(photo: Photo) = repo.trashRequest(listOf(photo.uri))
+    /**
+     * Trash a photograph — all of it.
+     *
+     * **The roll shows captures; the trash must act on captures.** One press can have written a
+     * JPEG, a PNG and a negative, and the grid collapses them to one tile. Trashing only the tile's
+     * photo deletes the JPEG, at which point the PNG becomes the group's best remaining file and
+     * the "deleted" photograph reappears on the roll — same picture, new file, a haunting. So every
+     * member of the group goes into the one system dialog, which also means the count the dialog
+     * shows is the count of files, which is honest.
+     */
+    fun trashRequest(photo: Photo) = trashRequest(listOf(photo))
 
-    fun trashRequest(photos: List<Photo>) = repo.trashRequest(photos.map { it.uri })
+    fun trashRequest(photos: List<Photo>): android.content.IntentSender? {
+        val all = groups.value
+        val uris = photos
+            .flatMap { photo ->
+                all.firstOrNull { group -> group.members.any { it.photo.id == photo.id } }
+                    ?.members?.map { it.photo }
+                    ?: listOf(photo)
+            }
+            .distinctBy { it.id }
+            .map { it.uri }
+        return repo.trashRequest(uris)
+    }
 
     /* ---------------- notices ---------------- */
 
@@ -2296,6 +2373,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          * Faster would fill the ring with near-duplicates and read the panel for nothing.
          */
         const val PRE_ROLL_GAP_MS = 34L
+
+        /** The fill loop's pace while the camera is down. Checking, not capturing. */
+        const val PRE_ROLL_IDLE_MS = 500L
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96

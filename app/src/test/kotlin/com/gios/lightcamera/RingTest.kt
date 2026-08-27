@@ -78,6 +78,26 @@ class RingTest {
         assertNull(r.takeBest { 1f })
     }
 
+    @Test
+    fun `taking the nearest frame never recycles what it returns`() {
+        // **The bug this guards against shipped.** nearest() then clear() handed the caller a
+        // frame that clear() had just recycled — a crash on the next draw, with Reach back on and
+        // burst off, which is the setting's default pairing.
+        val freed = mutableListOf<Int>()
+        val r = ring(8, freed)
+        listOf(100L, 133L, 166L, 200L).forEach { r.add(it.toInt(), it) }
+        val taken = r.takeNearest(pressedAtMs = 200, preRollMs = 66)
+        assertEquals(133, taken)
+        assertTrue("the returned frame must never be evicted", 133 !in freed)
+        assertEquals(listOf(100, 166, 200), freed.sorted())
+        assertEquals(0, r.size)
+    }
+
+    @Test
+    fun `taking from an empty ring is nothing, not a crash`() {
+        assertNull(ring(8, mutableListOf()).takeNearest(1_000, 100))
+    }
+
     /* ---------------- picking ---------------- */
 
     @Test

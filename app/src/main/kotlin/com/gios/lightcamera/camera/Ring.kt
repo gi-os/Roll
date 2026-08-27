@@ -47,7 +47,7 @@ class Ring<T>(val capacity: Int, private val onEvict: (T) -> Unit = {}) {
     fun entries(): List<Entry<T>> = items.toList()
 
     /**
-     * The frame nearest a moment [preRollMs] before the press.
+     * The frame nearest a moment [preRollMs] before the press. A query: the ring is untouched.
      *
      * **Nearest, not "the first one older than".** A ring that has not filled yet, or a stream that
      * stuttered, can leave the requested moment before anything in the buffer — and the honest
@@ -58,6 +58,25 @@ class Ring<T>(val capacity: Int, private val onEvict: (T) -> Unit = {}) {
         if (items.isEmpty()) return null
         val target = pressedAtMs - preRollMs
         return items.minByOrNull { kotlin.math.abs(it.elapsedMs - target) }?.value
+    }
+
+    /**
+     * [nearest], but the winner leaves the ring and everything else is evicted.
+     *
+     * **This exists because taking and clearing cannot be two calls.** The first version did
+     * `nearest()` then `clear()` — and `clear()` hands *every* entry to [onEvict], including the
+     * one just returned, so the caller was given a recycled bitmap. That is a crash on the very
+     * next draw, and it shipped: nothing in the ring records that a value has been handed out, so
+     * the ring cannot be trusted to skip it. Removing the winner before evicting the rest is the
+     * only ordering that cannot free what it returned.
+     */
+    fun takeNearest(pressedAtMs: Long, preRollMs: Long): T? {
+        if (items.isEmpty()) return null
+        val target = pressedAtMs - preRollMs
+        val winner = items.minByOrNull { kotlin.math.abs(it.elapsedMs - target) } ?: return null
+        items.remove(winner)
+        clear()
+        return winner.value
     }
 
     /** The newest frame held, which is what a pre-roll of zero means. */

@@ -107,6 +107,13 @@ fun MapScreen(
     }
     val loaded = remember { mutableStateMapOf<Tile, androidx.compose.ui.graphics.ImageBitmap>() }
     LaunchedEffect(wanted) {
+        // **Kept for exactly as long as it is wanted.** This map held every tile ever shown, so a
+        // long pan across a city accumulated hundreds of bitmaps with nothing to evict them — the
+        // out-of-memory arrives an afternoon later, in whatever allocation happens to be next.
+        // [Tiles] has the LRU and the disk cache, so dropping a tile here costs a lookup, not a
+        // fetch, and panning back is instant anyway.
+        val keep = wanted.toSet()
+        loaded.keys.retainAll(keep)
         wanted.forEach { tile ->
             if (loaded.containsKey(tile)) return@forEach
             tiles.get(tile)?.let { loaded[tile] = it.asImageBitmap() }

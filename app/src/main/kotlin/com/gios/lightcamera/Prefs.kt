@@ -2,6 +2,7 @@ package com.gios.lightcamera
 
 import android.content.Context
 import com.gios.lightcamera.camera.AfMode
+import com.gios.lightcamera.camera.ExposureMode
 import com.gios.lightcamera.camera.FlashMode
 import com.gios.lightcamera.camera.FrameAspect
 import com.gios.lightcamera.camera.PuriArt
@@ -714,6 +715,41 @@ class Prefs(context: Context) {
     fun setTagLocation(value: Boolean) =
         set(_tagLocation, value) { putBoolean(TAG_LOCATION, value) }
 
+    /**
+     * The four camera-state settings, written down.
+     *
+     * These lived only in [com.gios.lightcamera.camera.CameraEngine] at first, which meant every
+     * one of them silently reverted at the next launch — a settings screen whose switches read
+     * "On" yesterday and "Off" today is indistinguishable from a bug, and the flat profile in
+     * particular is a choice about every photograph, not about a session. The engine stays the
+     * source of truth for what the camera is *doing*; these are what was *chosen*, and a collector
+     * in the view model keeps the two in agreement.
+     */
+    private val _flat = MutableStateFlow(prefs.getBoolean(FLAT, false))
+    val flat: StateFlow<Boolean> = _flat.asStateFlow()
+
+    fun setFlat(value: Boolean) = set(_flat, value) { putBoolean(FLAT, value) }
+
+    private val _lensCorrection = MutableStateFlow(prefs.getBoolean(LENS_CORRECTION, true))
+    val lensCorrection: StateFlow<Boolean> = _lensCorrection.asStateFlow()
+
+    fun setLensCorrection(value: Boolean) =
+        set(_lensCorrection, value) { putBoolean(LENS_CORRECTION, value) }
+
+    private val _zoneFocus = MutableStateFlow(prefs.getBoolean(ZONE_FOCUS, false))
+    val zoneFocus: StateFlow<Boolean> = _zoneFocus.asStateFlow()
+
+    fun setZoneFocus(value: Boolean) = set(_zoneFocus, value) { putBoolean(ZONE_FOCUS, value) }
+
+    private val _exposureMode = MutableStateFlow(
+        ExposureMode.entries.firstOrNull { it.name == prefs.getString(EXPOSURE_MODE, null) }
+            ?: ExposureMode.Auto,
+    )
+    val exposureMode: StateFlow<ExposureMode> = _exposureMode.asStateFlow()
+
+    fun setExposureMode(value: ExposureMode) =
+        set(_exposureMode, value) { putString(EXPOSURE_MODE, value.name) }
+
     /** True when the negative is wanted. Whether it is *possible* is the camera's answer. */
     fun wantsNegative(): Boolean = CaptureFormat.Dng in _formats.value
 
@@ -912,6 +948,10 @@ class Prefs(context: Context) {
         const val FORMATS = "captureFormats"
         const val PRE_ROLL = "preRollMs"
         const val TAG_LOCATION = "tagLocation"
+        const val FLAT = "flatProfile"
+        const val LENS_CORRECTION = "lensCorrection"
+        const val ZONE_FOCUS = "zoneFocus"
+        const val EXPOSURE_MODE = "exposureMode"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

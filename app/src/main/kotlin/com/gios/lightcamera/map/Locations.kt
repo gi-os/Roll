@@ -56,6 +56,32 @@ object Locations {
         }.onFailure { Log.e(TAG, "no last known location", it) }.getOrNull()
     }
 
+    /**
+     * Everything the map needs, for one request dialog.
+     *
+     * **These were declared in the manifest and requested nowhere.** A manifest entry is a
+     * declaration of intent, not a grant, and every code path here checks and quietly does nothing
+     * when the check fails — which is right at the shutter, and adds up to a map that is always
+     * empty and a tagging setting that never tags, with no line anywhere saying why. Found in
+     * review: the feature shipped dead.
+     *
+     * Fine is included alongside coarse so the system offers the choice; either grant is enough
+     * for a map. `ACCESS_MEDIA_LOCATION` is the one nobody expects — it gates *reading* a
+     * coordinate back off a photograph, including one this app wrote a second earlier.
+     */
+    fun wanted(): Array<String> = buildList {
+        add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+        add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            add(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }.toTypedArray()
+
+    /** Whether anything at all can be tagged. Coarse is enough; fine is a bonus. */
+    fun canTag(context: Context): Boolean =
+        granted(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) ||
+            granted(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+
     fun granted(context: Context, permission: String): Boolean =
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
