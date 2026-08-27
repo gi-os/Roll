@@ -1,3 +1,17 @@
+## Roll v2.66 — fixes the crash on launch in 2.64 and 2.65
+
+**Roll crashed the moment it opened.** If you are on a nightly, this is the one to take.
+
+`init` starts a collector on the pre-roll setting; `viewModelScope` runs on the immediate main
+dispatcher and a `StateFlow` hands over its current value as soon as it is collected — so that
+collector ran *during construction*, before any property declared below `init` had been
+initialised. The ring buffer was declared next to the shutter code that uses it, four hundred lines
+further down, and clearing a field that was still null took the app down on the splash screen.
+
+Every unit test passed and CI was green, because the fault is in construction order rather than in
+anything a test exercised. There is now a check that reads the source and fails the build if
+anything `init` can reach is declared below it.
+
 ## Roll v2.65 — the roll, on a map
 
 **A map is a scope, not a place.** It sits beside Camera and Starred at the top of the roll, the

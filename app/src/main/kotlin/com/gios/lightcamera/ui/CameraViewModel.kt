@@ -207,6 +207,35 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var locateJob: Job? = null
 
+    /**
+     * The frames already in hand when the button is pressed.
+     *
+     * **Declared up here with the rest of the state, and that is not tidiness.** `init` starts a
+     * collector on `prefs.preRollMs`, `viewModelScope` runs on `Dispatchers.Main.immediate`, and a
+     * `StateFlow` hands over its current value the moment it is collected — so that collector runs
+     * *during construction*, synchronously, before any property declared below `init` has been
+     * initialised. This ring lived next to the shutter code that uses it, four hundred lines further
+     * down, and reading it from `updatePreRoll` gave back a field that was still null: an immediate
+     * crash on launch, in a build where every test passed.
+     *
+     * Anything `init` can reach has to be declared above `init`. The same note is at the top of
+     * that block for [photos].
+     *
+     * **Filled from the panel, not from a second stream off the ISP.** `CameraEngine` binds an
+     * `ImageAnalysis` only in QR mode, deliberately: a second full-rate consumer costs power on
+     * every frame whether or not anything reads it. The panel is a frame source that is already
+     * running, so the ring reads back from it and the camera pipeline is untouched.
+     *
+     * Every frame that leaves this ring without being used is recycled by the ring itself. Eight
+     * panel bitmaps is most of a hundred megabytes, and leaving that to the collector is an
+     * out-of-memory two photographs later.
+     */
+    private val preRollRing = Ring<Bitmap>(Ring.DEFAULT_CAPACITY) { frame ->
+        runCatching { frame.recycle() }
+    }
+
+    private var preRollJob: Job? = null
+
     private fun locateRoll() {
         locateJob?.cancel()
         if (prefs.scope.value != RollScope.Map) return
@@ -1730,24 +1759,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (prefs.sounds.value) beeps.saved()
     }
-
-    /**
-     * The frames already in hand when the button is pressed.
-     *
-     * **Filled from the panel, not from a second stream off the ISP.** `CameraEngine` binds an
-     * `ImageAnalysis` only in QR mode, deliberately: a second full-rate consumer costs power on
-     * every frame whether or not anything reads it. The panel is a frame source that is already
-     * running, so the ring reads back from it and the camera pipeline is untouched.
-     *
-     * Every frame that leaves this ring without being used is recycled by the ring itself. Eight
-     * panel bitmaps is most of a hundred megabytes, and leaving that to the collector is an
-     * out-of-memory two photographs later.
-     */
-    private val preRollRing = Ring<Bitmap>(Ring.DEFAULT_CAPACITY) { frame ->
-        runCatching { frame.recycle() }
-    }
-
-    private var preRollJob: Job? = null
 
     /**
      * Keep the ring filling while it is wanted and the viewfinder is up.
