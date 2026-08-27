@@ -1,3 +1,31 @@
+## Roll v2.65 — the roll, on a map
+
+**A map is a scope, not a place.** It sits beside Camera and Starred at the top of the roll, the
+same photographs are underneath it, and a tap opens the same viewer the grid does. Marks that hold
+several photographs zoom in rather than guessing which one you meant.
+
+**Photographs are tagged with where you were**, on by default, using the position the phone last
+had rather than a fresh fix — a camera must not wait for GPS, and a press whose whole argument is
+that it happens now cannot spend seconds on a radio. Where there is no recent position the
+photograph simply has none.
+
+Worth knowing, and said in the settings rather than buried: a coordinate lives inside the file and
+travels with it, so a photograph you send through the picker carries where you were. Turning it off
+stops new photographs carrying one; the ones already taken keep theirs.
+
+**Reading them back needs a second permission.** Since Android 10 MediaStore removes GPS from
+anything it hands an app unless the original is asked for, so `ACCESS_MEDIA_LOCATION` is what makes
+the map anything other than empty — including for photographs this app stamped a second earlier.
+
+**Tiles come from OpenStreetMap, and this is the only part of Roll that fetches anything.** The
+app's network story has been one sentence — it opens a connection when you send a bug report you
+wrote yourself — and a map cannot honour that, so the exception is contained: tiles are fetched only
+while the map is open, cached on disk for good, and the credit is on the screen because those
+servers are donated.
+
+Clustering happens in pixels rather than in degrees, so a city breaks apart into streets as you zoom
+rather than clustering differently depending on which latitude you were standing at.
+
 ## Roll v2.64 — focus peaking, and a shutter that reaches backwards
 
 **Focus peaking.** Zone focus without it asks you to trust a number; with it the edges the lens is

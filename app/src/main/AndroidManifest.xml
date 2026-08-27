@@ -18,6 +18,22 @@
     -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      Where a photograph was taken, for the map.
+
+      Coarse and fine are both declared and neither is required: a coarse fix is enough to put a
+      photograph in the right place on a map at any zoom a person actually reads, and asking only
+      for coarse is a smaller thing to ask for. Fine is used when it has been granted anyway.
+
+      ACCESS_MEDIA_LOCATION is the one that surprises people, and it is about *reading* rather than
+      writing: since Android 10 MediaStore strips GPS out of anything it hands an app unless the
+      original is asked for. Without it the map is empty in a way that looks like the photographs
+      have no location rather than like a permission is missing.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <!--
         The send picker is a list of people, not a grid of apps. Android gives a third-party app
         no way to read another app's sharing shortcuts — the row of faces in the system chooser

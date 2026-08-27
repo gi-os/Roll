@@ -317,6 +317,23 @@ private fun FrameTab(vm: CameraViewModel) {
         vm.settleChannel()
     }
 
+    Section("Location") {
+        Note(
+            "Every photograph gets the coordinate the phone last had, which is what puts it on the " +
+                "map. It costs nothing at the shutter — the last known position is used rather " +
+                "than a fresh fix, because a camera must not wait for GPS.\n\n" +
+                "It is worth knowing what this means: a coordinate lives inside the file and " +
+                "travels with it, so a photograph you send carries where you were. Turn it off " +
+                "and photographs from then on have none; the ones already taken keep theirs.\n\n" +
+                "The map itself fetches tiles from OpenStreetMap, which is the only time this app " +
+                "opens a connection other than sending a bug report. Tiles are kept once fetched.",
+        )
+    }
+    val tagLocation by vm.prefs.tagLocation.collectAsState()
+    Setting("Tag photographs", if (tagLocation) "On" else "Off") {
+        vm.prefs.setTagLocation(!tagLocation)
+    }
+
     Section("Files") {
         Note(
             "One press can write more than one file, and they stay one photograph on the roll — " +

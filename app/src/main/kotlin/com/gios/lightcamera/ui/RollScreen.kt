@@ -95,6 +95,9 @@ fun RollScreen(
     val scope by vm.prefs.scope.collectAsState()
     val roll by vm.roll.collectAsState()
     val colour by vm.prefs.colour.collectAsState()
+    // Read only where it is used. The map is the one scope that needs coordinates, and reading
+    // them is a file opened and an EXIF header parsed per photograph.
+    val located by vm.located.collectAsState()
 
     // **The roll is photographs too.** It used to be the one picture surface in the app that
     // stayed grey: the viewfinder and the viewer both held colour, and swiping up to the grid
@@ -184,6 +187,15 @@ fun RollScreen(
                     modifier = Modifier.padding(top = 24.dp).lightClickable { onRequestMedia() },
                 )
             }
+
+            // **The map takes the whole pane in place of the grid.** It is a scope, not a
+            // destination: the same photographs are underneath and a tap opens the same viewer, so
+            // it belongs here rather than behind a mode of its own.
+            scope == RollScope.Map -> MapScreen(
+                located = located,
+                tiles = vm.tiles,
+                onOpen = onOpen,
+            )
 
             entries.isEmpty() && !loading -> EmptyState(
                 text = if (scope == RollScope.Favourites) {

@@ -20,6 +20,9 @@ import com.gios.lightcamera.camera.FlashMode
 import com.gios.lightcamera.camera.FrameAspect
 import com.gios.lightcamera.camera.Frames
 import com.gios.lightcamera.camera.Ring
+import com.gios.lightcamera.map.Locations
+import com.gios.lightcamera.map.Point
+import com.gios.lightcamera.map.Tiles
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
@@ -182,6 +185,43 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         val available = channelsAvailable()
         if (_channel.value !in available) {
             _channel.value = available.firstOrNull() ?: Channel.Zoom
+        }
+    }
+
+    /** The tile cache, held here so it outlives a trip to the map and back. */
+    val tiles = Tiles(app)
+
+    private val _located = MutableStateFlow<List<Pair<Photo, Point>>>(emptyList())
+    val located: StateFlow<List<Pair<Photo, Point>>> = _located.asStateFlow()
+
+    /**
+     * Read coordinates off the roll, for the map.
+     *
+     * **Only while the map is the scope**, and one photograph at a time. Every read is a file
+     * opened and an EXIF header parsed, and doing that for a thousand photographs on every roll
+     * refresh would be a gallery that stalls for a feature most people are not looking at.
+     *
+     * It also needs `ACCESS_MEDIA_LOCATION`: since Android 10 MediaStore strips GPS out of
+     * anything it hands you unless the original is asked for, so without that permission this
+     * returns nothing for every photograph — including ones stamped a second ago.
+     */
+    private var locateJob: Job? = null
+
+    private fun locateRoll() {
+        locateJob?.cancel()
+        if (prefs.scope.value != RollScope.Map) return
+        locateJob = viewModelScope.launch {
+            val resolver = getApplication<Application>().contentResolver
+            val found = ArrayList<Pair<Photo, Point>>()
+            // Newest first, published as it goes: a map that fills in over a second or two is far
+            // better than a blank one that appears all at once a minute later.
+            photos.value.forEach { photo ->
+                if (!isActive) return@launch
+                val point = Locations.read(resolver, photo.uri) ?: return@forEach
+                found += photo to point
+                _located.value = found.toList()
+            }
+            _located.value = found
         }
     }
 
@@ -443,6 +483,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             prefs.photoSize.collect { engine.setPhotoSize(it, prefs.flash.value) }
         }
         viewModelScope.launch { prefs.preRollMs.collect { updatePreRoll(it) } }
+        viewModelScope.launch { prefs.scope.collect { locateRoll() } }
+        viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
         // what the shutter does with it, so it has to be settled before the press rather than at it.
         viewModelScope.launch {
@@ -2129,10 +2171,31 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         if (uri == null) {
             showNotice("Couldn't save")
-        } else if (prefs.sounds.value) {
-            // The other end of the bracket: click at the press, this when the file exists.
-            beeps.saved()
+        } else {
+            stampLocation(uri)
+            if (prefs.sounds.value) {
+                // The other end of the bracket: click at the press, this when the file exists.
+                beeps.saved()
+            }
         }
+    }
+
+    /**
+     * Put where you were onto a photograph that has just been written.
+     *
+     * **The last known fix, never a fresh one.** Asking for a live update at the shutter costs
+     * seconds and a radio on a press whose whole argument is that it happens now; where the phone
+     * has no recent position the photograph simply has none, which is a better outcome than a slow
+     * camera.
+     *
+     * Not applied to the lossless copy: PNG has no dependable place to keep this, and it is always
+     * a sibling of a JPEG that does — the map reads a capture, not a file.
+     */
+    private suspend fun stampLocation(uri: Uri) {
+        if (!prefs.tagLocation.value) return
+        val context = getApplication<Application>()
+        val where = Locations.lastKnown(context) ?: return
+        Locations.stamp(context.contentResolver, uri, where)
     }
 
     /* ---------------- the roll of film ---------------- */

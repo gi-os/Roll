@@ -700,6 +700,20 @@ class Prefs(context: Context) {
     /** True when this press has to go through the shader path to produce what was asked for. */
     fun wantsLossless(): Boolean = CaptureFormat.Png in _formats.value
 
+    /**
+     * Write where you were into every photograph.
+     *
+     * **On by default, which is what every other camera does and is worth being deliberate
+     * about.** The map is empty without it. But Roll's send picker shares files with people, and a
+     * coordinate in a photograph travels with the file — so the viewfinder shows an indicator
+     * while this is on, rather than the setting being the only place it is ever mentioned.
+     */
+    private val _tagLocation = MutableStateFlow(prefs.getBoolean(TAG_LOCATION, true))
+    val tagLocation: StateFlow<Boolean> = _tagLocation.asStateFlow()
+
+    fun setTagLocation(value: Boolean) =
+        set(_tagLocation, value) { putBoolean(TAG_LOCATION, value) }
+
     /** True when the negative is wanted. Whether it is *possible* is the camera's answer. */
     fun wantsNegative(): Boolean = CaptureFormat.Dng in _formats.value
 
@@ -897,6 +911,7 @@ class Prefs(context: Context) {
         const val BURST = "burst"
         const val FORMATS = "captureFormats"
         const val PRE_ROLL = "preRollMs"
+        const val TAG_LOCATION = "tagLocation"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

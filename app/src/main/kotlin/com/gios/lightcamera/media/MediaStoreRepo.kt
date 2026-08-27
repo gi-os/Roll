@@ -55,6 +55,16 @@ enum class RollScope(val label: String) {
      * loaded.
      */
     Favourites("Starred"),
+
+    /**
+     * The roll, placed on a map.
+     *
+     * A scope rather than a mode: the same photographs are underneath, so a tap opens the viewer
+     * exactly as the grid does. Only the ones carrying a coordinate appear, which is most of
+     * nobody's roll until location has been on for a while — the screen says so rather than
+     * showing an empty ocean.
+     */
+    Map("Map"),
 }
 
 /**
@@ -117,11 +127,11 @@ class MediaStoreRepo(private val context: Context) {
             RollScope.Camera -> "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND $hide"
             // Starred photographs can be anywhere, so the query is the wide one and the narrowing
             // happens after.
-            RollScope.Everything, RollScope.Favourites -> hide
+            RollScope.Everything, RollScope.Favourites, RollScope.Map -> hide
         }
         val args = when (scope) {
             RollScope.Camera -> arrayOf("DCIM/%", "$STRIP_PATH%")
-            RollScope.Everything, RollScope.Favourites -> arrayOf("$STRIP_PATH%")
+            RollScope.Everything, RollScope.Favourites, RollScope.Map -> arrayOf("$STRIP_PATH%")
         }
         // DATE_TAKEN is null for anything that isn't a photo with EXIF, so it can't be the
         // sort key on its own; COALESCE with DATE_ADDED, which is in seconds.
