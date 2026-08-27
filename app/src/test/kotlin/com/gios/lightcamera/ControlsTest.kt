@@ -57,21 +57,37 @@ class ControlsTest {
     }
 
     @Test
-    fun `the wheel click is claimed by the lock only while the setting is on`() {
+    fun `the wheel click is claimed by the lock only while the dial is asleep`() {
         assertEquals(
             PressAction.DialLock,
             Controls.pressNow(
                 Binding.WheelClick, PressAction.Torch,
-                clipPlaying = false, dialLockOn = true,
+                clipPlaying = false, dialAsleep = true,
             ),
         )
-        // Off, and the click is the torch again on the very next press — no relaunch, and the
+        // Awake, and the click is its binding again on the very next press — no relaunch, and the
         // binding underneath was never touched.
         assertEquals(
             PressAction.Torch,
             Controls.pressNow(
                 Binding.WheelClick, PressAction.Torch,
-                clipPlaying = false, dialLockOn = false,
+                clipPlaying = false, dialAsleep = false,
+            ),
+        )
+    }
+
+    /**
+     * **The regression this replaced.** The click used to be claimed for as long as the lock
+     * setting was on, so anything bound to it was unreachable for the whole session: press it,
+     * nothing happens, no way to find out why. One wake is all the lock ever needs.
+     */
+    @Test
+    fun `a woken dial hands the click back to whatever it is bound to`() {
+        assertEquals(
+            PressAction.Channel,
+            Controls.pressNow(
+                Binding.WheelClick, PressAction.Channel,
+                clipPlaying = false, dialAsleep = false,
             ),
         )
     }
@@ -83,7 +99,7 @@ class ControlsTest {
             PressAction.Shutter,
             Controls.pressNow(
                 Binding.VolumeUp, PressAction.Shutter,
-                clipPlaying = false, dialLockOn = true,
+                clipPlaying = false, dialAsleep = true,
             ),
         )
     }

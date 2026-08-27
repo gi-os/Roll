@@ -1,3 +1,37 @@
+## Roll v2.67 — the shutter is quick again, and four fixes
+
+**Saving got slow, and that was a regression I introduced.** Location tagging wrote the coordinate
+by rewriting the whole JPEG — `saveAttributes` does not poke a tag into a header, it copies the
+entire file to insert an EXIF segment — and it was awaited inline on every save with tagging on by
+default. It now runs after the photograph is already on disk, where nothing is waiting for it. The
+same reasoning was already written down in Simple for the date back; I did not apply it.
+
+Simple was never tagged at all before, so nothing shot in it reached the map. It is now, on the
+same off-the-press path.
+
+**The viewfinder no longer freezes while a photograph is taken.** The held frame was grabbed
+*before* the capture completed, so it was always slightly ahead of the frame the sensor returned —
+and with Reach back on it is provably a different moment, since that feature exists to save a frame
+from before the press. A still picture of the wrong instant, sat over the viewfinder for a second
+and a half, reads as the photograph you got. The progress bar was already independent of it, so it
+covers the wait on its own.
+
+**The wheel click was claimed for the whole session.** With the dial lock setting on, the click
+belonged to the lock permanently — so anything bound to it, including the new wheel channel, was
+unreachable: press it, nothing happens, no way to find out why. It went unnoticed while the click's
+only other job was the torch. The lock now claims the click only while the dial is actually asleep,
+which is the one transition it ever needed; the locked state was never remembered between launches
+anyway. Once woken, the click is its binding again.
+
+**Zone focus shows where it is focused.** It shipped reporting only through the notice a wheel turn
+raises, so with the wheel pointed at anything else the distance never appeared at all — a manual
+focus with no distance on screen, which is the thing it exists to replace. It is now in the status
+line with the zoom and exposure, along with the manual exposure pair and what the wheel is holding.
+
+**The wheel skipped filters on the channel binding.** Arming — whether overflow notches are
+swallowed — was read off the binding, and a channel binding does not say whether it is currently a
+filter or a value. It now follows what the wheel actually does.
+
 ## Roll v2.66 — fixes the crash on launch in 2.64 and 2.65
 
 **Roll crashed the moment it opened.** If you are on a nightly, this is the one to take.

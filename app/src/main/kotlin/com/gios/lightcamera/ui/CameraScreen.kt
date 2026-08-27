@@ -296,6 +296,9 @@ fun CameraScreen(
     // Peaking rides with zone focus rather than having a switch of its own: it exists to answer
     // "is this in focus", and with autofocus running the camera has already answered.
     val peaking by vm.engine.zoneFocus.collectAsState()
+    val focusReadout by vm.engine.focusLabel.collectAsState()
+    val manualExposure by vm.engine.exposureLabel.collectAsState()
+    val channel by vm.channel.collectAsState()
     LaunchedEffect(
         liveFilter,
         seed,
@@ -365,6 +368,10 @@ fun CameraScreen(
         }
     }
     val heldDial = remember(bindings) { vm.prefs.dialFor(Binding.WheelPressTurn) }
+    // Named on the panel only when the wheel actually cycles: with a fixed binding there is
+    // nothing to disambiguate, and an unobstructed viewfinder is worth more than a label.
+    val showChannel = bareDial == DialAction.Channel ||
+        vm.prefs.pressFor(Binding.WheelClick) == PressAction.Channel
 
     // **The dial lock.** The wheel is shared with the rest of the phone and turns in a pocket, so
     // with the setting on the dial boots asleep and a click on the wheel wakes it. The setting is
@@ -392,9 +399,24 @@ fun CameraScreen(
     // locked dial is still received and can be answered. A route that simply went inactive would
     // give a wheel that silently does nothing, which is the fault this feature exists to fix rather
     // than a way of fixing it.
+    // **Armed by the effect, not by the binding.** Each filter notch has to count — None is three
+    // notches wide on the track so a stray one lands somewhere harmless — whereas exposure, zoom
+    // and focus are values you rack through, where swallowing the overflow makes the dial feel
+    // stuck. With the wheel on a channel the binding no longer says which of those it is, so
+    // asking the binding armed the filter track and made it skip.
+    val effectiveDial = if (bareDial == DialAction.Channel) {
+        when (channel) {
+            Channel.Filter -> DialAction.Filter
+            Channel.Exposure -> DialAction.Exposure
+            Channel.Zoom -> DialAction.Zoom
+            Channel.Shutter, Channel.Iso, Channel.Focus -> DialAction.Exposure
+        }
+    } else {
+        bareDial
+    }
     WheelTurns(
         active = active && wheelEnabled && !puriOpen && bareDial != DialAction.Nothing,
-        armed = bareDial != DialAction.Filter,
+        armed = effectiveDial != DialAction.Filter,
     ) { notches ->
         if (dialLive) {
             turnDial(vm, engine, bareDial, notches)
@@ -841,6 +863,36 @@ fun CameraScreen(
                         if (ev != 0) {
                             LightText(
                                 " EV ${engine.evLabel()}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        // **Zone focus has to say where it is focused, permanently.** It shipped
+                        // reporting only through the notice a wheel turn raises, which meant that
+                        // with the wheel pointed at anything else the readout never appeared at
+                        // all — a manual focus with no distance on screen, which is the thing it
+                        // exists to replace. Focus is not a transient like a zoom nudge: it is the
+                        // state of the lens, and it belongs beside the other state.
+                        if (focusReadout.isNotEmpty()) {
+                            LightText(
+                                " $focusReadout",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        // What the wheel is holding. Only shown for
+                        // the channel binding, because with a fixed binding there is nothing to
+                        // disambiguate and an unobstructed viewfinder is worth more.
+                        if (showChannel) {
+                            LightText(
+                                " ${channel.label}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        if (manualExposure.isNotEmpty()) {
+                            LightText(
+                                " $manualExposure",
                                 LightTextVariant.Detail,
                                 modifier = Modifier.padding(start = 6.dp),
                             )

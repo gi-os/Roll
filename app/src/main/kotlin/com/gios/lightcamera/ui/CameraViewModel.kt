@@ -725,8 +725,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         prefs.pressFor(binding),
         clipPlaying,
         // Read at the moment of the press, so turning the setting off hands the wheel click back
-        // to the torch on the very next click rather than at the next launch.
-        dialLockOn = prefs.dialLock.value,
+        // to its binding on the very next click rather than at the next launch — and so does
+        // waking the dial, which is the fix for a click that was claimed all session.
+        dialAsleep = prefs.dialLock.value && _dialLocked.value,
     )
 
     /**
@@ -1466,40 +1467,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // feedback for the press; the file landing has its own sound now.
                 _shutterTick.tryEmit(Unit)
 
-                // **Hold the composition, but not when the flash is on.** A flash exposure takes long
-                // enough that the preview frame grabbed here — before the flash has even fired — is a
-                // plainly wrong picture: the scene is dark, the flash hasn't lit it, and the frozen
-                // panel sits there misleading you for however long the capture takes. Without flash
-                // the held frame is roughly what the photograph will look like; with it the preview
-                // is the wrong moment entirely, so the viewfinder stays live and the flash itself
-                // is the freeze-frame the user sees.
-                if (prefs.flash.value == FlashMode.Off) {
-                    // **Filtered, if the photograph will be.** `previewFrame` hands back the
-                    // *unfiltered* surface — the live filter is a `RenderEffect` on the view, which
-                    // never reaches the bitmap. Holding that over a filtered viewfinder would show a
-                    // plain picture and then save a Game Boy one, which is the same class of
-                    // dishonesty as the Purikura preview showing one thing and saving another. So the
-                    // same shader runs over the held frame, at panel size, where it is a few
-                    // milliseconds.
-                    _held.value = engine.previewFrame()?.let { panel ->
-                        val look = lookForShot()
-                        if (look.agsl == null) {
-                            panel
-                        } else {
-                            runCatching {
-                                // A raw panel grab, so it needs the same turn the live preview
-                                // gets. Without it the frame freezes into a different picture
-                                // from the one it froze, on the directional filters.
-                                ShaderRuntime.applyToBitmap(
-                                    panel,
-                                    look,
-                                    Random.nextFloat() * 1000f,
-                                    turn = engine.previewRotationDegrees() / 90,
-                                )
-                            }.getOrDefault(panel)
-                        }
-                    }
-                }
+                // **The viewfinder is no longer frozen while a photograph is taken.**
+                //
+                // It used to hold the panel frame from the moment of the press, on the reasoning
+                // that it is roughly what the photograph will look like. Roughly was the problem.
+                // The grab happens *before* the capture completes, so the held frame is always a
+                // little ahead of the one the sensor returns — and with Reach back on it is
+                // provably a different moment, because that feature exists to save a frame from
+                // before the press. A still picture of the wrong instant, sat over the viewfinder
+                // for a second and a half, reads as the photograph you got. It is not.
+                //
+                // The progress bar was already tied to `shooting` rather than to the held frame,
+                // for the flash case where nothing could honestly be frozen. So it covers this on
+                // its own: the viewfinder stays live, the bar says the camera is working, and
+                // nothing on screen claims to be a photograph that has not been taken yet.
+
                 // **The negative takes a different route out of here entirely.** Every other path
                 // in this app captures into memory and decides afterwards; a DNG cannot, because
                 // there is no bitmap behind it and the file can only be built by the thing holding
@@ -1972,6 +1954,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                             if (stamped != null) repo.rewrite(uri, stamped)
                             refreshRoll()
                         }
+                        // Last, because the date back above replaces the whole file. Simple was
+                        // never tagged at all before this, so nothing shot in it reached the map.
+                        stampLocation(uri)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
@@ -2202,11 +2187,33 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * Not applied to the lossless copy: PNG has no dependable place to keep this, and it is always
      * a sibling of a JPEG that does — the map reads a capture, not a file.
      */
-    private suspend fun stampLocation(uri: Uri) {
+    private fun stampLocation(uri: Uri) {
         if (!prefs.tagLocation.value) return
-        val context = getApplication<Application>()
-        val where = Locations.lastKnown(context) ?: return
-        Locations.stamp(context.contentResolver, uri, where)
+        // **Launched, not awaited.** `saveAttributes` does not poke a tag into a header: to insert
+        // an EXIF segment it rewrites the entire JPEG through a temporary copy, several megabytes
+        // read and several written on a 12-megapixel file. v2.65 awaited that inline on every save,
+        // with location on by default, and turned a shutter people called quick into one that
+        // visibly waited. The photograph is on disk before this starts and nothing is waiting for
+        // it, so nothing should — the same reasoning already written down in [shootSimple] for the
+        // date back.
+        //
+        // The cost is a window of a few hundred milliseconds where the file exists without its
+        // coordinate. A photograph sent inside that window goes unlocated, which is a far better
+        // outcome than a camera that pauses after every press.
+        //
+        // **Call it last.** Anything that rewrites the file afterwards — a date back, a developed
+        // JPEG — replaces the bytes wholesale and takes the coordinate with them.
+        //
+        // Its own coroutine with its own catch, because it outlives the shutter that started it: a
+        // throw here would otherwise reach `viewModelScope` unhandled and take the process down
+        // long after the press it belonged to was over.
+        viewModelScope.launch {
+            runCatching {
+                val context = getApplication<Application>()
+                val where = Locations.lastKnown(context) ?: return@launch
+                Locations.stamp(context.contentResolver, uri, where)
+            }.onFailure { Log.e(TAG, "could not tag a location", it) }
+        }
     }
 
     /* ---------------- the roll of film ---------------- */

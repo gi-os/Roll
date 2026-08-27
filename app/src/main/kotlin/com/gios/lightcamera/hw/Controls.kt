@@ -147,18 +147,29 @@ object Controls {
         binding: Binding,
         bound: PressAction,
         clipPlaying: Boolean,
-        /** Whether the dial lock setting is on. While it is, the wheel click is the lock. */
-        dialLockOn: Boolean = false,
+        /**
+         * Whether the dial is asleep *right now* — the setting is on and it has not been woken.
+         *
+         * **Asleep, not "the setting is on", and that distinction is a bug fix.** The click used to
+         * be claimed for as long as the setting was on, which meant the lock owned it for the whole
+         * session and any action bound to the click was unreachable — you could point the click at
+         * something, press it, and watch nothing happen with no way to find out why. That went
+         * unnoticed while the click's only other job was the torch, which people leave alone, and
+         * surfaced the moment there was a second thing worth putting there.
+         *
+         * The lock only ever needs the click for one transition. The locked state is not
+         * remembered — the dial boots asleep every launch by design — so waking it is the whole
+         * job, and once awake the click belongs to its binding again.
+         */
+        dialAsleep: Boolean = false,
     ): PressAction = when {
         clipPlaying && (binding == Binding.VolumeUp || binding == Binding.VolumeDown) ->
             PressAction.Nothing
         // **The click is claimed rather than rebound.** v2.49 moved the binding's default to the
         // lock, which quietly took the torch away and — much worse — meant a mapping could exist
         // with a locked dial and nothing pointed at the thing that opens it. Claiming it here
-        // instead means the lock owns the click for exactly as long as the setting is on, the
-        // binding underneath is untouched, and turning the setting off hands the click straight
-        // back to whatever it was doing.
-        dialLockOn && binding == Binding.WheelClick -> PressAction.DialLock
+        // instead means the binding underneath is untouched and gets the click straight back.
+        dialAsleep && binding == Binding.WheelClick -> PressAction.DialLock
         else -> bound
     }
 
