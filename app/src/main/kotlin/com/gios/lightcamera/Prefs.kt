@@ -13,6 +13,7 @@ import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
+import com.gios.lightcamera.media.CaptureFormat
 import com.gios.lightcamera.media.RollScope
 import kotlin.random.Random
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -637,6 +638,48 @@ class Prefs(context: Context) {
 
     fun setBurst(value: Boolean) = set(_burst, value) { putBoolean(BURST, value) }
 
+    /**
+     * **Which files one press writes.**
+     *
+     * A set rather than a mode, because these are not alternatives: a negative and a print are
+     * different things to have, and the reason to shoot RAW is rarely a reason to give up the file
+     * you can actually send someone. Every other camera on this phone makes you choose, which is
+     * the thing this replaces.
+     *
+     * JPEG alone is the default, and is what the app has always done.
+     *
+     * The set is never allowed to empty — a shutter that writes nothing is not a setting, it is a
+     * broken camera, and it would be discovered an afternoon later.
+     */
+    private val _formats = MutableStateFlow(readFormats())
+    val formats: StateFlow<Set<CaptureFormat>> = _formats.asStateFlow()
+
+    private fun readFormats(): Set<CaptureFormat> {
+        val stored = prefs.getStringSet(FORMATS, null)
+            ?.mapNotNull { name -> CaptureFormat.entries.firstOrNull { it.name == name } }
+            ?.toSet()
+        return stored?.takeIf { it.isNotEmpty() } ?: setOf(CaptureFormat.Jpeg)
+    }
+
+    fun toggleFormat(format: CaptureFormat) {
+        val next =
+            if (format in _formats.value) _formats.value - format else _formats.value + format
+        setFormats(next)
+    }
+
+    fun setFormats(value: Set<CaptureFormat>) {
+        // The last one cannot be turned off. Refusing here rather than in the UI means every route
+        // in — a settings tap, a restored preference, a future binding — obeys the same rule.
+        val safe = value.takeIf { it.isNotEmpty() } ?: setOf(CaptureFormat.Jpeg)
+        set(_formats, safe) { putStringSet(FORMATS, safe.map { it.name }.toSet()) }
+    }
+
+    /** True when this press has to go through the shader path to produce what was asked for. */
+    fun wantsLossless(): Boolean = CaptureFormat.Png in _formats.value
+
+    /** True when the negative is wanted. Whether it is *possible* is the camera's answer. */
+    fun wantsNegative(): Boolean = CaptureFormat.Dng in _formats.value
+
     /** The two free slots at the end of the band. Exposure then nothing is where the app started. */
     private val _bandSlots = MutableStateFlow(
         listOf(
@@ -829,6 +872,7 @@ class Prefs(context: Context) {
         const val HISTOGRAM = "histogram"
         const val CLIPPING = "clipping"
         const val BURST = "burst"
+        const val FORMATS = "captureFormats"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

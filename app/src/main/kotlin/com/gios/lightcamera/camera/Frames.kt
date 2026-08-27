@@ -68,7 +68,19 @@ object Frames {
     private const val EXIF_TRANSVERSE = 7
     private const val EXIF_ROTATE_270 = 8
 
-    class Processed(val jpeg: ByteArray, val width: Int, val height: Int)
+    /**
+     * The bytes a capture turned into.
+     *
+     * [png] is present only when it was asked for. It is **not** a conversion of [jpeg] — a PNG of
+     * a JPEG is a lossless copy of damage that has already happened. It comes off the same bitmap,
+     * before the JPEG encoder sees it, which is the only point at which lossless means anything.
+     */
+    class Processed(
+        val jpeg: ByteArray,
+        val width: Int,
+        val height: Int,
+        val png: ByteArray? = null,
+    )
 
     /** How far to turn a captured frame, and whether to mirror it afterwards. */
     class Upright(val turn: Int, val flip: Boolean)
@@ -111,12 +123,22 @@ object Frames {
         seed: Float,
         stampAt: Long? = null,
         stampStyle: StampStyle = StampStyle.Dots,
+        /**
+         * Also encode a lossless copy.
+         *
+         * **This forces the develop path even with nothing to develop.** The fast path writes the
+         * sensor's own JPEG and never holds a bitmap, so there is nothing to make a PNG out of
+         * except that JPEG — and a PNG of a JPEG is bytes spent preserving artefacts. Asking for
+         * one therefore costs a decode and an encode, which is the honest price and is why the
+         * setting says so.
+         */
+        wantPng: Boolean = false,
     ): Processed {
         val needsCrop = aspect != FrameAspect.Full
         // The date back costs a decode and a re-encode on a photograph that would otherwise have
         // been written exactly as the camera produced it. That is the price of printing on the
         // negative, it only applies when the stamp is on, and it is worth saying out loud.
-        if (filter.agsl == null && !needsCrop && stampAt == null) return untouched(frame)
+        if (filter.agsl == null && !needsCrop && stampAt == null && !wantPng) return untouched(frame)
 
         // **A filter must never cost you the photograph.** Everything below decodes a 12-megapixel
         // JPEG into a 48MB bitmap, mirrors it, hands it to a GPU and encodes it again, and any step
@@ -126,7 +148,7 @@ object Frames {
         // sensor's own frame, unfiltered, rather than nothing at all. `runCatching` catches `Error`
         // as well as `Exception`, which for the out-of-memory case is the whole point of it.
         return runCatching {
-            develop(frame, filter, aspect, seed, stampAt, stampStyle)
+            develop(frame, filter, aspect, seed, stampAt, stampStyle, wantPng)
         }.onFailure {
             Log.e(TAG, "processing failed; writing the frame the sensor gave us", it)
         }.getOrElse { untouched(frame) }
@@ -145,6 +167,7 @@ object Frames {
         seed: Float,
         stampAt: Long?,
         stampStyle: StampStyle,
+        wantPng: Boolean,
     ): Processed {
         var bitmap = decodeUpright(frame.jpeg, frame.rotationDegrees, frame.mirrored)
             ?: return untouched(frame)
@@ -172,7 +195,22 @@ object Frames {
 
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 6)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-        return Processed(out.toByteArray(), bitmap.width, bitmap.height)
+        // **PNG first in memory, then the bitmap goes.** A lossless encode of a 12-megapixel frame
+        // is 20-35MB and the bitmap it came from is another 48MB; holding a third copy while both
+        // are alive is where this runs out. It is also allowed to fail on its own without taking
+        // the photograph with it — a JPEG that saved is a photograph, a PNG that didn't is a
+        // setting that didn't apply.
+        val png = if (wantPng) {
+            runCatching {
+                val bytes = ByteArrayOutputStream(bitmap.width * bitmap.height / 2)
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes)
+                bytes.toByteArray()
+            }.onFailure { Log.e(TAG, "lossless encode failed; the JPEG still saved", it) }
+                .getOrNull()
+        } else {
+            null
+        }
+        return Processed(out.toByteArray(), bitmap.width, bitmap.height, png)
     }
 
     /**

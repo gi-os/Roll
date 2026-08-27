@@ -261,6 +261,63 @@ class MediaStoreRepo(private val context: Context) {
     }
 
     /**
+     * The name one press writes under, milliseconds and all.
+     *
+     * **The milliseconds are the group key, not decoration.** Every file from one press shares this
+     * stem, and that shared name is the only record anywhere that they are one photograph —
+     * MediaStore has no field for the relationship, which is the same reason [framesOf] matches a
+     * booth strip to its frames by name. At second resolution two presses inside one second would
+     * write the same stem and be read back as a single photograph with two of everything.
+     */
+    fun stemFor(takenAt: Long): String =
+        "ROLL_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date(takenAt))
+
+    /**
+     * An empty row in the camera roll for something *else* to write into.
+     *
+     * The negative is the one file this app does not encode: CameraX writes the DNG itself, so it
+     * needs somewhere to write it. The row is created pending, exactly as [save] does, and the
+     * caller must clear that flag with [publish] once the bytes are down — a pending row is
+     * invisible to every other gallery on the phone, which is what stops a half-written negative
+     * appearing in Photos as a broken thumbnail.
+     */
+    fun reserve(
+        takenAt: Long,
+        format: CaptureFormat,
+        stem: String,
+    ): Uri? {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$stem.${format.extension}")
+            put(MediaStore.Images.Media.MIME_TYPE, format.mime)
+            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Images.Media.DATE_TAKEN, takenAt)
+            put(MediaStore.Images.Media.DATE_ADDED, takenAt / 1000)
+            put(MediaStore.Images.Media.DATE_MODIFIED, takenAt / 1000)
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        return runCatching { context.contentResolver.insert(collection, values) }
+            .onFailure { Log.e(TAG, "could not reserve a row for ${format.label}", it) }
+            .getOrNull()
+    }
+
+    /** Clear the pending flag, making a reserved row visible to the rest of the phone. */
+    fun publish(uri: Uri) {
+        runCatching {
+            context.contentResolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null,
+                null,
+            )
+        }.onFailure { Log.e(TAG, "could not publish $uri", it) }
+    }
+
+    /** Drop a reserved row whose bytes never arrived, so nothing is left half-written. */
+    fun abandon(uri: Uri) {
+        runCatching { context.contentResolver.delete(uri, null, null) }
+    }
+
+    /**
      * Write a JPEG into the camera roll.
      *
      * [takenAt] is passed in rather than read from the clock because a developed roll has to
@@ -275,12 +332,27 @@ class MediaStoreRepo(private val context: Context) {
         suffix: String? = null,
         /** True for one of the four frames behind a strip: saved, but kept out of the roll. */
         hidden: Boolean = false,
+        /**
+         * Which format these bytes are.
+         *
+         * Only ever changes the name and the MIME type — the bytes arrive already encoded, because
+         * the encoder needs the bitmap and the bitmap belongs to [com.gios.lightcamera.camera.Frames].
+         */
+        format: CaptureFormat = CaptureFormat.Jpeg,
+        /**
+         * The name every file from one press shares, minus its extension.
+         *
+         * Passed in rather than derived from [takenAt] so that a JPEG and its lossless twin cannot
+         * land in different groups because the clock ticked between two `save` calls. Null means
+         * "one file, on its own" and the stem is made here.
+         */
+        stem: String? = null,
     ): Uri? = withContext(Dispatchers.IO) {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(takenAt))
+        val base = stem ?: stemFor(takenAt)
         val tail = suffix?.let { "_$it" } ?: ""
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "ROLL_$stamp$tail.jpg")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$base$tail.${format.extension}")
+            put(MediaStore.Images.Media.MIME_TYPE, format.mime)
             put(
                 MediaStore.Images.Media.RELATIVE_PATH,
                 if (hidden) STRIP_PATH else "DCIM/Camera",

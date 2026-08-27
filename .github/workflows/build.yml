@@ -5,7 +5,14 @@ on:
     branches: [main]
     paths-ignore:
       - '**.md'
+      - 'signing-fingerprint.txt'
   workflow_dispatch:
+    inputs:
+      channel:
+        description: 'nightly (default) or official'
+        type: choice
+        options: [nightly, official]
+        default: nightly
 
 permissions:
   contents: write
@@ -30,8 +37,28 @@ jobs:
       # moves on every push and Obtainium always has something newer to offer.
       - name: Stamp version
         id: ver
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          DISPATCH_CHANNEL: ${{ inputs.channel }}
         run: |
           RUN=${{ github.run_number }}
+
+          # A push is a nightly. Roll ships more often than anything else here, and
+          # every one of those pushes used to be offered to everyone within the hour
+          # -- fine when one person ran it, wrong once people rely on it. An official
+          # build is asked for: `[release]` in the commit subject, or running this
+          # workflow by hand and picking official.
+          CHANNEL=nightly
+          # The SUBJECT LINE only. Searching the whole message means any commit that
+          # merely discusses releasing cuts a release.
+          SUBJECT=$(printf '%s' "$COMMIT_MSG" | head -1)
+          case "$SUBJECT" in *"[release]"*) CHANNEL=official ;; esac
+          # Empty on a push, so a dispatch cannot inherit a [release] from the commit
+          # it happens to be sitting on.
+          if [ "$DISPATCH_CHANNEL" = "official" ]; then CHANNEL=official; fi
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "building a ${CHANNEL}"
+
           BASE=$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+).*"/\1/')
           VERSION="${BASE}.${RUN}"
           sed -i -E "s/versionCode = .*/versionCode = ${RUN}/" app/build.gradle.kts
@@ -128,15 +155,37 @@ jobs:
           path: debugout/*.apk
           if-no-files-found: error
 
+      # The whole file was the release body, so every release carried the entire
+      # history and BrightMarket showed all of it as "what changed". Newest section
+      # only, with a fallback so a release never blocks on prose.
+      - name: Extract release notes
+        id: notes
+        run: |
+          if [ -f RELEASE_NOTES.md ]; then
+            awk '/^## /{n++} n==1' RELEASE_NOTES.md | tail -n +2 > body.md
+          fi
+          [ -s body.md ] || echo "See the commit log for changes in this build." > body.md
+          echo "--- release body ---"; cat body.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
-          name: Roll v${{ steps.ver.outputs.version }}
+          # Nightlies get their own tag namespace so they never read as a version,
+          # and `prerelease: true` is the entire guarantee that they reach nobody who
+          # has not opted in -- the index builder skips prereleases when choosing the
+          # stable entry and records them separately under `preview`.
+          tag_name: >-
+            ${{ steps.ver.outputs.channel == 'official'
+                && format('v{0}', steps.ver.outputs.version)
+                || format('nightly-{0}', steps.ver.outputs.version) }}
+          name: >-
+            ${{ steps.ver.outputs.channel == 'official'
+                && format('Roll v{0}', steps.ver.outputs.version)
+                || format('Nightly {0}', steps.ver.outputs.version) }}
           files: out/LightCamera-v${{ steps.ver.outputs.version }}.apk
-          body_path: RELEASE_NOTES.md
-          generate_release_notes: true
-          make_latest: true
+          body_path: body.md
+          prerelease: ${{ steps.ver.outputs.channel != 'official' }}
+          make_latest: ${{ steps.ver.outputs.channel == 'official' }}
 
       # Tell the index a release exists instead of waiting for its cron. GitHub
       # schedules are best-effort -- observed 70 minutes apart against a 15
@@ -146,9 +195,17 @@ jobs:
         if: success()
         continue-on-error: true
         run: |
-          curl -sf -X POST \
+          # A retry-and-shrug step must print which failure it shrugged at. The old
+          # form printed one fixed sentence, so a dead token, a network blip and a
+          # renamed repo were indistinguishable -- and a 401 went unnoticed across
+          # the whole fleet for weeks.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
             -H "Authorization: Bearer ${{ secrets.INDEX_DISPATCH_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/gi-os/brightmarket-index/dispatches \
-            -d "{\"event_type\":\"app-released\"}" \
-          || echo "index ping failed; the hourly cron will pick this up"
+            -d "{\"event_type\":\"app-released\"}") || code=000
+          if [ "$code" = "204" ]; then
+            echo "index pinged"
+          else
+            echo "::warning::index ping refused with HTTP $code; the cron will pick this up"
+          fi

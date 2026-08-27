@@ -46,6 +46,7 @@ import com.gios.lightcamera.ui.theme.LightText
 import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
+import com.gios.lightcamera.media.CaptureFormat
 
 /**
  * Which page of settings is showing.
@@ -267,6 +268,41 @@ private fun FrameTab(vm: CameraViewModel) {
     }
     Setting("Sharpest of eight", if (burst) "On" else "Off") { vm.prefs.setBurst(!burst) }
     Setting("Sounds", if (sounds) "Focus beep" else "Off") { vm.prefs.setSounds(!sounds) }
+
+    Section("Files") {
+        Note(
+            "One press can write more than one file, and they stay one photograph on the roll — " +
+                "the formats are alternatives to each other, not to the picture. Lossless is for " +
+                "the flat-colour filters: Dither, Halftone and Game Boy are made of hard edges " +
+                "beside flat fields, which is the exact thing JPEG smears, and the pattern is the " +
+                "photograph. It costs a decode, a second encode and about 30MB a shot. Pro only — " +
+                "Simple writes the sensor's own JPEG untouched, and that is the whole point of it.",
+        )
+    }
+    val formats by vm.prefs.formats.collectAsState()
+    // RAW is deliberately absent until the capture path that writes one is here. A switch that
+    // turns on a file the camera does not yet produce is worse than no switch.
+    CaptureFormat.entries.filter { it != CaptureFormat.Dng }.forEach { format ->
+        val on = format in formats
+        val only = on && formats.size == 1
+        Setting(
+            label = when (format) {
+                CaptureFormat.Jpeg -> "JPEG"
+                CaptureFormat.Png -> "Lossless PNG"
+                CaptureFormat.Dng -> "RAW negative"
+            },
+            // The last format standing says so rather than silently refusing the tap, because a
+            // control that does nothing and explains nothing reads as a bug.
+            value = when {
+                only -> "Only"
+                on -> "On"
+                else -> "Off"
+            },
+            enabled = !only,
+        ) {
+            vm.prefs.toggleFormat(format)
+        }
+    }
 }
 
 /* ---------------------------------- look ---------------------------------- */

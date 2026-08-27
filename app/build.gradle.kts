@@ -35,7 +35,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 1
-        versionName = "2.60.1"
+        versionName = "2.61.1"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
@@ -110,12 +110,20 @@ dependencies {
 
     // CameraX. camera-camera2 is not just the backend here — Camera2Interop is how the
     // hardware face detector is switched on and read back.
-    implementation("androidx.camera:camera-core:1.4.1")
-    implementation("androidx.camera:camera-camera2:1.4.1")
-    implementation("androidx.camera:camera-lifecycle:1.4.1")
-    implementation("androidx.camera:camera-view:1.4.1")
+    //
+    // **1.5 rather than 1.4, for one reason: DNG.** `ImageCapture.OUTPUT_FORMAT_RAW` and
+    // `OUTPUT_FORMAT_RAW_JPEG` arrived in 1.5.0, and they are the whole reason Roll can write a
+    // negative without standing up a second Camera2 session beside the one CameraX already owns.
+    // Two stacks driving one sensor is the kind of thing that works until it doesn't.
+    //
+    // The bump costs nothing structural: 1.5.3 wants `compileSdk 35` and AGP 8.6, and this module
+    // is already on 35 and 8.7.3.
+    implementation("androidx.camera:camera-core:1.5.3")
+    implementation("androidx.camera:camera-camera2:1.5.3")
+    implementation("androidx.camera:camera-lifecycle:1.5.3")
+    implementation("androidx.camera:camera-view:1.5.3")
     // Video mode. Bound instead of ImageCapture rather than alongside it — see CameraEngine.
-    implementation("androidx.camera:camera-video:1.4.1")
+    implementation("androidx.camera:camera-video:1.5.3")
 
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Shake-to-report posts a GitHub issue. The only network this app does, and only ever

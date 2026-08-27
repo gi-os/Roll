@@ -35,6 +35,9 @@ import com.gios.lightcamera.ocr.TextScan
 import com.gios.lightcamera.qr.CodeHandoff
 import com.gios.lightcamera.qr.Codes
 import com.gios.lightcamera.qr.ScanGate
+import com.gios.lightcamera.media.CaptureFormat
+import com.gios.lightcamera.media.CaptureGroup
+import com.gios.lightcamera.media.Captures
 import com.gios.lightcamera.media.MediaStoreRepo
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.media.RollScope
@@ -105,8 +108,43 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         prefs.favourites,
         prefs.scope,
     ) { list, starred, scope ->
-        if (scope == RollScope.Favourites) list.filter { it.name in starred } else list
+        val scoped = if (scope == RollScope.Favourites) {
+            list.filter { it.name in starred }
+        } else {
+            list
+        }
+        // **One press is one item, even when it wrote three files.** The grid draws this list
+        // directly and the viewer pages through it, so collapsing here is what stops a negative and
+        // its print appearing as two photographs of the same moment — which is what a roll full of
+        // near-duplicates would be, and the reason most cameras make you pick a format instead.
+        // The alternates are not lost: [groupOf] finds them, and the viewer's corner control walks
+        // them.
+        Captures.of(scoped).map { it.primary.photo }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Every file from every press, grouped, before the roll collapses it.
+     *
+     * Kept beside [photos] rather than recomputed by the viewer: the grouping is a parse of every
+     * filename in the roll, which is cheap once and wasteful on every recomposition.
+     */
+    val groups: StateFlow<List<CaptureGroup>> = combine(
+        _photos,
+        prefs.favourites,
+        prefs.scope,
+    ) { list, starred, scope ->
+        val scoped = if (scope == RollScope.Favourites) {
+            list.filter { it.name in starred }
+        } else {
+            list
+        }
+        Captures.of(scoped)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** The other formats of the photograph on screen, or null when there is only the one file. */
+    fun groupOf(photo: Photo): CaptureGroup? =
+        groups.value.firstOrNull { group -> group.members.any { it.photo.id == photo.id } }
+            ?.takeIf { it.hasAlternatives }
 
     private val _loadingRoll = MutableStateFlow(true)
     val loadingRoll: StateFlow<Boolean> = _loadingRoll.asStateFlow()
@@ -1385,7 +1423,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 val seed = Random.nextFloat() * 1000f
                 val stampAt = stampTime(activeFilter)
                 val processed = withContext(Dispatchers.Default) {
-                    Frames.process(frame, activeFilter, aspect, seed, stampAt, prefs.stampStyle.value)
+                    Frames.process(
+                        frame,
+                        activeFilter,
+                        aspect,
+                        seed,
+                        stampAt,
+                        prefs.stampStyle.value,
+                        wantPng = prefs.wantsLossless(),
+                    )
                 }
 
                 finish(processed, activeFilter.id)
@@ -1800,12 +1846,41 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        // **One press, one stem, however many files.** The name is made once and handed to every
+        // save, because it is the only thing tying them together — MediaStore has no field for
+        // "these rows are one photograph", so two saves that each asked the clock for a stem could
+        // land a millisecond apart and be read back as two photographs with one file each.
+        val stem = repo.stemFor(takenAt)
+        val wanted = prefs.formats.value
+
         val uri = repo.save(
             jpeg = processed.jpeg,
             takenAt = takenAt,
             width = processed.width,
             height = processed.height,
+            stem = stem,
         )
+
+        // The lossless copy, when there is one. **Its failure is not the photograph's failure**:
+        // the JPEG above is already on disk and already a photograph, so a PNG that could not be
+        // encoded or could not be written is a line on the viewfinder, not a lost shot.
+        if (CaptureFormat.Png in wanted) {
+            val png = processed.png
+            if (png == null) {
+                showNotice("Lossless copy failed")
+            } else {
+                val pngUri = repo.save(
+                    jpeg = png,
+                    takenAt = takenAt,
+                    width = processed.width,
+                    height = processed.height,
+                    stem = stem,
+                    format = CaptureFormat.Png,
+                )
+                if (pngUri == null) showNotice("Couldn't save the lossless copy")
+            }
+        }
+
         if (uri == null) {
             showNotice("Couldn't save")
         } else if (prefs.sounds.value) {
