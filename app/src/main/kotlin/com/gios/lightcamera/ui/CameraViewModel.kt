@@ -35,6 +35,7 @@ import com.gios.lightcamera.ocr.TextScan
 import com.gios.lightcamera.qr.CodeHandoff
 import com.gios.lightcamera.qr.Codes
 import com.gios.lightcamera.qr.ScanGate
+import androidx.camera.core.ImageCapture
 import com.gios.lightcamera.media.CaptureFormat
 import com.gios.lightcamera.media.CaptureGroup
 import com.gios.lightcamera.media.Captures
@@ -397,6 +398,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // Size is a use-case configuration, so changing it rebinds the camera.
         viewModelScope.launch {
             prefs.photoSize.collect { engine.setPhotoSize(it, prefs.flash.value) }
+        }
+        // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
+        // what the shutter does with it, so it has to be settled before the press rather than at it.
+        viewModelScope.launch {
+            prefs.formats.collect {
+                engine.setNegative(CaptureFormat.Dng in it, prefs.flash.value)
+            }
         }
         // Continuous AF is driven from the face list rather than from a timer, so a still
         // subject costs nothing at all.
@@ -1376,6 +1384,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
+                // **The negative takes a different route out of here entirely.** Every other path
+                // in this app captures into memory and decides afterwards; a DNG cannot, because
+                // there is no bitmap behind it and the file can only be built by the thing holding
+                // the capture metadata. So when a negative is wanted the destinations are made
+                // first and CameraX writes both files itself. See [shootNegative].
+                if (prefs.wantsNegative() && engine.negativeSupported.value) {
+                    shootNegative()
+                    return@launch
+                }
+
                 val startedAt = System.nanoTime()
                 // **A deadline on the capture, because a shutter that hangs never comes back.**
                 // `takePicture` reports both success and failure through a callback, and a HAL that
@@ -1504,6 +1522,126 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // print with a different face in it.
         if (puri != null) reshufflePuri()
         return true
+    }
+
+    /**
+     * One press that writes a negative.
+     *
+     * **The order matters and it is not the obvious one.** The rows are described *before* the
+     * capture, because CameraX needs somewhere to put two files and because both of them have to
+     * carry the same stem — that shared name is the only thing in the system recording that they
+     * are one photograph. Asking the clock twice, once per file, would put them in different
+     * groups whenever a millisecond fell between the two inserts.
+     *
+     * **The JPEG is developed afterwards rather than instead.** With a filter on, or a lossless
+     * copy wanted, the JPEG CameraX just wrote is read back, put through the shader and written
+     * over in place. That costs a decode that the ordinary Pro path does not — but the alternative
+     * is two exposures a moment apart, and a negative that does not match the print it came with
+     * is not a negative, it is a different photograph.
+     *
+     * A failure anywhere past the capture leaves the files that did land. A DNG on disk with no
+     * filter applied to its JPEG is a worse photograph than intended; no photograph is worse still.
+     */
+    private suspend fun shootNegative() {
+        val takenAt = System.currentTimeMillis()
+        val stem = repo.stemFor(takenAt)
+        val resolver = getApplication<Application>().contentResolver
+        val collection = repo.imagesCollection()
+
+        val rawOptions = ImageCapture.OutputFileOptions.Builder(
+            resolver,
+            collection,
+            repo.valuesFor(takenAt, CaptureFormat.Dng, stem),
+        ).build()
+        val jpegOptions = ImageCapture.OutputFileOptions.Builder(
+            resolver,
+            collection,
+            repo.valuesFor(takenAt, CaptureFormat.Jpeg, stem),
+        ).build()
+
+        val startedAt = System.nanoTime()
+        // The same deadline as every other capture, and for the same reason: two callbacks that
+        // never arrive would leave `_shooting` latched and every press after it silently dropped.
+        val attempt = runCatching {
+            withTimeout(CAPTURE_DEADLINE_MS) { engine.captureNegative(rawOptions, jpegOptions) }
+        }.onFailure { Log.e(TAG, "negative capture failed", it) }
+        val took = (System.nanoTime() - startedAt) / 1_000_000
+        _shutterTick.tryEmit(Unit)
+
+        val pair = attempt.getOrNull()
+        if (pair == null) {
+            val why = attempt.exceptionOrNull()?.message?.take(48)
+            showNotice(if (why.isNullOrBlank()) "Shutter failed" else "Shutter: $why")
+            return
+        }
+        if (prefs.timings.value) showNotice("${took}ms shot · RAW")
+
+        val jpegUri = pair.jpeg
+        if (pair.raw == null) showNotice("No negative — the JPEG saved")
+        if (jpegUri == null) {
+            // The negative alone is still a photograph, and the roll opens it.
+            if (pair.raw != null && prefs.sounds.value) beeps.saved()
+            return
+        }
+
+        val activeFilter = lookForShot()
+        val wantPng = prefs.wantsLossless()
+        val aspect = prefs.aspect.value
+        val stampAt = stampTime(activeFilter)
+        val needsDeveloping = activeFilter.agsl != null ||
+            aspect != FrameAspect.Full ||
+            stampAt != null ||
+            wantPng
+        if (!needsDeveloping) {
+            if (prefs.sounds.value) beeps.saved()
+            return
+        }
+
+        val original = withContext(Dispatchers.IO) {
+            runCatching { resolver.openInputStream(jpegUri)?.use { it.readBytes() } }.getOrNull()
+        }
+        if (original == null) {
+            showNotice("Saved, but couldn't develop it")
+            return
+        }
+
+        val processed = withContext(Dispatchers.Default) {
+            Frames.process(
+                // Rotation is left to the EXIF the camera wrote, which is why this is zero rather
+                // than the panel's idea of which way up the phone is: CameraX has already applied
+                // `targetRotation` to the file, and turning it a second time is how a photograph
+                // ends up on its side.
+                CapturedFrame(jpeg = original, rotationDegrees = 0, mirrored = false),
+                activeFilter,
+                aspect,
+                Random.nextFloat() * 1000f,
+                stampAt,
+                prefs.stampStyle.value,
+                wantPng = wantPng,
+            )
+        }
+
+        val rewritten = repo.rewrite(jpegUri, processed.jpeg)
+        if (!rewritten) showNotice("Couldn't develop the JPEG")
+
+        if (wantPng) {
+            val png = processed.png
+            if (png == null) {
+                showNotice("Lossless copy failed")
+            } else if (
+                repo.save(
+                    jpeg = png,
+                    takenAt = takenAt,
+                    width = processed.width,
+                    height = processed.height,
+                    stem = stem,
+                    format = CaptureFormat.Png,
+                ) == null
+            ) {
+                showNotice("Couldn't save the lossless copy")
+            }
+        }
+        if (prefs.sounds.value) beeps.saved()
     }
 
     /**

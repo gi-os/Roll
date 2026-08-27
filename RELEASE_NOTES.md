@@ -1,3 +1,30 @@
+## Roll v2.62 — RAW
+
+**The negative, from the same exposure as the print.** Turn on RAW in Settings -> FRAME -> Files
+and one press writes a DNG and its JPEG together -- not two captures a moment apart, which is the
+only version of this worth having. They share a name, so the roll shows them as one photograph.
+
+No filter can reach a RAW file, and that is what it is for: a DNG is the sensor's readout before
+the picture is made, so there are no pixels to put a shader on yet. Develop it later, and
+differently, which is the whole argument for keeping one.
+
+**With a filter on, the JPEG is developed after the fact.** The one CameraX wrote is read back, put
+through the shader and written over in place. That costs a decode the ordinary Pro path does not --
+the price of the negative and its print being the same moment.
+
+**The switch says "Unavailable" where the camera means it.** RAW is an optional capability and the
+selfie sensor commonly lacks it where the main one has it, so it is asked of the camera on every
+bind rather than assumed -- a capability check that never happens always surfaces at the shutter,
+which is the worst place for it.
+
+**Simple is untouched.** RAW and lossless are Pro. Asking for a negative used to switch Simple's
+ring buffer off as a side effect even though Simple was never going to write one; the format is now
+requested only where it is used.
+
+**A corner control in the viewer** names the formats a press produced and picks which one Send uses.
+It does not change what is drawn: a JPEG and its lossless twin are the same photograph, and a DNG
+has no picture to show until something develops it.
+
 ## Roll v2.61 — one press, more than one file
 
 **A photograph can now be written as more than one file, and it stays one photograph on the roll.**

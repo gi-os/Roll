@@ -157,6 +157,9 @@ fun ViewerScreen(
     ColourEffect(enabled = colour != com.gios.lightcamera.Colour.Off)
 
     // Decode no bigger than the panel. A 12MP JPEG at 1:1 is 48MB of heap for a 1080px view.
+    // photo id -> the id of the file its actions should use. Empty means "the one on screen".
+    var chosenFormat by remember { mutableStateOf(mapOf<Long, Long>()) }
+
     val screenWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) {
         LocalConfiguration.current.screenWidthDp.dp.roundToPx()
     }
@@ -304,6 +307,24 @@ fun ViewerScreen(
 
         if (chromeVisible) {
             val photo = photoAt(pager.currentPage)
+            // **Which file the buttons act on, when one press wrote several.**
+            //
+            // The roll shows one item per press, so the pager never leaves this page to reach the
+            // negative — there has to be somewhere to say "that one". Keyed by photo id rather
+            // than by page, because pages renumber when something is trashed and the selection
+            // would follow the position instead of the picture.
+            //
+            // What it does *not* do is change what is drawn. A JPEG and its lossless twin are the
+            // same photograph and swapping the pixels would look like nothing happening, and a DNG
+            // has no picture to draw at all until something develops it. So this names the formats
+            // that exist and decides which one is sent.
+            val group = photo?.let { vm.groupOf(it) }
+            val chosen = if (photo != null && group != null) {
+                val wantId = chosenFormat[photo.id] ?: photo.id
+                group.members.firstOrNull { it.photo.id == wantId } ?: group.primary
+            } else {
+                null
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -323,6 +344,21 @@ fun ViewerScreen(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                // Only when there is something to choose between. A label that always says JPG is
+                // a label nobody reads, and this app's whole viewfinder argument is that an
+                // unobstructed picture beats a decorated one.
+                if (group != null && chosen != null && photo != null) {
+                    LightText(
+                        text = chosen.format?.label ?: "FILE",
+                        variant = LightTextVariant.Superfine,
+                        modifier = Modifier
+                            .lightClickable {
+                                val next = group.after(chosen)
+                                chosenFormat = chosenFormat + (photo.id to next.photo.id)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
                 LightText(
                     text = "${pager.currentPage + 1}/${photos.size}",
                     variant = LightTextVariant.Superfine,
@@ -417,7 +453,14 @@ fun ViewerScreen(
                     icon = LightIcons.Share,
                     onClick = {
                         val target = photoAt(pager.currentPage) ?: return@ChromeIcon
-                        onSend(listOf(target))
+                        // The file the corner control is pointing at, which is the one on screen
+                        // unless somebody said otherwise.
+                        val pick = vm.groupOf(target)
+                            ?.members
+                            ?.firstOrNull { it.photo.id == chosenFormat[target.id] }
+                            ?.photo
+                            ?: target
+                        onSend(listOf(pick))
                     },
                 )
             }

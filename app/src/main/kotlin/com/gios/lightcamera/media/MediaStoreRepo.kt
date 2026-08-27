@@ -273,49 +273,32 @@ class MediaStoreRepo(private val context: Context) {
         "ROLL_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date(takenAt))
 
     /**
-     * An empty row in the camera roll for something *else* to write into.
+     * The row a file is described by, before anything is written into it.
      *
-     * The negative is the one file this app does not encode: CameraX writes the DNG itself, so it
-     * needs somewhere to write it. The row is created pending, exactly as [save] does, and the
-     * caller must clear that flag with [publish] once the bytes are down — a pending row is
-     * invisible to every other gallery on the phone, which is what stops a half-written negative
-     * appearing in Photos as a broken thumbnail.
+     * Shared by [save], which writes the bytes itself, and by the negative, which does not — there
+     * CameraX is handed these values and does the insert, because it is the only thing that can
+     * build a DNG. **One function so the two paths cannot drift**: a DNG landing in a different
+     * folder, or with a different `DATE_TAKEN`, would sort away from the JPEG it was taken with and
+     * break the group they are supposed to form.
      */
-    fun reserve(
+    fun valuesFor(
         takenAt: Long,
         format: CaptureFormat,
         stem: String,
-    ): Uri? {
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "$stem.${format.extension}")
-            put(MediaStore.Images.Media.MIME_TYPE, format.mime)
-            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/Camera")
-            put(MediaStore.Images.Media.DATE_TAKEN, takenAt)
-            put(MediaStore.Images.Media.DATE_ADDED, takenAt / 1000)
-            put(MediaStore.Images.Media.DATE_MODIFIED, takenAt / 1000)
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-        return runCatching { context.contentResolver.insert(collection, values) }
-            .onFailure { Log.e(TAG, "could not reserve a row for ${format.label}", it) }
-            .getOrNull()
+        suffix: String? = null,
+        hidden: Boolean = false,
+    ): ContentValues = ContentValues().apply {
+        val tail = suffix?.let { "_$it" } ?: ""
+        put(MediaStore.Images.Media.DISPLAY_NAME, "$stem$tail.${format.extension}")
+        put(MediaStore.Images.Media.MIME_TYPE, format.mime)
+        put(MediaStore.Images.Media.RELATIVE_PATH, if (hidden) STRIP_PATH else "DCIM/Camera")
+        put(MediaStore.Images.Media.DATE_TAKEN, takenAt)
+        put(MediaStore.Images.Media.DATE_ADDED, takenAt / 1000)
+        put(MediaStore.Images.Media.DATE_MODIFIED, takenAt / 1000)
     }
 
-    /** Clear the pending flag, making a reserved row visible to the rest of the phone. */
-    fun publish(uri: Uri) {
-        runCatching {
-            context.contentResolver.update(
-                uri,
-                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
-                null,
-                null,
-            )
-        }.onFailure { Log.e(TAG, "could not publish $uri", it) }
-    }
-
-    /** Drop a reserved row whose bytes never arrived, so nothing is left half-written. */
-    fun abandon(uri: Uri) {
-        runCatching { context.contentResolver.delete(uri, null, null) }
-    }
+    /** The stills table these rows go into. Public so the negative can be aimed at the same one. */
+    fun imagesCollection(): Uri = collection
 
     /**
      * Write a JPEG into the camera roll.
@@ -349,19 +332,11 @@ class MediaStoreRepo(private val context: Context) {
         stem: String? = null,
     ): Uri? = withContext(Dispatchers.IO) {
         val base = stem ?: stemFor(takenAt)
-        val tail = suffix?.let { "_$it" } ?: ""
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "$base$tail.${format.extension}")
-            put(MediaStore.Images.Media.MIME_TYPE, format.mime)
-            put(
-                MediaStore.Images.Media.RELATIVE_PATH,
-                if (hidden) STRIP_PATH else "DCIM/Camera",
-            )
-            put(MediaStore.Images.Media.DATE_TAKEN, takenAt)
-            put(MediaStore.Images.Media.DATE_ADDED, takenAt / 1000)
-            put(MediaStore.Images.Media.DATE_MODIFIED, takenAt / 1000)
+        val values = valuesFor(takenAt, format, base, suffix, hidden).apply {
             if (width > 0) put(MediaStore.Images.Media.WIDTH, width)
             if (height > 0) put(MediaStore.Images.Media.HEIGHT, height)
+            // Invisible to every other gallery on the phone until the bytes are down, so a killed
+            // write is not a broken thumbnail in Photos.
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val resolver = context.contentResolver

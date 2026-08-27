@@ -275,15 +275,22 @@ private fun FrameTab(vm: CameraViewModel) {
                 "the formats are alternatives to each other, not to the picture. Lossless is for " +
                 "the flat-colour filters: Dither, Halftone and Game Boy are made of hard edges " +
                 "beside flat fields, which is the exact thing JPEG smears, and the pattern is the " +
-                "photograph. It costs a decode, a second encode and about 30MB a shot. Pro only — " +
-                "Simple writes the sensor's own JPEG untouched, and that is the whole point of it.",
+                "photograph. It costs a decode, a second encode and about 30MB a shot.\n\n" +
+                "RAW is the sensor's own readout before the picture is made, so no filter can " +
+                "reach it — there is nothing to put a shader on yet, which is exactly what a " +
+                "negative is for. It comes with its JPEG from the same exposure, not a second one.\n\n" +
+                "Pro only. Simple writes the sensor's own JPEG untouched, and that is the whole " +
+                "point of it.",
         )
     }
     val formats by vm.prefs.formats.collectAsState()
-    // RAW is deliberately absent until the capture path that writes one is here. A switch that
-    // turns on a file the camera does not yet produce is worse than no switch.
-    CaptureFormat.entries.filter { it != CaptureFormat.Dng }.forEach { format ->
-        val on = format in formats
+    // Whether this camera can produce a DNG at all is the camera's answer, re-read on every bind.
+    // RAW is an optional capability and the selfie sensor commonly lacks it where the main one has
+    // it, so the switch says "Unavailable" rather than turning on and failing at the shutter.
+    val rawSupported by vm.engine.negativeSupported.collectAsState()
+    CaptureFormat.entries.forEach { format ->
+        val supported = format != CaptureFormat.Dng || rawSupported
+        val on = format in formats && supported
         val only = on && formats.size == 1
         Setting(
             label = when (format) {
@@ -294,11 +301,12 @@ private fun FrameTab(vm: CameraViewModel) {
             // The last format standing says so rather than silently refusing the tap, because a
             // control that does nothing and explains nothing reads as a bug.
             value = when {
+                !supported -> "Unavailable"
                 only -> "Only"
                 on -> "On"
                 else -> "Off"
             },
-            enabled = !only,
+            enabled = supported && !only,
         ) {
             vm.prefs.toggleFormat(format)
         }

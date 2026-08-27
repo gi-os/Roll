@@ -15,6 +15,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.Face
+import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
@@ -174,6 +175,16 @@ class CameraEngine(private val context: Context) {
 
     /** Set before binding; changing it rebinds, because it is a use-case configuration. */
     var photoSize: PhotoSize = PhotoSize.Large
+        private set
+
+    /**
+     * Whether this bind should be able to write a negative.
+     *
+     * Read at [rebind] rather than at the shutter, because the output format is a property of the
+     * `ImageCapture` use case and changing it means rebinding the camera — which is not something
+     * to do inside a capture. [setNegative] is the way to change it.
+     */
+    var negative: Boolean = false
         private set
 
     private val captureExecutor = Executors.newSingleThreadExecutor()
@@ -387,6 +398,30 @@ class CameraEngine(private val context: Context) {
     }
 
     /**
+     * Ask for, or stop asking for, a RAW file alongside the JPEG.
+     *
+     * Rebinds, because the output format belongs to the use case. Guarded on equality so that a
+     * settings screen re-emitting the same value does not drop the viewfinder.
+     */
+    fun setNegative(wanted: Boolean, flash: FlashMode) {
+        if (wanted == negative) return
+        if (_recording.value) return
+        negative = wanted
+        rebind(flash)
+    }
+
+    /**
+     * Whether this camera can hand back a DNG at all.
+     *
+     * **Asked of the camera rather than assumed from the hardware.** RAW is an optional capability
+     * and the front camera on a phone very often does not have it while the back one does, so this
+     * is re-read on every bind and the setting reads "Unavailable" rather than failing at the
+     * shutter — which is where a capability check that never happened always surfaces.
+     */
+    private val _negativeSupported = MutableStateFlow(false)
+    val negativeSupported: StateFlow<Boolean> = _negativeSupported.asStateFlow()
+
+    /**
      * The frame currently on the viewfinder, as a bitmap.
      *
      * This is the whole of `Screen` size: no `takePicture`, no sensor readout, no JPEG from the
@@ -524,6 +559,27 @@ class CameraEngine(private val context: Context) {
         // the pipeline actually running, and if a capture ever fails the mode is abandoned for the rest of
         // the process and the shot is retried the ordinary way. A dead shutter is unacceptable; a shutter
         // that is early when it can be is worth having.
+        // **Asked before the use case is built, because the format is built into it.**
+        // `getCameraInfo` answers for a selector without binding anything, which is the only way
+        // to know this in time: by the point there is a bound camera to ask, the `ImageCapture`
+        // has already been configured. A camera that refuses the query at all is a camera with no
+        // negative, which is the safe reading.
+        val rawJpegSupported = runCatching {
+            val info = provider.getCameraInfo(
+                CameraSelector.Builder().requireLensFacing(_lensFacing.value).build(),
+            )
+            ImageCapture.getImageCaptureCapabilities(info)
+                .supportedOutputFormats
+                .contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        }.getOrDefault(false)
+        _negativeSupported.value = rawJpegSupported
+
+        // **Simple never shoots a negative, so turning one on must not cost Simple anything.**
+        // An earlier version gated the ring buffer on `negative` alone, which meant switching RAW
+        // on in Pro quietly took zero shutter lag away from a mode that was never going to write a
+        // DNG. The format is asked for only where it is actually used.
+        val wantsRaw = negative && rawJpegSupported && !mode.isSimple
+
         val zsl = mode.isSimple && zslAllowed
         val capture = ImageCapture.Builder()
             .setResolutionSelector(captureSelector)
@@ -542,6 +598,16 @@ class CameraEngine(private val context: Context) {
             // Whatever the phone's attitude was when the listener last spoke, so a rebind
             // mid-shoot doesn't silently reset the file's orientation to upright.
             .setTargetRotation(lastRotation)
+            // **The negative, when the camera will give one.** `OUTPUT_FORMAT_RAW_JPEG` makes one
+            // press produce two files from one exposure — the DNG and the ISP's JPEG — rather than
+            // two captures a moment apart, which is the only version of this worth having.
+            //
+            // It is asked for only where it is supported, and support is a property of *this*
+            // camera: the selfie sensor on this phone will very likely say no while the main one
+            // says yes.
+            .also { builder ->
+                if (wantsRaw) builder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+            }
             .also { builder ->
                 if (!mode.isSimple) return@also
                 // **Measured: 1877 ms inside `takePicture`, 87 ms to save.** The time is entirely the
@@ -1048,6 +1114,75 @@ class CameraEngine(private val context: Context) {
                         zslAllowed = false
                         zslActive = false
                     }
+                    if (cont.isActive) cont.resumeWithException(exception)
+                }
+            },
+        )
+    }
+
+    /**
+     * What one RAW press produced.
+     *
+     * Both are nullable because the two saves are independent: the camera can land the negative and
+     * fail the JPEG, or the other way round, and a press that produced *one* of the two files still
+     * produced a photograph.
+     */
+    class NegativePair(val raw: Uri?, val jpeg: Uri?)
+
+    /**
+     * One exposure, two files, written by CameraX rather than by this app.
+     *
+     * **This is the one capture path where the bytes never pass through here.** Everything else in
+     * Roll takes an in-memory frame and decides what to do with it, because that is what lets a
+     * shader run before anything is written. A DNG cannot work that way: it is the sensor's readout
+     * before demosaic, there is no bitmap to hand a shader, and building the file means the capture
+     * metadata that only CameraX and the HAL hold. So the destinations are handed down and the
+     * results come back as `Uri`s.
+     *
+     * **The two callbacks arrive in an order that is explicitly not guaranteed**, and they are told
+     * apart by `OutputFileResults.getImageFormat()` rather than by which came first — the CameraX
+     * documentation says so in as many words, and assuming otherwise gives you a DNG named `.jpg`
+     * on some devices and not others. The coroutine resumes when both have landed, or when one has
+     * errored, and never twice.
+     */
+    suspend fun captureNegative(
+        rawOptions: ImageCapture.OutputFileOptions,
+        jpegOptions: ImageCapture.OutputFileOptions,
+    ): NegativePair = suspendCancellableCoroutine { cont ->
+        val capture = imageCapture
+        if (capture == null || camera == null || !_ready.value || mode == CaptureMode.Video) {
+            cont.resumeWithException(IllegalStateException("camera not bound for stills"))
+            return@suspendCancellableCoroutine
+        }
+
+        var raw: Uri? = null
+        var jpeg: Uri? = null
+        var landed = 0
+        val lock = Any()
+
+        capture.takePicture(
+            rawOptions,
+            jpegOptions,
+            captureExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+                    // The pair is assembled inside the lock and handed out whole. Reading the two
+                    // fields afterwards would be a race with the other callback, which runs on the
+                    // same executor but is not ordered against this one.
+                    val pair = synchronized(lock) {
+                        if (results.imageFormat == ImageFormat.RAW_SENSOR) {
+                            raw = results.savedUri
+                        } else {
+                            jpeg = results.savedUri
+                        }
+                        landed += 1
+                        if (landed == 2) NegativePair(raw, jpeg) else null
+                    }
+                    if (pair != null && cont.isActive) cont.resume(pair)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "negative capture failed", exception)
                     if (cont.isActive) cont.resumeWithException(exception)
                 }
             },
