@@ -63,6 +63,7 @@ import com.gios.lightcamera.map.Locations
  */
 enum class SettingsTab(val label: String) {
     Frame("FRAME"),
+    Camera("CAMERA"),
     Look("LOOK"),
     Controls("KEYS"),
     Film("FILM"),
@@ -123,6 +124,7 @@ fun SettingsScreen(vm: CameraViewModel, onClose: () -> Unit) {
         ) {
             when (tab) {
                 SettingsTab.Frame -> FrameTab(vm)
+                SettingsTab.Camera -> CameraTab(vm)
                 SettingsTab.Look -> LookTab(vm, context)
                 SettingsTab.Controls -> ControlsTab(vm, context, colours.content, colours.background)
                 SettingsTab.Film -> FilmTab(vm, context, onClose, roll != null)
@@ -177,17 +179,11 @@ private fun TabRow(current: SettingsTab, onPick: (SettingsTab) -> Unit) {
 
 @Composable
 private fun FrameTab(vm: CameraViewModel) {
-    val context = androidx.compose.ui.platform.LocalContext.current
     val aspect by vm.prefs.aspect.collectAsState()
     val photoSize by vm.prefs.photoSize.collectAsState()
     val chrome by vm.prefs.chrome.collectAsState()
-    val afMode by vm.prefs.afMode.collectAsState()
-    val facePriority by vm.prefs.facePriority.collectAsState()
-    val timer by vm.prefs.timer.collectAsState()
-    val sounds by vm.prefs.sounds.collectAsState()
     val level by vm.prefs.level.collectAsState()
     val simpleMode by vm.prefs.simpleMode.collectAsState()
-    val facesSupported by vm.engine.facesSupported.collectAsState()
 
     Section("Frame") {
         Note(
@@ -226,6 +222,26 @@ private fun FrameTab(vm: CameraViewModel) {
     Setting("Simple mode", if (simpleMode) "On" else "Off") {
         vm.prefs.setSimpleMode(!simpleMode)
     }
+
+}
+
+/* ---------------------------------- camera ---------------------------------- */
+
+/**
+ * Everything about *taking* the photograph, as opposed to what shape it comes out.
+ *
+ * Split out of FRAME because that tab had grown to the size the un-tabbed screen was when the
+ * tabs were introduced — the fault the tabs exist to fix, reproduced inside one of them. The cut
+ * is the same rule as then: where the subject changes. FRAME is the picture; CAMERA is the act.
+ */
+@Composable
+private fun CameraTab(vm: CameraViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val afMode by vm.prefs.afMode.collectAsState()
+    val facePriority by vm.prefs.facePriority.collectAsState()
+    val timer by vm.prefs.timer.collectAsState()
+    val sounds by vm.prefs.sounds.collectAsState()
+    val facesSupported by vm.engine.facesSupported.collectAsState()
 
     Section("Exposure aids") {
         Note(

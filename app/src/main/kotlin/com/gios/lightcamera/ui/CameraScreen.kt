@@ -299,6 +299,8 @@ fun CameraScreen(
     val focusReadout by vm.engine.focusLabel.collectAsState()
     val manualExposure by vm.engine.exposureLabel.collectAsState()
     val channel by vm.channel.collectAsState()
+    val formats by vm.prefs.formats.collectAsState()
+    val rawWanted = com.gios.lightcamera.media.CaptureFormat.Dng in formats
     LaunchedEffect(
         liveFilter,
         seed,
@@ -368,10 +370,15 @@ fun CameraScreen(
         }
     }
     val heldDial = remember(bindings) { vm.prefs.dialFor(Binding.WheelPressTurn) }
+    // **One binding is enough.** The first version routed turns by the *turn* binding alone, so
+    // pointing the click at Channel produced a click that "switched" and a spin that still walked
+    // the filters — the two gestures disagreed about what the wheel was. If either gesture is
+    // pointed at the channel system, the whole wheel belongs to it.
+    val clickIsChannel = bindings[Binding.WheelClick] == PressAction.Channel.name
+    val channelWheel = bareDial == DialAction.Channel || clickIsChannel
     // Named on the panel only when the wheel actually cycles: with a fixed binding there is
     // nothing to disambiguate, and an unobstructed viewfinder is worth more than a label.
-    val showChannel = bareDial == DialAction.Channel ||
-        vm.prefs.pressFor(Binding.WheelClick) == PressAction.Channel
+    val showChannel = channelWheel
 
     // **The dial lock.** The wheel is shared with the rest of the phone and turns in a pocket, so
     // with the setting on the dial boots asleep and a click on the wheel wakes it. The setting is
@@ -404,22 +411,18 @@ fun CameraScreen(
     // and focus are values you rack through, where swallowing the overflow makes the dial feel
     // stuck. With the wheel on a channel the binding no longer says which of those it is, so
     // asking the binding armed the filter track and made it skip.
-    val effectiveDial = if (bareDial == DialAction.Channel) {
-        when (channel) {
-            Channel.Filter -> DialAction.Filter
-            Channel.Exposure -> DialAction.Exposure
-            Channel.Zoom -> DialAction.Zoom
-            Channel.Shutter, Channel.Iso, Channel.Focus -> DialAction.Exposure
-        }
-    } else {
-        bareDial
-    }
+    val picking by vm.picking.collectAsState()
+    // Picking a channel and walking the filters are both read one name at a time, so both take one
+    // step per gesture; a value is racked through, so overflow notches must not be swallowed.
+    val oneStepPerGesture = channelWheel && (picking || channel == Channel.Filter) ||
+        !channelWheel && bareDial == DialAction.Filter
     WheelTurns(
-        active = active && wheelEnabled && !puriOpen && bareDial != DialAction.Nothing,
-        armed = effectiveDial != DialAction.Filter,
+        active = active && wheelEnabled && !puriOpen &&
+            (channelWheel || bareDial != DialAction.Nothing),
+        armed = !oneStepPerGesture,
     ) { notches ->
         if (dialLive) {
-            turnDial(vm, engine, bareDial, notches)
+            if (channelWheel) vm.channelTurn(notches) else turnDial(vm, engine, bareDial, notches)
         } else {
             // Every locked turn, and it does not stack: the notice is one line of state that
             // replaces itself, so holding the wheel over keeps it up rather than queueing a
@@ -591,6 +594,10 @@ fun CameraScreen(
                                 timer = timer,
                                 aspect = aspect,
                                 chrome = chrome,
+                                zoneOn = peaking,
+                                rawOn = rawWanted,
+                                onToggleZone = { vm.prefs.setZoneFocus(!peaking) },
+                                onToggleRaw = { vm.toggleRaw() },
                                 onPress = { vm.press(it) },
                                 onCycleTimer = { vm.cycleTimer() },
                                 onCycleAspect = {
@@ -629,7 +636,7 @@ fun CameraScreen(
                                 // A buzz for the *ask*. The buzz and beep for the lens landing
                                 // come off the camera's own AF result, in the view model.
                                 LightHaptics.advance(context)
-                                engine.focusAt(x, y, lock = false)
+                                engine.tapFocus(x, y)
                             },
                             onDoubleTap = { vm.flipLens() },
                             onFilterStep = { vm.stepFilter(it) },
@@ -885,7 +892,9 @@ fun CameraScreen(
                         // disambiguate and an unobstructed viewfinder is worth more.
                         if (showChannel) {
                             LightText(
-                                " ${channel.label}",
+                                // The marks are the picker: same slot, two states, no second
+                                // label. `›FILTER‹` is a question, `FILTER` is an answer.
+                                if (picking) " ›${channel.label}‹" else " ${channel.label}",
                                 LightTextVariant.Detail,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
@@ -1577,6 +1586,10 @@ private fun BandSlotControl(
     timer: SelfTimer,
     aspect: FrameAspect,
     chrome: Chrome,
+    zoneOn: Boolean,
+    rawOn: Boolean,
+    onToggleZone: () -> Unit,
+    onToggleRaw: () -> Unit,
     onPress: (PressAction) -> Unit,
     onCycleTimer: () -> Unit,
     onCycleAspect: () -> Unit,
@@ -1605,6 +1618,24 @@ private fun BandSlotControl(
             icon = LightIcons.FlipLens,
             onClick = { onPress(PressAction.FlipLens) },
         )
+
+        BandSlot.Focus -> if (!mode.isSimple) {
+            BandWord(
+                // The words a lens barrel uses. AF is the ordinary state and stays dim; MF is the
+                // one you chose, and lit is what chosen looks like everywhere else in this band.
+                text = if (zoneOn) "MF" else "AF",
+                lighten = !zoneOn,
+                onClick = onToggleZone,
+            )
+        }
+
+        BandSlot.Raw -> if (!mode.isSimple) {
+            BandWord(
+                text = "RAW",
+                lighten = !rawOn,
+                onClick = onToggleRaw,
+            )
+        }
 
         BandSlot.Timer -> BandWord(
             text = if (timer.seconds == 0) "OFF" else "${timer.seconds}s",

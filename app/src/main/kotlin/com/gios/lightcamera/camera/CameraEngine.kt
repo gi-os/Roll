@@ -727,6 +727,9 @@ class CameraEngine(private val context: Context) {
             // between the unbind and the bind would otherwise see a stale `ready` and fire into a
             // use case with no camera behind it.
             _ready.value = false
+            // A rebind is a new framing — a flipped lens, a changed mode — and a remembered tap is
+            // in the old framing's coordinates. Aimed at nothing now.
+            tapPoint = null
             provider.unbindAll()
             preview.setSurfaceProvider(view.surfaceProvider)
             // One use case beside the preview, whichever mode it is. Preview + capture + video is
@@ -973,17 +976,42 @@ class CameraEngine(private val context: Context) {
      * difference between a shutter that answers and one that thinks first, and it is why this camera has
      * two detents at all.
      */
+    /**
+     * Where the finger last said to focus, and when it said it.
+     *
+     * **The half press used to override the tap, which is backwards.** Tap the subject at the edge
+     * of the frame, half-press to lock — and the lens snapped back to the centre, because
+     * [halfPress] only ever knew about faces and the middle. The tap is the most explicit
+     * instruction this camera receives; automation must defer to it. So the point is kept, and a
+     * half press within [TAP_MEMORY_MS] locks *there*.
+     *
+     * It expires, because the box on screen does: a tap from three minutes ago points at a scene
+     * that has moved on, and honouring it would be a half press that focuses somewhere invisible.
+     * And it is cleared on every rebind — a lens flip or a mode change is a new framing, and view
+     * coordinates from the old one are aimed at nothing in particular.
+     */
+    @Volatile private var tapPoint: Triple<Float, Float, Long>? = null
+
+    /** A finger on the viewfinder: focus there, and remember there. */
+    fun tapFocus(x: Float, y: Float) {
+        tapPoint = Triple(x, y, System.currentTimeMillis())
+        focusAt(x, y, lock = false)
+    }
+
     fun halfPress() {
+        // The order is the policy: the person's tap, then the person's face-priority setting,
+        // then the centre. Most explicit instruction first.
+        val tapped = tapPoint?.takeIf { System.currentTimeMillis() - it.third < TAP_MEMORY_MS }
         val target = if (facePriority) {
             FaceMapper.priority(_faces.value, viewWidth, viewHeight)
         } else {
             null
         }
         focusHeld = true
-        if (target != null) {
-            focusAt(target.centreX, target.centreY, lock = true)
-        } else {
-            focusAt(viewWidth * 0.5f, viewHeight * 0.5f, lock = true)
+        when {
+            tapped != null -> focusAt(tapped.first, tapped.second, lock = true)
+            target != null -> focusAt(target.centreX, target.centreY, lock = true)
+            else -> focusAt(viewWidth * 0.5f, viewHeight * 0.5f, lock = true)
         }
     }
 
@@ -1646,5 +1674,15 @@ class CameraEngine(private val context: Context) {
          */
         const val ZSL_WARM_MS = 1_500L
         const val TAP_FOCUS_HOLD_MS = 4_000L
+
+        /**
+         * How long a tap keeps steering the half press.
+         *
+         * Longer than [TAP_FOCUS_HOLD_MS] on purpose: the *metering* of a tap expires quickly so
+         * the viewfinder goes back to being automatic, but the *intent* of the tap — that subject,
+         * not the centre — outlives it. Twenty seconds is a person framing the same shot; past
+         * that it is a different photograph.
+         */
+        const val TAP_MEMORY_MS = 20_000L
     }
 }

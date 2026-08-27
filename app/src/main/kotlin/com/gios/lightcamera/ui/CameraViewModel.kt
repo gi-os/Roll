@@ -167,12 +167,70 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
     )
 
-    /** One click of the wheel: step to the next thing it could be holding, and say so. */
-    fun cycleChannel() {
-        val available = channelsAvailable()
-        val next = Channel.next(_channel.value, available)
-        _channel.value = next
-        showNotice(next.label)
+    /**
+     * Whether the wheel is choosing *what to hold* rather than adjusting it.
+     *
+     * **The wheel is modal, and the first version was not — which made it useless.** A click that
+     * silently cycled the channel left the turn doing whatever the turn was bound to, so binding
+     * the click to Channel produced a notice and no behaviour: click "switched", the spin still
+     * walked the filters. The model people actually described wanting is a camera menu dial —
+     * click to open the choice, turn to choose, click to lock it in, turn to adjust — and that
+     * needs one bit of state, which is this.
+     */
+    private val _picking = MutableStateFlow(false)
+    val picking: StateFlow<Boolean> = _picking.asStateFlow()
+
+    /** The click, both of its meanings: open the choice, or lock it in. */
+    fun toggleChannelPicking() {
+        if (_picking.value) {
+            _picking.value = false
+            showNotice("${_channel.value.label} — turn to adjust")
+        } else {
+            _picking.value = true
+            showNotice("Pick: ${_channel.value.label} — turn, then click")
+        }
+    }
+
+    /**
+     * A turn of the wheel while it belongs to the channel system.
+     *
+     * Picking: one channel per gesture, whichever way it was flicked — the list is short and names
+     * are read one at a time. Locked in: the turn adjusts the held channel's value, every notch.
+     */
+    fun channelTurn(notches: Int) {
+        if (_picking.value) {
+            val available = channelsAvailable()
+            if (available.isEmpty()) return
+            val at = available.indexOf(_channel.value).coerceAtLeast(0)
+            val step = if (notches > 0) 1 else -1
+            val next = available[(at + step + available.size) % available.size]
+            _channel.value = next
+            showNotice("Pick: ${next.label} — turn, then click")
+            return
+        }
+        when (_channel.value) {
+            Channel.Filter -> stepFilter(if (notches > 0) 1 else -1)
+            Channel.Exposure -> {
+                engine.stepEv(notches)
+                showNotice("EV ${engine.evLabel()}")
+            }
+            Channel.Shutter -> {
+                engine.stepShutter(notches)
+                showNotice(engine.exposureLabel.value)
+            }
+            Channel.Iso -> {
+                engine.stepIso(notches)
+                showNotice(engine.exposureLabel.value)
+            }
+            Channel.Focus -> {
+                engine.stepFocus(notches)
+                showNotice(engine.focusLabel.value)
+            }
+            Channel.Zoom -> {
+                engine.stepZoom(notches)
+                showNotice(engine.zoomLabel())
+            }
+        }
     }
 
     /**
@@ -185,6 +243,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         val available = channelsAvailable()
         if (_channel.value !in available) {
             _channel.value = available.firstOrNull() ?: Channel.Zoom
+            // Mid-pick, the list just changed under the reader; closing is less surprising than
+            // the selection silently jumping to a channel nobody chose.
+            _picking.value = false
         }
     }
 
@@ -206,6 +267,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * returns nothing for every photograph — including ones stamped a second ago.
      */
     private var locateJob: Job? = null
+
+    /**
+     * The RAW toggle, from the band.
+     *
+     * The settings row can read "Unavailable"; a band slot has three letters and no room to
+     * explain, so the explanation happens at the tap — once, in a notice, rather than as a control
+     * that lights up and then writes nothing.
+     */
+    fun toggleRaw() {
+        if (!engine.negativeSupported.value) {
+            showNotice("No RAW on this camera")
+            return
+        }
+        prefs.toggleFormat(CaptureFormat.Dng)
+    }
 
     /** Re-read the roll's coordinates — called when a permission has just been granted. */
     fun relocateRoll() = locateRoll()
@@ -807,7 +883,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             PressAction.Exposure -> openStripOrSayWhyNot(Strip.Exposure)
             PressAction.Zoom -> openStripOrSayWhyNot(Strip.Zoom)
             PressAction.DialLock -> toggleDialLock()
-            PressAction.Channel -> cycleChannel()
+            PressAction.Channel -> toggleChannelPicking()
             PressAction.Nothing -> Unit
         }
     }

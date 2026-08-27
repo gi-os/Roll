@@ -1,3 +1,35 @@
+## Roll v2.69 — the wheel finally works the way it was described
+
+**Click to pick, turn to choose, click to lock, turn to adjust.** The channel wheel shipped as a
+click that silently cycled a selection nothing read: bind the click to "Wheel channel" and the spin
+still walked the filters, because turns were routed by the *turn* binding alone. The two gestures
+disagreed about what the wheel was. Now, if either gesture is pointed at the channel system, the
+whole wheel belongs to it — one binding is enough — and the wheel is properly modal: a click opens
+the choice (the status line reads `›FILTER‹`), a turn steps through what the wheel can hold, a
+click locks it in (`FILTER`), and turns adjust it. Bind "Wheel channel" to the click in
+Settings -> KEYS and that is the entire interaction.
+
+While picking, one channel per flick; locked in, every notch counts — a value is racked, a name is
+read.
+
+**The half press respects your tap.** Tap the subject at the edge of the frame, half-press to lock,
+and the lens snapped back to the centre — the half press only ever knew about faces and the middle,
+so it overrode the most explicit instruction the camera gets. A half press now locks on the tapped
+spot for twenty seconds after the tap: long enough to be framing the same shot, short enough that a
+stale tap cannot aim a lock at a scene that has moved on. A lens flip or mode change forgets the
+tap, since it is in the old framing's coordinates.
+
+**Settings: FRAME split into FRAME and CAMERA.** FRAME had grown to the size the un-tabbed screen
+was when the tabs were introduced — the fault tabs exist to fix, reproduced inside one. FRAME is
+now the picture: size, shape, grid, level. CAMERA is the act: focus, shutter, exposure, the flat
+profile, files and location.
+
+**Two controls brought up to the viewfinder band.** The two free band slots (Settings -> KEYS) can
+now hold **AF/MF** — zone focus, one tap, because street photography is the whole reason it exists
+and a control three taps deep is not a control you use on a street — and **RAW**, lit while the
+negative is being written, since that is a per-scene decision too. On a camera with no RAW the
+band slot says so once, in a notice, instead of lighting up and writing nothing.
+
 ## Roll v2.68 — seven found in review, none by a crash report
 
 A deliberate audit of everything the last five nightlies added, hunting the class of bug that

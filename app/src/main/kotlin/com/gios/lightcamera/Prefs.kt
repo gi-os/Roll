@@ -63,6 +63,18 @@ enum class BandSlot(val label: String) {
     Timer("Self timer"),
     Shape("Shape"),
     Grid("Grid"),
+
+    /**
+     * `AF` / `MF`: zone focus, one tap from the viewfinder.
+     *
+     * Brought forward because it is the setting most likely to be flipped mid-shoot — street
+     * photography is the whole reason zone focus exists, and a control three taps deep in settings
+     * is not a control you use on a street.
+     */
+    Focus("Focus"),
+
+    /** `RAW`, lit while the negative is being written. Same argument: a per-scene decision. */
+    Raw("RAW"),
 }
 
 /**
