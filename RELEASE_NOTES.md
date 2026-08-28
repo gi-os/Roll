@@ -1,3 +1,19 @@
+## Roll v2.88 — the meter
+
+**A needle, for whatever the wheel holds.** Put the wheel on shutter, ISO, focus, zoom or EV and a
+small ladder of that dial's values appears on the right edge of the viewfinder, with a red needle
+sweeping on a fixed pivot — read like a speedometer, dragged like a slider. Your finger sets the
+value by height; the wheel still steps it; the needle answers both. Filters get no needle, because
+a needle pointing at a name is just a list in costume.
+
+**The band and the menu traded jobs.** The wheel's channel now sits in the band where Adjust used
+to be — tap it to open the pick, same act as clicking the wheel, built for thumbs. Adjust moved
+into the mode menu next to Filters. And the mode menu gains a photo type entry in Pro and Selfie:
+tap to cycle JPG, JPG+PNG, JPG+RAW, all three — which files a press writes is a per-scene decision,
+and it now lives one tap from the shutter instead of three switches deep in settings.
+
+**The queue bar drains downward** now instead of filling up, the way a buffer actually empties.
+
 ## Roll v2.87 — holding the shutter now means it
 
 Two shots from a held button was the hardware being taken at its word: the camera key sends one

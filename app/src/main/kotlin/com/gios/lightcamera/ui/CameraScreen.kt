@@ -493,15 +493,25 @@ fun CameraScreen(
                         // one swipe from the viewfinder and that is how it is reached in practice,
                         // so the icon was spending a permanent slot on a shortcut to a gesture.
                         // The adjustments had no home at all, which is the worse problem.
-                        ChromeIcon(
-                            // **Not the brightness glyph**, which the exposure slot already uses by
-                            // default — the same icon twice in one band, meaning two different
-                            // things, is worse than either choice of icon. Rows of lines reads as a
-                            // stack of sliders, which is what is behind it.
-                            icon = LightIcons.List,
-                            onClick = { if (presetOffered) presetOpen = !presetOpen },
-                            lighten = !presetOffered,
-                        )
+                        // **The wheel's channel, where Adjust used to sit.** Adjust moved into
+                        // the mode dropdown; this slot now names what the wheel holds and a tap
+                        // opens the pick — the same act as clicking the wheel, for thumbs. When
+                        // the wheel is on fixed bindings the old Adjust chip keeps its seat.
+                        if (channelWheel) {
+                            LightText(
+                                text = if (picking) "›${channel.label}‹" else channel.label,
+                                variant = LightTextVariant.Button,
+                                modifier = Modifier
+                                    .lightClickable { vm.toggleChannelPicking() }
+                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                            )
+                        } else {
+                            ChromeIcon(
+                                icon = LightIcons.List,
+                                onClick = { if (presetOffered) presetOpen = !presetOpen },
+                                lighten = !presetOffered,
+                            )
+                        }
                         Spacer(Modifier.weight(1f))
                         // The stock camera's "PHOTO ⌄": what the camera is set to, and a
                         // chevron that opens the picker.
@@ -898,15 +908,7 @@ fun CameraScreen(
                         // What the wheel is holding. Only shown for
                         // the channel binding, because with a fixed binding there is nothing to
                         // disambiguate and an unobstructed viewfinder is worth more.
-                        if (showChannel) {
-                            LightText(
-                                // The marks are the picker: same slot, two states, no second
-                                // label. `›FILTER‹` is a question, `FILTER` is an answer.
-                                if (picking) " ›${channel.label}‹" else " ${channel.label}",
-                                LightTextVariant.Detail,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
+
                         // **The fault chip.** A notice lives two seconds; a dropped frame in the
                         // middle of a burst deserves a mark that stays until it is read. Tap to
                         // replay the last fault and clear it. A crash from the previous run
@@ -947,11 +949,13 @@ fun CameraScreen(
                                     .height(12.dp),
                             ) {
                                 drawRect(color = ink.copy(alpha = 0.25f))
-                                val filled = size.height * fill
+                                // Reversed on request: the bar drains from the top as the develop
+                                // completes, the way a buffer empties, instead of filling upward.
+                                val remaining = size.height * (1f - fill)
                                 drawRect(
                                     color = ink,
-                                    topLeft = Offset(0f, size.height - filled),
-                                    size = Size(size.width, filled),
+                                    topLeft = Offset(0f, size.height - remaining),
+                                    size = Size(size.width, remaining),
                                 )
                             }
                             LightText(
@@ -1023,6 +1027,23 @@ fun CameraScreen(
                 modifier = Modifier.padding(start = BAND),
             )
         }
+        // **The meter, when the wheel holds a value.** A ladder of the channel's stops on the
+        // right edge with a red needle on a fixed pivot — read like a speedometer, dragged like a
+        // slider. It appears only while the wheel is a value dial: filters are names, and a needle
+        // pointing at a name is a list wearing a costume.
+        if (channelWheel && !picking) {
+            vm.gaugeSpec()?.let { spec ->
+                NeedleGauge(
+                    labels = spec.labels,
+                    index = spec.index,
+                    onSet = spec.onSet,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 10.dp),
+                )
+            }
+        }
+
         if (modeOpen) {
             ModeStrip(
                 mode = mode,
@@ -1039,6 +1060,20 @@ fun CameraScreen(
                     modeOpen = false
                     onOpenSettings()
                 },
+                onAdjust = if (presetOffered) {
+                    {
+                        modeOpen = false
+                        presetOpen = true
+                    }
+                } else {
+                    null
+                },
+                photoType = if (mode == CaptureMode.Photo || mode == CaptureMode.Selfie) {
+                    vm.photoTypeLabel()
+                } else {
+                    null
+                },
+                onPhotoType = { vm.cyclePhotoType() },
                 modifier = Modifier.padding(start = BAND),
             )
         }
@@ -1182,6 +1217,11 @@ private fun ModeStrip(
     onPick: (CaptureMode) -> Unit,
     onFilters: () -> Unit,
     onSettings: () -> Unit,
+    /** The Preset sliders, moved here from the band — the band slot now names the wheel. */
+    onAdjust: (() -> Unit)? = null,
+    /** Which files a press writes, cycled per scene. Pro and Selfie only; null hides it. */
+    photoType: String? = null,
+    onPhotoType: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colours = LightThemeTokens.colors
@@ -1216,6 +1256,14 @@ private fun ModeStrip(
                     Spacer(Modifier.width(6.dp))
                 }
                 Spacer(Modifier.weight(1f))
+                if (photoType != null && onPhotoType != null) {
+                    ChromeLabel(text = photoType, onClick = onPhotoType, lighten = true)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (onAdjust != null) {
+                    ChromeLabel(text = "Adjust", onClick = onAdjust, lighten = true)
+                    Spacer(Modifier.width(6.dp))
+                }
                 ChromeLabel(text = "Filters", onClick = onFilters, lighten = true)
                 ChromeIcon(icon = LightIcons.Settings, lighten = true, onClick = onSettings)
             }

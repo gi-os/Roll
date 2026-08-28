@@ -1231,6 +1231,36 @@ class CameraEngine(private val context: Context) {
         applyCaptureOptions()
     }
 
+    /* ---------------- the gauge's view of the dials ---------------- */
+
+    /** The focus ladder as labels, for the needle gauge. Index 0 is the nearest stop. */
+    fun focusLabels(): List<String> = focusStops.map { metres ->
+        if (metres.isInfinite()) "∞" else if (metres < 1f) "%.1f".format(metres) else "%.0fm".format(metres)
+    }
+
+    fun focusIndexNow(): Int = focusIndex
+
+    fun setFocusIndex(index: Int) {
+        if (!_zoneFocus.value) return
+        focusIndex = index.coerceIn(0, focusStops.lastIndex)
+        applyCaptureOptions()
+        updateFocusLabel()
+    }
+
+    fun shutterIndexNow(): Int = shutterIndex
+
+    fun setShutterIndex(index: Int) {
+        shutterIndex = index.coerceIn(0, Exposure.SHUTTER_STOPS.lastIndex)
+        applyCaptureOptions()
+    }
+
+    fun isoIndexNow(): Int = isoIndex
+
+    fun setIsoIndex(index: Int) {
+        isoIndex = index.coerceIn(0, Exposure.ISO_STOPS.lastIndex)
+        applyCaptureOptions()
+    }
+
     fun setFlat(on: Boolean) {
         if (on == _flat.value) return
         _flat.value = on

@@ -14,6 +14,7 @@ import com.gios.lightcamera.Prefs
 import com.gios.lightcamera.SelfTimer
 import com.gios.lightcamera.StampStyle
 import com.gios.lightcamera.camera.CameraEngine
+import com.gios.lightcamera.camera.Exposure
 import com.gios.lightcamera.camera.CapturedFrame
 import com.gios.lightcamera.camera.DateStamp
 import com.gios.lightcamera.camera.FaceBox
@@ -246,6 +247,88 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 if (held in channelsAvailable()) _channel.value = held
             }
             settleChannel()
+        }
+    }
+
+    /**
+     * What the needle gauge shows and touches, for the channel the wheel holds.
+     *
+     * One shape for every dial: a ladder of labels, the index the needle points at, and a setter
+     * a finger can drag. Filter has no ladder worth a needle (names, not values) and returns null,
+     * which is the gauge declining to draw.
+     */
+    class GaugeSpec(
+        val labels: List<String>,
+        val index: Int,
+        val onSet: (Int) -> Unit,
+    )
+
+    fun gaugeSpec(): GaugeSpec? = when (_channel.value) {
+        Channel.Shutter -> GaugeSpec(
+            labels = Exposure.SHUTTER_STOPS.map { if (it >= 1L) it.toString() else "1" },
+            index = engine.shutterIndexNow(),
+        ) { engine.setShutterIndex(it) }
+        Channel.Iso -> GaugeSpec(
+            labels = Exposure.ISO_STOPS.map { it.toString() },
+            index = engine.isoIndexNow(),
+        ) { engine.setIsoIndex(it) }
+        Channel.Focus -> if (engine.zoneFocus.value) {
+            GaugeSpec(
+                labels = engine.focusLabels(),
+                index = engine.focusIndexNow(),
+            ) { engine.setFocusIndex(it) }
+        } else {
+            null
+        }
+        Channel.Zoom -> {
+            val stops = zoomGaugeStops()
+            GaugeSpec(
+                labels = stops.map { if (it < 9.95f) "%.1fx".format(it) else "%.0fx".format(it) },
+                index = stops.indices.minByOrNull { kotlin.math.abs(stops[it] - engine.zoom.value) } ?: 0,
+            ) { engine.setZoom(stops[it.coerceIn(0, stops.lastIndex)]) }
+        }
+        Channel.Exposure -> {
+            val range = engine.evRange.value
+            val steps = (range.first..range.last).toList()
+            GaugeSpec(
+                labels = steps.map { if (it > 0) "+$it" else it.toString() },
+                index = steps.indexOf(engine.ev.value).coerceAtLeast(0),
+            ) { engine.setEv(steps[it.coerceIn(0, steps.lastIndex)]) }
+        }
+        Channel.Filter -> null
+    }
+
+    private fun zoomGaugeStops(): List<Float> {
+        val max = engine.maxZoom.value
+        return listOf(1f, 1.5f, 2f, 3f, 4f, 6f, 8f).filter { it <= max }.ifEmpty { listOf(1f) }
+    }
+
+    /**
+     * Cycle the photo type from the mode menu: JPEG, then +PNG, then +RAW where the camera has
+     * one, then both, back to JPEG. One row in the picker instead of three switches in settings,
+     * because which files a press writes is a per-scene decision in Pro.
+     */
+    fun cyclePhotoType() {
+        val png = CaptureFormat.Png in prefs.formats.value
+        val raw = CaptureFormat.Dng in prefs.formats.value
+        val rawPossible = engine.negativeSupported.value
+        val next: Set<CaptureFormat> = when {
+            !png && !raw -> setOf(CaptureFormat.Jpeg, CaptureFormat.Png)
+            png && !raw && rawPossible -> setOf(CaptureFormat.Jpeg, CaptureFormat.Dng)
+            png && !raw -> setOf(CaptureFormat.Jpeg)
+            !png && raw -> setOf(CaptureFormat.Jpeg, CaptureFormat.Png, CaptureFormat.Dng)
+            else -> setOf(CaptureFormat.Jpeg)
+        }
+        prefs.setFormats(next)
+        showNotice(photoTypeLabel())
+    }
+
+    fun photoTypeLabel(): String {
+        val f = prefs.formats.value
+        return buildString {
+            append("JPG")
+            if (CaptureFormat.Png in f) append("+PNG")
+            if (CaptureFormat.Dng in f) append("+RAW")
         }
     }
 
