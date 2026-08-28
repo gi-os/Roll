@@ -742,6 +742,21 @@ private fun FilmTab(
 
 @Composable
 private fun AboutTab(vm: CameraViewModel, context: android.content.Context, rule: Color) {
+
+    Section("Feedback") {
+        Note(
+            "Send feedback opens the same report the shake gesture offers — a note, an optional " +
+                "screenshot, sent only when you confirm. The shake needs four sharp direction " +
+                "changes in about a second, which is deliberate: a camera gets carried, and a " +
+                "gesture that fires in a pocket reports nothing but the pocket.",
+        )
+    }
+    Setting(
+        "Send feedback",
+        if (com.gios.light.common.report.LightReport.installed) "Opens the report chip" else "Reporting is off in this build",
+    ) {
+        com.gios.light.common.report.Feedback.ask()
+    }
     val colours = LightThemeTokens.colors
     val timings by vm.prefs.timings.collectAsState()
 

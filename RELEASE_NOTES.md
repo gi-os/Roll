@@ -1,3 +1,16 @@
+## Roll v2.86 — two ways to send that need no gesture
+
+The shake gesture asks for four sharp direction changes inside a second. That tuning is right for
+a camera that gets carried, and wrong as the only door: plenty of hands never fire it and stop
+trying. So there are two more doors now.
+
+**Tap the fault tally.** The `!N` chip already knows what went wrong. Tapping it now raises the
+report offer as well as reading the names out, and the full tally rides the report — the names on
+your chip arrive in the issue verbatim.
+
+**Settings → ABOUT → Send feedback.** One row, no gesture, same report: a note, an optional
+screenshot, sent only when you confirm.
+
 ## Roll v2.85 — the fast one
 
 The first official release since v2.60, and it comes down to one sentence: the press is the photograph. Your finger lands, the shot exists. Filters, encoding and saving drain through a queue behind a live viewfinder, the way a camera body's buffer works. A thin bar in the status line shows the queue doing its job. Hold the shutter down and Roll bursts until you let go.

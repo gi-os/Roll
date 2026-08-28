@@ -456,14 +456,22 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun readFaults() {
-        val summary = synchronized(faultTally) {
+        val full = synchronized(faultTally) {
             faultTally.entries
                 .sortedByDescending { it.value }
-                .take(3)
-                .joinToString(" · ") { (what, n) -> if (n > 1) "$what ×$n" else what }
+                .joinToString("\n") { (what, n) -> if (n > 1) "$what ×$n" else what }
                 .also { faultTally.clear() }
         }
-        if (summary.isNotEmpty()) showNotice(summary)
+        if (full.isNotEmpty()) {
+            showNotice(full.lines().take(3).joinToString(" · "))
+            // **The tap is the send path now, not just the readout.** The shake gesture takes
+            // four sharp reversals at 0.46g and people reasonably never find that out — so the
+            // one control that already knows something went wrong offers to report it. Recording
+            // into Trouble raises the standard "SEND ERROR?" chip, and the whole tally rides the
+            // report as its detail: the names on the chip arrive in the issue, verbatim, which is
+            // the difference between "!4" and four fixable bugs.
+            Trouble.record("the fault chip was read", full)
+        }
         _faults.value = 0
     }
 
