@@ -174,10 +174,24 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     val channel: StateFlow<Channel> = _channel.asStateFlow()
 
     /** The channels that mean something right now. See [Channel.available]. */
-    fun channelsAvailable(): List<Channel> = Channel.available(
-        exposure = engine.exposureMode.value,
-        filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
-    )
+    fun channelsAvailable(): List<Channel> {
+        val base = Channel.available(
+            exposure = engine.exposureMode.value,
+            filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
+        )
+        // **A heavy filter keeps the wheel on itself.** Film and Mono are looks over a scene the
+        // camera still reads; everything else — low-res, distorting, datamosh — replaces the scene,
+        // and EV/zone/zoom under it would be adjusting a photograph nobody can see. Those channels
+        // leave the dial until a plain look is back. [Filters.keepsOtherChannels] is the single
+        // list of which filters count as plain.
+        return if (Filters.keepsOtherChannels(filter.value)) {
+            base
+        } else {
+            base.filterNot {
+                it == Channel.Exposure || it == Channel.Focus || it == Channel.Zoom
+            }
+        }
+    }
 
     /**
      * Whether the wheel is choosing *what to hold* rather than adjusting it.
@@ -204,6 +218,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     val channelLocked: StateFlow<Boolean> = _channelLocked.asStateFlow()
 
     fun toggleChannelLock() {
+        touchLadder()
         _channelLocked.value = !_channelLocked.value
         _picking.value = false
         showNotice(if (_channelLocked.value) "Channel locked — ${_channel.value.label}" else "Channel unlocked")
@@ -400,6 +415,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The click, both of its meanings: open the choice, or lock it in. */
     fun toggleChannelPicking() {
+        touchLadder()
         // **A click on a locked channel unlocks it.** The first shape refused the click and told
         // you where to tap instead, and the field's verdict was "channel unlock doesn't work" —
         // which is correct: a lock the most natural gesture cannot open reads as broken, not
@@ -1572,6 +1588,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * silence from it reads as a control that isn't working.
      */
     fun stepFilter(by: Int) {
+        // A swipe on the viewfinder steps the filter too, and it is as much a dial touch as a
+        // wheel notch — the ladder that just moved deserves to be on screen to show it.
+        touchLadder()
         // **The dial stays open while the shutter is.** It used to be closed for the 1.8 seconds a
         // Pro capture takes, because the filter was read off the dial when the sensor answered and
         // a notch inside that window baked a look you were not framing into the file. The fix for
@@ -1642,6 +1661,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // Open during a capture, like the wheel above and for the same reason — the shot in flight
         // is holding its own look in [shootingWith] and cannot be changed out from under itself.
         if (filterLocked) return
+        touchLadder()
         prefs.setFilter(id)
     }
 
@@ -1706,6 +1726,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * optional. A lock whose state you cannot see is a wheel that intermittently does nothing.
      */
     fun toggleDialLock() {
+        touchLadder()
         val locked = !_dialLocked.value
         _dialLocked.value = locked
         showNotice(if (locked) "Dial locked" else "Dial unlocked")
@@ -1728,6 +1749,34 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         prefs.setDialLock(on)
         _dialLocked.value = on
         showNotice(if (on) "Dial locks on launch" else "Dial lock off")
+    }
+
+    /**
+     * Whether the gauge ladder is on screen.
+     *
+     * The ladder is a *working* element — it is where a finger lands to set a value — so it shows
+     * itself when the dial is touched and retreats when the dial has been quiet. Hiding it keeps
+     * the viewfinder clean between adjustments; a ladder that never left would be chrome that is
+     * in the way of the picture it is reporting on.
+     *
+     * Starts visible (the first thing a fresh eye needs is where the value is) and any dial
+     * interaction — a wheel turn, a tap on the ladder, a drag along it — both brings it back and
+     * restarts the countdown. The slow hide is the caller's animation; this is just the state that
+     * drives it.
+     */
+    private val _ladderVisible = MutableStateFlow(true)
+    val ladderVisible: StateFlow<Boolean> = _ladderVisible.asStateFlow()
+
+    private var ladderHideJob: Job? = null
+
+    /** Called on any dial touch: wake the ladder and restart the countdown to its retreat. */
+    fun touchLadder() {
+        _ladderVisible.value = true
+        ladderHideJob?.cancel()
+        ladderHideJob = viewModelScope.launch {
+            delay(LADDER_IDLE_MS)
+            _ladderVisible.value = false
+        }
     }
 
     /**
@@ -3381,6 +3430,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        /**
+         * How long the gauge ladder stays up after the last dial touch.
+         *
+         * Three seconds: long enough to read the value and set it, short enough that a ladder that
+         * never left would be chrome in the way of the picture. The retreat is the caller's slow
+         * fade; this is only the quiet gap before it starts.
+         */
+        const val LADDER_IDLE_MS = 3_000L
+
         /** Eight, which is the number in the setting's name and about a quarter of a second of them. */
         const val BURST_FRAMES = 8
 
