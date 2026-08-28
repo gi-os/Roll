@@ -1,3 +1,34 @@
+## Roll v2.73 — the burst stops apologising
+
+**"Sensor didn't answer" under a fast finger, the climbing fault count, the black screen: one
+fault.** A zero-lag capture that fails abandons the mode — but the capture mode is baked into the
+bound use case, so the abandonment was a flag the camera never read. Every further capture on that
+bind hit the same drained ring, failed the same way, and enough of those in a row wedged the
+session itself: preview dead, viewfinder black, "the app did not die". Abandoning ZSL now *is* a
+rebind, the shot that failed retries once on the fresh camera — a drained ring costs nothing
+visible — and only a retry that also fails becomes a fault.
+
+**And the camera watches its own pulse.** Every live frame stamps a heartbeat; if the stamps stop
+for four seconds while the camera claims to be bound, it rebinds itself, says "Camera restarted",
+and marks a fault — a black viewfinder is now a two-second event, not a state. The watchdog knows
+about long manual exposures and waits them out rather than ruining the photograph it exists to
+protect.
+
+**The viewfinder should never lag, so the things that lagged it are gone:** the roll re-grouped
+every filename on the main thread on every save — once per shot in a burst — and MediaStore raised
+a full roll re-query per row it touched. Grouping moved off the main thread, the re-query is
+debounced to the last change, and the darkroom thread now yields cores the Android way
+(`THREAD_PRIORITY_BACKGROUND`) — Java's own priority was a polite suggestion the scheduler ignored.
+
+**The gauge tells the truth now.** It read "2, 1, 2, 1" under any burst because the presses
+waiting for the sensor — where a burst actually lives — were counted nowhere. The bar now sums all
+three stages: waiting, at the sensor, developing.
+
+**Batch delete.** While selecting, tap a day's heading to take or release the whole day; a long
+press on a heading *starts* selection with the day. Cleaning up after a burst is hold, tap TRASH,
+confirm. The heading shows the count while selecting — the one moment that number is about to
+mean something.
+
 ## Roll v2.72 — the buffer moves to disk, where it always belonged
 
 **Three quick shots lagged, then the screen went black. The crash report is the diagnosis:** "Heap

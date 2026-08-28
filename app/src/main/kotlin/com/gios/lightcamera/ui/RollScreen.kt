@@ -59,7 +59,7 @@ import com.gios.lightcamera.map.Locations
 /** One row of the flattened roll: either a photo or the day it was taken. */
 private sealed interface RollEntry {
     data class Frame(val photo: Photo) : RollEntry
-    data class Day(val label: String, val count: Int) : RollEntry
+    data class Day(val label: String, val count: Int, val ids: List<Long>) : RollEntry
 }
 
 /**
@@ -290,16 +290,43 @@ fun RollScreen(
                     },
                 ) { index ->
                     when (val entry = entries[index]) {
-                        is RollEntry.Day -> Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Just the day. The count of photographs in it was the sort of
-                            // number an interface offers because it happens to know it, not
-                            // because anybody wanted it.
-                            LightText(entry.label.uppercase(), LightTextVariant.Detail)
+                        is RollEntry.Day -> {
+                            val dayIds = entry.ids.toSet()
+                            val allTaken = selecting && selected.containsAll(dayIds)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    // **The batch select.** While choosing, a day heading takes
+                                    // or releases its whole day; a long press starts choosing
+                                    // *with* the day, so burst cleanup is hold-then-trash. Not
+                                    // tappable outside selection by single tap, because a label
+                                    // that navigates nowhere should not react to idle touches.
+                                    .lightCombinedClickable(
+                                        onLongClick = { selected = selected + dayIds },
+                                        onClick = {
+                                            if (selecting) {
+                                                selected = if (allTaken) {
+                                                    selected - dayIds
+                                                } else {
+                                                    selected + dayIds
+                                                }
+                                            }
+                                        },
+                                    )
+                                    .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                LightText(entry.label.uppercase(), LightTextVariant.Detail)
+                                if (selecting) {
+                                    // The one moment the count earns its place: it is about to
+                                    // be the size of a deletion.
+                                    LightText(
+                                        if (allTaken) "  — ${entry.count} picked" else "  — take all ${entry.count}",
+                                        LightTextVariant.Detail,
+                                        lighten = true,
+                                    )
+                                }
+                            }
                         }
 
                         is RollEntry.Frame -> Thumb(
@@ -553,7 +580,10 @@ private fun flatten(photos: List<Photo>): List<RollEntry> {
     fun flush() {
         if (pending.isEmpty()) return
         out += pending
-        out += RollEntry.Day(DayLabels.label(day), count)
+        // The heading knows its photographs, which is what makes it a control as well as a
+        // label: tapping a day while selecting takes the whole day, and after a burst "delete
+        // the lot" is a hundred taps otherwise.
+        out += RollEntry.Day(DayLabels.label(day), count, pending.map { it.photo.id })
         pending = ArrayList()
         count = 0
     }
