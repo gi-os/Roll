@@ -1,4 +1,4 @@
-## Roll v2.73 — a mode change starts clean
+## Roll v2.74 — a mode change starts clean
 
 **Pick a filter in Pro, switch to Video, come back, and the filter was still on.** Reported twice
 within half an hour, from both ends of the same complaint: once as a filter that "remains enabled

@@ -308,6 +308,7 @@ fun CameraScreen(
     // Named apart from the progress bar's own `inFlight` boolean further down — same word,
     // different question, and Kotlin resolves the nearer one silently.
     val capturing by vm.inFlight.collectAsState()
+    val waiting by vm.waiting.collectAsState()
     val rawWanted = com.gios.lightcamera.media.CaptureFormat.Dng in formats
     LaunchedEffect(
         liveFilter,
@@ -925,7 +926,7 @@ fun CameraScreen(
                         // behind it. The count falling and the bar refilling is the queue
                         // draining; a dot could only say "busy", and after the shutter learned to
                         // outrun the darkroom, "busy" stopped being information.
-                        if (developing + capturing > 0) {
+                        if (developing + capturing + waiting > 0) {
                             var fill by remember { mutableFloatStateOf(0f) }
                             LaunchedEffect(developingSince, developEst) {
                                 while (true) {
@@ -955,7 +956,7 @@ fun CameraScreen(
                                 )
                             }
                             LightText(
-                                " ${developing + capturing}",
+                                " ${developing + capturing + waiting}",
                                 LightTextVariant.Detail,
                                 modifier = Modifier.padding(start = 2.dp),
                             )

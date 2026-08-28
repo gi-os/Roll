@@ -18,6 +18,7 @@ import android.hardware.camera2.params.Face
 import android.hardware.camera2.params.TonemapCurve
 import android.net.Uri
 import android.provider.MediaStore
+import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.OrientationEventListener
@@ -481,7 +482,11 @@ class CameraEngine(private val context: Context) {
      * bound camera. Post-bind the sensor orientation and active array are refreshed from
      * the camera actually in use, in case the guess picked a different physical sensor.
      */
+    /** What the last bind was asked for, so recovery can rebind without a caller. */
+    @Volatile private var lastFlash: FlashMode = FlashMode.Off
+
     private fun rebind(flash: FlashMode) {
+        lastFlash = flash
         val provider = provider ?: return
         val owner = owner ?: return
         val view = previewView ?: return
@@ -899,6 +904,7 @@ class CameraEngine(private val context: Context) {
             request: CaptureRequest,
             result: TotalCaptureResult,
         ) {
+            lastResultAt = SystemClock.elapsedRealtime()
             readAf(result)
             readFaces(result)
             readMeter(result)
@@ -1472,6 +1478,15 @@ class CameraEngine(private val context: Context) {
                         Log.w(TAG, "zero shutter lag capture failed; not asking again", exception)
                         zslAllowed = false
                         zslActive = false
+                        // **The flag alone was a fix that never applied.** The capture mode is
+                        // baked into the bound use case, so "the next bind goes back to
+                        // minimise-latency" meant nothing until a mode or size change happened to
+                        // rebind — every further capture on this bind hit the same drained ring,
+                        // failed the same way, and six of those in a burst is how the session
+                        // itself ends up wedged with the preview black. Abandoning ZSL now *is*
+                        // the rebind, and the caller is told a retry is worth one attempt.
+                        zslRetryArmed = true
+                        ContextCompat.getMainExecutor(context).execute { rebind(lastFlash) }
                     }
                     if (cont.isActive) cont.resumeWithException(exception)
                 }
@@ -1546,6 +1561,58 @@ class CameraEngine(private val context: Context) {
                 }
             },
         )
+    }
+
+    /** Set when a failed ZSL capture triggered the recovery rebind. One retry is warranted. */
+    @Volatile private var zslRetryArmed = false
+
+    /** True once per abandonment: the shot that failed may be retried on the fresh bind. */
+    fun consumeZslRetry(): Boolean {
+        val armed = zslRetryArmed
+        zslRetryArmed = false
+        return armed
+    }
+
+    /**
+     * When the camera last produced any capture result — the preview's own heartbeat.
+     *
+     * Every live frame lands in [resultCallback], so this going stale while [ready] claims
+     * otherwise is the black viewfinder in one number: the session has died under a use case that
+     * still looks bound. It happens; what must not happen is it *persisting*, with the app
+     * insisting everything is fine over a black rectangle.
+     */
+    @Volatile private var lastResultAt = 0L
+
+    /**
+     * How long silence is allowed to run before [recoverIfDead] treats it as death.
+     *
+     * Generous with a manual shutter held open: a 30-second exposure is 30 legitimate seconds of
+     * nothing, and restarting the camera through it would be the watchdog ruining the photograph
+     * it exists to protect.
+     */
+    fun staleLimitMs(): Long {
+        val base = 4_000L
+        if (!_exposureMode.value.manualAe) return base
+        val shutterMs = Exposure.shutterAt(shutterIndex) / 1_000_000L
+        return maxOf(base, shutterMs * 2 + base)
+    }
+
+    /**
+     * Rebind if the preview has flatlined. Returns true when it acted.
+     *
+     * The caller polls this; the engine deliberately owns no clock of its own. A recovery is a
+     * full rebind — new session, options re-applied — which is also what un-wedges a HAL that a
+     * burst of failed reprocess requests has left catatonic.
+     */
+    fun recoverIfDead(): Boolean {
+        if (!_ready.value) return false
+        if (_recording.value) return false
+        val last = lastResultAt
+        if (last == 0L) return false
+        if (SystemClock.elapsedRealtime() - last < staleLimitMs()) return false
+        Log.w(TAG, "no capture results for ${staleLimitMs()}ms; rebinding the camera")
+        rebind(lastFlash)
+        return true
     }
 
     /* ---------------- video ---------------- */

@@ -63,6 +63,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -76,6 +78,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 
 /**
@@ -135,7 +138,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // The alternates are not lost: [groupOf] finds them, and the viewer's corner control walks
         // them.
         Captures.of(scoped).map { it.primary.photo }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
      * Every file from every press, grouped, before the roll collapses it.
@@ -154,7 +158,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             list
         }
         Captures.of(scoped)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        // Off the main thread, because this re-parses every filename on the roll and runs on
+        // every save — which during a burst is once per shot. Grouping a thousand photographs on
+        // the thread the viewfinder draws on was a measurable slice of the burst lag.
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
      * What the wheel is holding.
@@ -337,6 +345,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private var locateJob: Job? = null
 
     /**
+     * Which notice is current, so an old one's fade cannot clear a newer one.
+     *
+     * Up here rather than beside [showNotice] because the watchdog made that function reachable
+     * from `init`, and InitOrderTest holds every such property to the rule the v2.64 launch crash
+     * taught: anything a construction-time collector can touch is declared above `init`, however
+     * safe the individual call happens to be.
+     */
+    private var noticeToken = 0
+
+    /**
      * The darkroom: captures waiting to be developed, drained behind the shutter.
      *
      * **The shutter waits for the capture and for nothing else — the buffer model every real
@@ -378,6 +396,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     /** Sensor captures issued and not yet landed, part of the status row's depth gauge. */
     private val _inFlight = MutableStateFlow(0)
     val inFlight: StateFlow<Int> = _inFlight.asStateFlow()
+
+    /**
+     * Presses accepted and still waiting for the sensor permit.
+     *
+     * The gauge read "2, 1, 2, 1" however hard the shutter was hammered, because the only shots
+     * it could see were the one at the sensor and whatever had reached the darkroom — the queue
+     * of presses suspended behind [captureGate], which is where a burst actually *is*, was
+     * counted nowhere. This is that number, and the gauge sums all three stages: waiting, at the
+     * sensor, developing.
+     */
+    private val _waiting = MutableStateFlow(0)
+    val waiting: StateFlow<Int> = _waiting.asStateFlow()
 
     /** Jobs enqueued and not yet finished, for the buffer gauge in the status row. */
     private val _developing = MutableStateFlow(0)
@@ -523,7 +553,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val darkroomThread =
         java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "darkroom").apply { priority = Thread.MIN_PRIORITY }
+            // Android schedules by its own nice values, not Java's: MIN_PRIORITY alone still
+            // competed with the viewfinder. THREAD_PRIORITY_BACKGROUND is what actually yields
+            // the cores — set on the thread itself, first thing it does.
+            Thread({
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                runnable.run()
+            }, "darkroom").apply { priority = Thread.MIN_PRIORITY }
         }.asCoroutineDispatcher()
 
     private fun startDarkroom() {
@@ -584,6 +620,79 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     if (_developing.value <= 0) _developingSince.value = 0L
                 }
             }
+        }
+    }
+
+    /**
+     * Everything that happens to a sensor frame once it exists, shared by the first attempt and
+     * the post-recovery retry so the two cannot drift.
+     *
+     * Film-roll exposures queue whole — they are not files and arrive at a person's pace. Anything
+     * else is **saved untouched immediately** (the disk is the buffer) and either finished on the
+     * spot when nothing wants developing, or queued as a [FileJob] to be rewritten in place.
+     */
+    private suspend fun handleQuickFrame(
+        frame: CapturedFrame,
+        activeFilter: Filters.Filter,
+        aspect: FrameAspect,
+        seed: Float,
+        stampAt: Long?,
+        stampStyle: StampStyle,
+        wantPng: Boolean,
+        pressedAt: Long,
+    ) {
+        if (roll.value != null) {
+            develop(
+                DevelopJob(
+                    frame = frame,
+                    filter = activeFilter,
+                    aspect = aspect,
+                    seed = seed,
+                    stampAt = stampAt,
+                    stampStyle = stampStyle,
+                    wantPng = wantPng,
+                    takenAt = pressedAt,
+                ),
+            )
+            return
+        }
+        val stem = repo.stemFor(pressedAt)
+        val size = Frames.sizeOf(frame.jpeg)
+        val uri = repo.save(
+            jpeg = frame.jpeg,
+            takenAt = pressedAt,
+            width = size.first,
+            height = size.second,
+            stem = stem,
+        )
+        if (uri == null) {
+            recordFault("Couldn't save")
+            showNotice("Couldn't save")
+            return
+        }
+        val needsWork = activeFilter.agsl != null ||
+            aspect != FrameAspect.Full ||
+            stampAt != null ||
+            wantPng
+        if (!needsWork) {
+            stampLocation(uri)
+            if (prefs.sounds.value) beeps.saved()
+        } else {
+            develop(
+                FileJob(
+                    uri = uri,
+                    stem = stem,
+                    rotationDegrees = frame.rotationDegrees,
+                    mirrored = frame.mirrored,
+                    filter = activeFilter,
+                    aspect = aspect,
+                    seed = seed,
+                    stampAt = stampAt,
+                    stampStyle = stampStyle,
+                    wantPng = wantPng,
+                    takenAt = pressedAt,
+                ),
+            )
         }
     }
 
@@ -990,6 +1099,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             prefs.mode.collect { channelForMode(it) }
         }
         startDarkroom()
+        // **The preview's watchdog.** The engine stamps every capture result; this asks, twice a
+        // second, whether the stamps stopped while the camera claims to be bound — which is the
+        // black viewfinder as a number. Recovery is a rebind, named out loud and marked as a
+        // fault, because a camera that silently heals is a camera whose disease nobody reports.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(1_500)
+                if (engine.recoverIfDead()) {
+                    showNotice("Camera restarted")
+                    recordFault("Preview went dark — camera restarted")
+                }
+            }
+        }
         // The activity already offers a report dialog for a crash log on disk; the chip is the
         // quieter half — a black screen that killed the process silently gets a mark on the next
         // viewfinder either way.
@@ -1061,10 +1183,25 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------------- the roll above the viewfinder ---------------- */
 
+    private var refreshWanted = MutableStateFlow(0L)
+
     fun startObservingMedia() {
         if (observer != null) return
-        observer = repo.observe {
-            viewModelScope.launch { refreshRoll() }
+        // Debounced: MediaStore raises one change per row touched, and a burst touches a row per
+        // shot plus one per develop rewrite. Re-querying the whole roll for each was a second
+        // main-thread tax the viewfinder paid during exactly the moments it could least afford
+        // one. The last change wins; the roll is never more than a third of a second stale.
+        observer = repo.observe { refreshWanted.value = SystemClock.elapsedRealtime() }
+        viewModelScope.launch {
+            var seen = 0L
+            while (isActive) {
+                delay(300)
+                val wanted = refreshWanted.value
+                if (wanted != seen) {
+                    seen = wanted
+                    refreshRoll()
+                }
+            }
         }
         viewModelScope.launch { refreshRoll() }
     }
@@ -2018,8 +2155,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     val stampStyle = prefs.stampStyle.value
                     val wantPng = prefs.wantsLossless()
                     val pressedAt = System.currentTimeMillis()
+                    _waiting.value += 1
                     viewModelScope.launch {
                         captureGate.withPermit {
+                            _waiting.value -= 1
                             _inFlight.value += 1
                             try {
                                 val startedAt = System.nanoTime()
@@ -2028,71 +2167,33 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 _stillMs.value = (_stillMs.value * 3 + took) / 4
                                 Log.i(TAG, "pro: shot ${took}ms")
                                 if (prefs.timings.value) showNotice("${took}ms shot")
-                                // **The film roll is the one place the bytes still queue whole:**
-                                // an exposure onto a loaded roll is not a file on the camera roll,
-                                // so there is nothing to save first. Rolls are 12 to 36 shots at a
-                                // person's pace; the heap argument does not reach them.
-                                if (roll.value != null) {
-                                    develop(
-                                        DevelopJob(
-                                            frame = frame,
-                                            filter = activeFilter,
-                                            aspect = aspect,
-                                            seed = seed,
-                                            stampAt = stampAt,
-                                            stampStyle = stampStyle,
-                                            wantPng = wantPng,
-                                            takenAt = pressedAt,
-                                        ),
-                                    )
-                                    return@withPermit
-                                }
-                                // **Saved untouched, immediately — the disk is the buffer.** The
-                                // frame lands on the roll unfiltered within a beat of the press,
-                                // heap holds nothing per queued shot, and a process death from
-                                // here on costs a filter, never a photograph. The develop reads
-                                // the file back and rewrites it in place, the negative's pattern.
-                                val stem = repo.stemFor(pressedAt)
-                                val size = Frames.sizeOf(frame.jpeg)
-                                val uri = repo.save(
-                                    jpeg = frame.jpeg,
-                                    takenAt = pressedAt,
-                                    width = size.first,
-                                    height = size.second,
-                                    stem = stem,
+                                handleQuickFrame(
+                                    frame, activeFilter, aspect, seed, stampAt,
+                                    stampStyle, wantPng, pressedAt,
                                 )
-                                if (uri == null) {
-                                    recordFault("Couldn't save")
-                                    showNotice("Couldn't save")
-                                    return@withPermit
-                                }
-                                val needsWork = activeFilter.agsl != null ||
-                                    aspect != FrameAspect.Full ||
-                                    stampAt != null ||
-                                    wantPng
-                                if (!needsWork) {
-                                    stampLocation(uri)
-                                    if (prefs.sounds.value) beeps.saved()
-                                } else {
-                                    develop(
-                                        FileJob(
-                                            uri = uri,
-                                            stem = stem,
-                                            rotationDegrees = frame.rotationDegrees,
-                                            mirrored = frame.mirrored,
-                                            filter = activeFilter,
-                                            aspect = aspect,
-                                            seed = seed,
-                                            stampAt = stampAt,
-                                            stampStyle = stampStyle,
-                                            wantPng = wantPng,
-                                            takenAt = pressedAt,
-                                        ),
-                                    )
-                                }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (failure: Throwable) {
+                                // **A failed zero-lag capture earns one quiet retry.** The engine
+                                // answers that failure by rebinding without the ring, so the
+                                // second attempt goes to a camera that can actually take it —
+                                // and a burst that drained the ring costs nothing visible. Only
+                                // when the retry fails too does this become a fault.
+                                if (engine.consumeZslRetry()) {
+                                    val retried = runCatching {
+                                        // The recovery rebind was posted to the main queue by the
+                                        // engine; wait for the fresh bind rather than racing it.
+                                        withTimeoutOrNull(2_000) { engine.ready.first { it } }
+                                        withTimeout(CAPTURE_DEADLINE_MS) { engine.capture() }
+                                    }.getOrNull()
+                                    if (retried != null) {
+                                        handleQuickFrame(
+                                            retried, activeFilter, aspect, seed, stampAt,
+                                            stampStyle, wantPng, pressedAt,
+                                        )
+                                        return@withPermit
+                                    }
+                                }
                                 // The panel frame rather than no photograph — the same rescue as
                                 // ever, now per shot instead of per shutter, so one refused frame
                                 // in a burst costs that frame alone.
@@ -2887,8 +2988,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /* ---------------- notices ---------------- */
-
-    private var noticeToken = 0
 
     fun showNotice(text: String) {
         val token = ++noticeToken
