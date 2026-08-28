@@ -69,6 +69,27 @@ fun NeedleGauge(
         Canvas(Modifier.width(GAUGE_WIDTH).height(GAUGE_HEIGHT)) {
             heightPx = size.height
             val step = size.height / count
+            // **Needle first, labels second: the bar slides in *under* the text.** The pivot sits
+            // off the left edge of the screen entirely — the gauge is flush with that edge — so
+            // what appears is only the last stretch of a long arm sweeping on a hidden centre,
+            // which is the sketch: a speedometer you see the tip of, not the works.
+            val pivot = Offset(-PIVOT_REACH, size.height / 2f)
+            val target = Offset(LABEL_X + OVERLAP, step * index + step * 0.5f)
+            val angle = Math.toDegrees(
+                atan2((target.y - pivot.y).toDouble(), (target.x - pivot.x).toDouble()),
+            ).toFloat()
+            val reach = kotlin.math.hypot(
+                (target.x - pivot.x).toDouble(),
+                (target.y - pivot.y).toDouble(),
+            ).toFloat()
+            rotate(degrees = angle, pivot = pivot) {
+                drawLine(
+                    color = NEEDLE_RED,
+                    start = pivot,
+                    end = Offset(pivot.x + reach, pivot.y),
+                    strokeWidth = 2.dp.toPx(),
+                )
+            }
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
                 textSize = step * 0.62f
@@ -78,28 +99,11 @@ fun NeedleGauge(
             labels.forEachIndexed { i, label ->
                 drawContext.canvas.nativeCanvas.drawText(
                     label,
-                    NEEDLE_ROOM,
+                    LABEL_X,
                     step * i + step * 0.72f,
                     textPaint,
                 )
             }
-            // The pivot: a fixed point past the ladder's left edge, vertically centred. The
-            // needle's angle to each rung is what makes it a meter — computed, not styled, so
-            // the sweep is honest about where the value sits in its range.
-            val pivot = Offset(-PIVOT_REACH, size.height / 2f)
-            val target = Offset(NEEDLE_ROOM - 4.dp.toPx(), step * index + step * 0.5f)
-            val angle = Math.toDegrees(
-                atan2((target.y - pivot.y).toDouble(), (target.x - pivot.x).toDouble()),
-            ).toFloat()
-            rotate(degrees = angle, pivot = pivot) {
-                drawLine(
-                    color = NEEDLE_RED,
-                    start = pivot,
-                    end = Offset(pivot.x + PIVOT_REACH + NEEDLE_ROOM - 2.dp.toPx(), pivot.y),
-                    strokeWidth = 2.dp.toPx(),
-                )
-            }
-            drawCircle(color = colours.content, radius = 2.5f.dp.toPx(), center = Offset(0f, pivot.y))
         }
     }
 }
@@ -107,11 +111,14 @@ fun NeedleGauge(
 private val GAUGE_WIDTH = 44.dp
 private val GAUGE_HEIGHT = 128.dp
 
-/** How far the pivot sits off-canvas: longer reach, shallower sweep, more speedometer. */
-private const val PIVOT_REACH = 70f
+/** How far the hidden pivot sits past the screen's left edge: long arm, shallow sweep. */
+private const val PIVOT_REACH = 160f
 
-/** Room left of the labels for the needle to cross into. */
-private const val NEEDLE_ROOM = 30f
+/** Where the ladder's text starts, from the screen edge. Left-aligned, as drawn in the sketch. */
+private const val LABEL_X = 8f
+
+/** How far the needle's tip rides in under the text. Under: the labels draw over it. */
+private const val OVERLAP = 14f
 
 /** The one colour in the app that is not the theme's: a meter needle is red or it is not one. */
 private val NEEDLE_RED = Color(0xFFCC2A1E)

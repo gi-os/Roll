@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -297,8 +299,6 @@ fun CameraScreen(
     // Peaking rides with zone focus rather than having a switch of its own: it exists to answer
     // "is this in focus", and with autofocus running the camera has already answered.
     val peaking by vm.engine.zoneFocus.collectAsState()
-    val focusReadout by vm.engine.focusLabel.collectAsState()
-    val manualExposure by vm.engine.exposureLabel.collectAsState()
     val channel by vm.channel.collectAsState()
     val formats by vm.prefs.formats.collectAsState()
     val developing by vm.developing.collectAsState()
@@ -499,19 +499,22 @@ fun CameraScreen(
                         // the wheel is on fixed bindings the old Adjust chip keeps its seat.
                         if (channelWheel) {
                             val channelLocked by vm.channelLocked.collectAsState()
-                            LightText(
-                                // The lock is the label's own state: a bracketed name is held.
-                                // Tap to lock the wheel onto this channel, tap again to free it —
-                                // the wheel click still opens the pick while unlocked.
-                                text = when {
-                                    channelLocked -> "[${channel.label}]"
-                                    picking -> "›${channel.label}‹"
-                                    else -> channel.label
+                            // An icon, not a word: the meter names the values, so the button only
+                            // has to say which dial — and whether it is held. Solid means locked,
+                            // lightened means free; a tap toggles, and the wheel click also
+                            // unlocks. Shutter, ISO and zoom borrow glyphs until they earn their
+                            // own — the mapping is one place, here.
+                            ChromeIcon(
+                                icon = when (channel) {
+                                    Channel.Filter -> LightIcons.List
+                                    Channel.Exposure -> LightIcons.Exposure
+                                    Channel.Shutter -> LightIcons.Camera
+                                    Channel.Iso -> LightIcons.Circle
+                                    Channel.Focus -> LightIcons.Crosshair
+                                    Channel.Zoom -> LightIcons.Add
                                 },
-                                variant = LightTextVariant.Button,
-                                modifier = Modifier
-                                    .lightClickable { vm.toggleChannelLock() }
-                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                lighten = !channelLocked,
+                                onClick = { vm.toggleChannelLock() },
                             )
                         } else {
                             ChromeIcon(
@@ -906,13 +909,6 @@ fun CameraScreen(
                         // all — a manual focus with no distance on screen, which is the thing it
                         // exists to replace. Focus is not a transient like a zoom nudge: it is the
                         // state of the lens, and it belongs beside the other state.
-                        if (focusReadout.isNotEmpty()) {
-                            LightText(
-                                " $focusReadout",
-                                LightTextVariant.Detail,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
                         // What the wheel is holding. Only shown for
                         // the channel binding, because with a fixed binding there is nothing to
                         // disambiguate and an unobstructed viewfinder is worth more.
@@ -972,13 +968,6 @@ fun CameraScreen(
                                 modifier = Modifier.padding(start = 2.dp),
                             )
                         }
-                        if (manualExposure.isNotEmpty()) {
-                            LightText(
-                                " $manualExposure",
-                                LightTextVariant.Detail,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
                         if (timer.seconds > 0 && mode != CaptureMode.Video) {
                             LightText(
                                 " ${timer.label}",
@@ -1035,24 +1024,38 @@ fun CameraScreen(
                 modifier = Modifier.padding(start = BAND),
             )
         }
-        // **The meter.** A ladder of the channel's stops on the right edge with a red needle on
-        // a fixed pivot — read like a speedometer, dragged like a slider, tapped to lock the
-        // dial. Filters ride it too, as three-letter codes: the viewfinder is already showing
-        // what the filter looks like, so the ladder only has to say where the wheel is.
+        // **The meter.** A left-aligned ladder of the channel's stops flush with the left edge,
+        // a red needle sweeping on a pivot hidden off-screen — only the tip enters the frame,
+        // sliding in under the numbers. Read like a speedometer, dragged like a slider, tapped
+        // to lock the dial. Filters ride it as three-letter codes.
         if (channelWheel && !picking) {
             vm.gaugeSpec()?.let { spec ->
-                NeedleGauge(
-                    labels = spec.labels,
-                    index = spec.index,
-                    onSet = spec.onSet,
-                    // A tap — not a drag — locks and unlocks the dial itself, so a value you just
-                    // set stays set in a pocket. The drag still slides the value; the meter is
-                    // both the readout and the latch, which is how a physical meter would do it.
-                    onTap = { vm.toggleDialLock() },
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 10.dp),
-                )
+                // Sideways, like every other word on this viewfinder: the ladder is drawn in the
+                // gauge's own portrait space and the whole thing turned 90°, so it stands upright
+                // on the screen's edge when the phone is in the shooting grip — the sketch's
+                // landscape-left ladder. The pivot stays off-screen; only the needle's tip enters,
+                // under the numbers. A tap latches the dial; a drag slides the value; rotation is
+                // a graphics layer, so touch coordinates arrive already mapped.
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 34.dp)
+                        .requiredSize(width = 128.dp, height = 44.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .requiredSize(width = 44.dp, height = 128.dp)
+                            .graphicsLayer { rotationZ = 90f },
+                    ) {
+                        NeedleGauge(
+                            labels = spec.labels,
+                            index = spec.index,
+                            onSet = spec.onSet,
+                            onTap = { vm.toggleDialLock() },
+                        )
+                    }
+                }
             }
         }
 

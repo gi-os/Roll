@@ -1,3 +1,22 @@
+## Roll v2.90 — the meter stands up, the channels turn to icons, feet arrive
+
+**The meter matches the sketch now.** No box around it, ladder text left-aligned, and the whole
+gauge turned sideways with the rest of the chrome — hold the phone in the shooting grip and the
+ladder stands upright on the frame's edge, the pivot hidden off-screen, only the red tip of the
+needle sliding in under the numbers.
+
+**The channel button is an icon, and the readouts got out of the way.** The meter names the values,
+so the button only says which dial — crosshair for focus, the exposure glyph for EV, the list for
+filters; shutter, ISO and zoom borrow glyphs until they earn their own. Solid means locked,
+lightened means free. The top-line focus and exposure texts are gone: the dial is the readout.
+
+**Channel unlock works the way a hand expects.** A click on a locked channel frees it — the old
+build refused the click and pointed at a tap target instead, and a lock the most natural gesture
+cannot open reads as broken, not strict.
+
+**Feet.** Settings → CAMERA → Distances. The zone-focus ladder and its sharpness readout speak
+feet or meters as you prefer; the optics stay metric underneath.
+
 ## Roll v2.89 — the meter learns to latch, the dial learns when to catch
 
 **∞ no longer reads NaN.** Focused at infinity, the depth-of-field formula divided infinity by

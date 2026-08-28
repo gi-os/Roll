@@ -383,8 +383,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The click, both of its meanings: open the choice, or lock it in. */
     fun toggleChannelPicking() {
+        // **A click on a locked channel unlocks it.** The first shape refused the click and told
+        // you where to tap instead, and the field's verdict was "channel unlock doesn't work" —
+        // which is correct: a lock the most natural gesture cannot open reads as broken, not
+        // strict. The click frees it; the next click opens the pick.
         if (_channelLocked.value) {
-            showNotice("Channel locked — tap ${_channel.value.label} to unlock")
+            _channelLocked.value = false
+            showNotice("Channel unlocked")
             return
         }
         if (_picking.value) {
@@ -1400,6 +1405,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             prefs.zslRing.collect { engine.setZslWanted(it) }
+        }
+        viewModelScope.launch {
+            prefs.feet.collect { engine.useFeet = it }
         }
         startDarkroom()
         // **The preview's watchdog.** The engine stamps every capture result; this asks, twice a

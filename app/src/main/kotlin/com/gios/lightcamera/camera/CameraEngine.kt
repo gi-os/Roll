@@ -1234,8 +1234,19 @@ class CameraEngine(private val context: Context) {
     /* ---------------- the gauge's view of the dials ---------------- */
 
     /** The focus ladder as labels, for the needle gauge. Index 0 is the nearest stop. */
+    /** Set from the units preference; the optics stay metric, only the words change. */
+    @Volatile var useFeet: Boolean = false
+
     fun focusLabels(): List<String> = focusStops.map { metres ->
-        if (metres.isInfinite()) "∞" else if (metres < 1f) "%.1f".format(metres) else "%.0fm".format(metres)
+        when {
+            metres.isInfinite() -> "∞"
+            useFeet -> {
+                val ft = metres * 3.2808f
+                if (ft < 3f) "%.1f".format(ft) else "%.0f'".format(ft)
+            }
+            metres < 1f -> "%.1f".format(metres)
+            else -> "%.0fm".format(metres)
+        }
     }
 
     fun focusIndexNow(): Int = focusIndex
@@ -1299,6 +1310,7 @@ class CameraEngine(private val context: Context) {
         _focusLabel.value = ZoneFocus.label(
             metres,
             ZoneFocus.depthOfField(metres, hyperfocalM, focalLengthMm),
+            feet = useFeet,
         )
     }
 

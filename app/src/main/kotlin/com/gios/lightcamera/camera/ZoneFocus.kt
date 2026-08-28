@@ -102,18 +102,28 @@ object ZoneFocus {
      *
      * Zero prints nothing at all here, which is the difference between zone focusing and guessing.
      */
-    fun label(subjectMetres: Float, depth: Depth): String {
-        val subject = if (subjectMetres.isInfinite()) "∞" else formatMetres(subjectMetres)
-        val near = formatMetres(depth.near)
-        val far = if (depth.far.isInfinite()) "∞" else formatMetres(depth.far)
+    fun label(subjectMetres: Float, depth: Depth, feet: Boolean = false): String {
+        val subject = if (subjectMetres.isInfinite()) "∞" else format(subjectMetres, feet)
+        val near = format(depth.near, feet)
+        val far = if (depth.far.isInfinite()) "∞" else format(depth.far, feet)
         return "$subject · sharp $near–$far"
     }
 
-    private fun formatMetres(metres: Float): String = when {
-        metres.isInfinite() -> "∞"
-        metres < 1f -> "%.0f cm".format(metres * 100)
-        metres < 10f -> "%.1f m".format(metres)
-        else -> "%.0f m".format(metres)
+    /** One distance, in the units the person thinks in. The optics stay metric underneath. */
+    fun format(metres: Float, feet: Boolean): String {
+        if (metres.isInfinite()) return "∞"
+        if (!feet) {
+            return when {
+                metres < 1f -> "%.0f cm".format(metres * 100)
+                metres < 10f -> "%.1f m".format(metres)
+                else -> "%.0f m".format(metres)
+            }
+        }
+        val ft = metres * 3.2808f
+        return when {
+            ft < 3f -> "%.1f ft".format(ft)
+            else -> "%.0f ft".format(ft)
+        }
     }
 
     /**

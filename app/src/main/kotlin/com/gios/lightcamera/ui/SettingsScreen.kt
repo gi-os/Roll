@@ -342,6 +342,8 @@ private fun CameraTab(vm: CameraViewModel) {
         vm.prefs.setLensCorrection(!lensCorrection)
     }
     Setting("Zone focus", if (zone) "On" else "Off") { vm.prefs.setZoneFocus(!zone) }
+    val feet by vm.prefs.feet.collectAsState()
+    Setting("Distances", if (feet) "Feet" else "Meters") { vm.prefs.setFeet(!feet) }
 
     Section("Location") {
         Note(

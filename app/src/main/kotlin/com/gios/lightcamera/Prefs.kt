@@ -782,6 +782,17 @@ class Prefs(context: Context) {
 
     fun setZslRing(value: Boolean) = set(_zslRing, value) { putBoolean(ZSL_RING, value) }
 
+    /**
+     * Distances in feet instead of meters — the zone-focus ladder and its readout.
+     *
+     * A toggle, not a locale guess: the phone sells in both worlds and a street shooter knows
+     * which units their eyes think in.
+     */
+    private val _feet = MutableStateFlow(prefs.getBoolean(FEET, false))
+    val feet: StateFlow<Boolean> = _feet.asStateFlow()
+
+    fun setFeet(value: Boolean) = set(_feet, value) { putBoolean(FEET, value) }
+
     /** The newest process-death timestamp the chip has already announced. See the exit check. */
     fun exitSeen(): Long = prefs.getLong(EXIT_SEEN, 0L)
 
@@ -993,6 +1004,7 @@ class Prefs(context: Context) {
         const val EXPOSURE_MODE = "exposureMode"
         const val EXIT_SEEN = "exitSeenAt"
         const val ZSL_RING = "zslRing"
+        const val FEET = "distancesInFeet"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 
