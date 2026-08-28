@@ -1354,19 +1354,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * switch waits for the recorder to go idle and then rebinds, and [applyMode] only commits the
      * mode to preferences once the engine confirms it actually rebound.
      */
-    fun setMode(next: CaptureMode) {
+    fun setMode(next: CaptureMode, keepFilter: Boolean = false) {
         if (engine.recording.value) {
             engine.stopRecording()
             viewModelScope.launch {
                 engine.awaitIdle()
-                applyMode(next)
+                applyMode(next, keepFilter)
             }
             return
         }
-        applyMode(next)
+        applyMode(next, keepFilter)
     }
 
-    private fun applyMode(next: CaptureMode) {
+    private fun applyMode(next: CaptureMode, keepFilter: Boolean = false) {
         // **Simple drops Auto flash.** Auto is not free even when it decides not to fire: the HAL runs a
         // precapture metering sequence — often a preflash — before it will start the frame you asked for,
         // which is most of a second that a mode whose whole argument is speed should not be spending. Off
@@ -1392,15 +1392,35 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             showNotice("Still finishing the recording")
             return
         }
+        val changed = prefs.mode.value != next
         prefs.setMode(next)
+        // **A mode starts clean.** The filter is a decision about a photograph, and a mode is a
+        // decision about which camera you are holding — so carrying one across the other meant
+        // arriving in Video, or back in Pro from QR, still wearing a look chosen for a different
+        // shot several minutes ago. Worse, the modes with no filter track hide the dial without
+        // clearing it, so the filter went invisible rather than off and the only way to find it
+        // was to go back and walk the dial to None by hand. Reported twice, from both ends: as a
+        // filter that "remains enabled after changing camera modes" and as a request for a mode
+        // switch to "begin with a blank slate".
+        //
+        // The lens flip is the exception, and it is the reason this is a parameter rather than
+        // two lines in `setMode`. Photo and Selfie are one mode wearing two lenses — the codebase
+        // says so directly in [flipLens] — and turning the camera around mid-shoot to get the
+        // other side of the same thing is not a new decision about the photograph.
+        //
+        // The grade is deliberately untouched. It is persisted on purpose: which adjustments you
+        // shoot with is a property of your camera, not of this frame, and clearing it here would
+        // throw away a setting on a gesture nobody thinks of as destructive.
+        if (changed && !keepFilter) prefs.setFilter(Filters.none.id)
         showNotice(next.bandLabel)
     }
 
     /** The lens switch, which in Photo and Selfie is the same thing as switching mode. */
     fun flipLens() {
         when (prefs.mode.value) {
-            CaptureMode.Simple, CaptureMode.Photo -> setMode(CaptureMode.Selfie)
-            CaptureMode.Selfie -> setMode(CaptureMode.Photo)
+            // Turning the camera around keeps the filter. See [applyMode].
+            CaptureMode.Simple, CaptureMode.Photo -> setMode(CaptureMode.Selfie, keepFilter = true)
+            CaptureMode.Selfie -> setMode(CaptureMode.Photo, keepFilter = true)
             // Nothing to flip to: both readers are the back lens by definition, and a double tap
             // that quietly moved you into Selfie would be the camera changing mode behind your
             // back — while you are holding it over the thing you were trying to read.
