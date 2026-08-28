@@ -94,7 +94,7 @@ dependencies {
 
     // The wheel, the LPIII key map and the LightSync backup provider, shared with every other
     // Light* app rather than pasted into each of them.
-    implementation("com.gios:light-common:1.2.3")
+    implementation("com.gios:light-common:1.8.0")
     // Installs the baseline profile that light-common ships in its AAR. Below API 31 nothing
     // reads a profile on its own, so without this the profile is inert and the AOT warm-up it
     // buys never happens.
