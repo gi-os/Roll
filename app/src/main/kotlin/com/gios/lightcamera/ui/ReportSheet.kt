@@ -29,7 +29,16 @@ import com.gios.lightcamera.ui.theme.verticalGridUnitsAsDp
  * Why the sheet is up: you shook the phone, the app died the last time you had it open, or the
  * app noticed by itself that something it tried did not work.
  */
-enum class ReportReason { Shaken, Crashed, Failed }
+/**
+ * The library's reason type, under the name this file always used.
+ *
+ * A typealias rather than a mapping function at every call site: the enum was a copy of the
+ * library's to begin with — same three names, same meanings — and two identical enums whose only
+ * difference is their package is exactly the kind of duplication that drifts. The chip, the
+ * wording and the timing all live in light-common now; this file keeps the sheet, which is the
+ * part that knows Roll's own troubles.
+ */
+typealias ReportReason = com.gios.light.common.report.ReportReason
 
 /**
  * What went wrong, once you have said you want to tell somebody.

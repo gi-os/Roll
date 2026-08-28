@@ -1,3 +1,22 @@
+## Roll v2.76 — the chip is the library's, and the library is current
+
+**The report chip shrank back to its intended size.** Roll was drawing its own copy of the chip
+with the Button text style at grid scale — on this panel, a banner wearing a chip's name. The chip
+now comes from light-common, like the rest of the shake-to-report machinery: the same 11sp popup
+every Bright app shows, fading on the same clock, placing itself in its own window instead of
+asking the layout for room.
+
+**light-common 1.2.3 → 1.8.0**, which also brings the report sheet fix where the note field kept
+hiding under the keyboard. The version was checked against the package registry's own metadata
+rather than the repo's tags, because a tag there has resolved to nothing before.
+
+**Real errors now offer to report themselves.** The faults the `!N` counter collects — a dropped
+frame, a failed develop, a camera restart — also feed Roll's Trouble line, which raises the
+standard "SEND ERROR?" chip with a screenshot attached. Trouble already knew how to do this
+politely: the same failure asks once an hour at most, the first failure of a cascade is the one
+that gets reported, and nothing is ever sent without the tap. The counter stays as the quiet,
+persistent half; the chip is the loud, consented one.
+
 ## Roll v2.75 — the photograph is of the press, always
 
 **A queued press used to expose late.** Presses faster than the sensor waited their turn, and each

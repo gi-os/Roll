@@ -38,7 +38,7 @@ import com.gios.lightcamera.report.Symptom
 import com.gios.lightcamera.report.Trouble
 import com.gios.lightcamera.ui.CameraViewModel
 import com.gios.lightcamera.ui.ColorMode
-import com.gios.lightcamera.ui.ReportChip
+import com.gios.light.common.report.ReportChip
 import com.gios.lightcamera.ui.ReportReason
 import com.gios.lightcamera.ui.ReportSheet
 import com.gios.lightcamera.ui.Shell
@@ -245,23 +245,24 @@ class MainActivity : ComponentActivity() {
                         // Bottom-start, not bottom-end: the shutter and the album live on the
                         // right of the viewfinder chrome, and a chip over the shutter would be
                         // the one place it must never be.
+                        //
+                        // **The library's chip, not a local copy.** Roll's own drew with the
+                        // Button text variant at grid scale, which on this panel is a banner
+                        // wearing a chip's name; light-common's is the 11sp popup every Bright
+                        // app shows, it fades on the same clock everywhere, and it places
+                        // itself — a Popup owns its own window, so there is no Box to align.
                         report?.takeIf { !sheetOpen }?.let { pending ->
-                            Box(
-                                Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(start = lightInset(), bottom = lightInset()),
-                            ) {
-                                ReportChip(
-                                    reason = pending.reason,
-                                    onOpen = { reportSheetOpen.value = true },
-                                    onExpire = {
-                                        // Silence is "not now": an unsent crash log stays on
-                                        // disk for the next launch to offer again.
-                                        reportRequest.value = null
-                                        shake?.start()
-                                    },
-                                )
-                            }
+                            ReportChip(
+                                reason = pending.reason,
+                                inset = lightInset(),
+                                onOpen = { reportSheetOpen.value = true },
+                                onExpire = {
+                                    // Silence is "not now": an unsent crash log stays on
+                                    // disk for the next launch to offer again.
+                                    reportRequest.value = null
+                                    shake?.start()
+                                },
+                            )
                         }
                     }
                 }

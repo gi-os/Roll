@@ -435,6 +435,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private fun recordFault(what: String) {
         _faults.value += 1
         _lastFault.value = what
+        // The chip counter is the quiet, persistent half; this is the loud, consented half.
+        // Trouble dedupes per message per hour and keeps the first failure of a cascade, and its
+        // collector in the activity raises the standard light-common "SEND ERROR?" chip — the
+        // shake-to-report pipeline, offered by the app instead of waiting to be shaken about.
+        Trouble.record(what)
     }
 
     fun readFaults() {
