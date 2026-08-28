@@ -1,3 +1,13 @@
+## Roll v2.85 — the watchdog stops shooting the surgeon
+
+**"Shutter timeout and camera restarted on RAW mode" — the restart caused the timeout.** A
+full-resolution RAW readout can stall the preview stream for longer than the watchdog's four-second
+stale limit, and the watchdog read that silence as a dead camera and rebound it *mid-capture*: the
+shot timed out because the camera was torn down underneath it, then the develop had nothing to
+develop. The order in the report title is the order it happened. The watchdog now stands aside
+whenever a capture is outstanding — a camera busy taking a photograph is the opposite of a dead
+one — and resumes its rounds the moment the shot lands.
+
 ## Roll v2.84 — the reporting feature is the library's, all of it
 
 **"Make sure it's using the latest shake-to-send code from bright common" — now it is, wholesale.**

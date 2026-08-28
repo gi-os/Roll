@@ -1250,6 +1250,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             var firstRecoveryAt = 0L
             while (isActive) {
                 delay(1_500)
+                // **Never while a capture is outstanding.** A full-resolution still — RAW above
+                // all — can stall the repeating preview for longer than the stale limit, and the
+                // watchdog was reading that silence as death and rebinding *mid-capture*: the
+                // shot timed out because its camera was torn down under it, and the report read
+                // "shutter timeout and camera restarted on RAW mode", which is exactly the order
+                // it happened in. A capture in flight is the opposite of a dead camera.
+                if (_inFlight.value > 0 || _shooting.value) continue
                 if (engine.recoverIfDead()) {
                     val now = SystemClock.elapsedRealtime()
                     if (now - firstRecoveryAt > 60_000L) {
