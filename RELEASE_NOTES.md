@@ -1,3 +1,28 @@
+## Roll v2.80 — Zero-grade files, by default, at zero-lag speed
+
+**The insight this release is built on: Zero's quality and Zero's speed are the same decision.**
+Its files look the way they do because the ISP is told to do *nothing* — noise reduction off, edge
+enhancement off, hot pixels left alone, a straight line for a tone curve — and nothing is cheaper
+than the FAST processing everyone else asks for. Quality was never the thing traded for speed;
+both were traded away together, for punch.
+
+So the flat profile is now **on by default**, and a flat still states Zero's exact keys on the
+capture itself rather than trusting session options to win a HAL negotiation: NR OFF, EDGE OFF,
+HOT_PIXEL OFF, aberration OFF, linear tonemap — and the JPEG writes at quality 95, which is what
+Zero writes. White balance stays on, because a frame with none is not flat, it is green. Lens
+correction remains its own switch, defaulted on.
+
+And because OFF is cheap, all of it rides zero-shutter-lag: the instant shutter now produces the
+unprocessed file. That combination is the thing neither app had — Zero's negative-grade JPEG,
+Roll's press-is-the-photograph timing, one camera.
+
+Prefer the ISP's processed look? Settings -> CAMERA -> Flat profile, one tap, as before. Flat also
+remains the better base for every filter — a shader grading a linear frame instead of grading a
+grade.
+
+Toggling flat or lens correction now re-binds the camera (one viewfinder blink) so the next
+photograph is guaranteed to carry the new setting rather than the old bind's opinion.
+
 ## Roll v2.79 — the deaths that left no note now leave one
 
 **Two shots killed the whole app, and nothing reported it — which is the bug this release fixes

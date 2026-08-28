@@ -737,7 +737,11 @@ class Prefs(context: Context) {
      * source of truth for what the camera is *doing*; these are what was *chosen*, and a collector
      * in the view model keeps the two in agreement.
      */
-    private val _flat = MutableStateFlow(prefs.getBoolean(FLAT, false))
+    // **On by default, which is a statement of what this camera is for.** Flat is Zero's
+    // look — the ISP asked to do nothing — and the request that set it as the default was
+    // "top priority is extremely high quality photos". Off remains one tap away for anyone
+    // who wants the ISP's punchier opinion.
+    private val _flat = MutableStateFlow(prefs.getBoolean(FLAT, true))
     val flat: StateFlow<Boolean> = _flat.asStateFlow()
 
     fun setFlat(value: Boolean) = set(_flat, value) { putBoolean(FLAT, value) }

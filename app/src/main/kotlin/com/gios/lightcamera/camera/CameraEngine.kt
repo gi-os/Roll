@@ -609,7 +609,16 @@ class CameraEngine(private val context: Context) {
             // and quality is not linear in cost: the difference between 88 and 92 is a few percent of file
             // size and nothing a person can see on a 3.92" screen or a print, while the encoder does
             // measurably less work. Pro keeps 92, where somebody has asked for the best file.
-            .setJpegQuality(if (mode.isSimple) 88 else 92)
+            // 95 with the flat profile on — the file is the whole point of shooting flat, and
+            // Zero, whose look this profile is, writes at 95. Otherwise the measured trade
+            // stands: 88 in Simple, 92 in Pro.
+            .setJpegQuality(
+                when {
+                    _flat.value && !mode.isSimple -> 95
+                    mode.isSimple -> 88
+                    else -> 92
+                },
+            )
             .setCaptureMode(
                 if (zsl) {
                     ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG
@@ -642,6 +651,36 @@ class CameraEngine(private val context: Context) {
                 // Pro is left alone: somebody there has asked for the best file the camera can make, and
                 // waiting for it is the correct trade.
                 Camera2Interop.Extender(builder).apply {
+                    // **Flat means Zero's keys, on the still itself.** The flat profile lives in
+                    // session options, but the priority between session options and a use case's
+                    // own baked-in options is a HAL negotiation this app should not bet a
+                    // photograph on — so the still states them again. OFF is also *cheaper* than
+                    // FAST: the quality Zero is admired for and the speed it is admired for are
+                    // the same decision, which is why flat now rides zero-shutter-lag untouched.
+                    if (_flat.value) {
+                        setCaptureRequestOption(
+                            CaptureRequest.NOISE_REDUCTION_MODE,
+                            CameraMetadata.NOISE_REDUCTION_MODE_OFF,
+                        )
+                        setCaptureRequestOption(
+                            CaptureRequest.EDGE_MODE,
+                            CameraMetadata.EDGE_MODE_OFF,
+                        )
+                        setCaptureRequestOption(
+                            CaptureRequest.HOT_PIXEL_MODE,
+                            CameraMetadata.HOT_PIXEL_MODE_OFF,
+                        )
+                        setCaptureRequestOption(
+                            CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                            CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_OFF,
+                        )
+                        setCaptureRequestOption(
+                            CaptureRequest.TONEMAP_MODE,
+                            CameraMetadata.TONEMAP_MODE_CONTRAST_CURVE,
+                        )
+                        setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, LINEAR_TONEMAP)
+                        return@apply
+                    }
                     setCaptureRequestOption(
                         CaptureRequest.NOISE_REDUCTION_MODE,
                         CameraMetadata.NOISE_REDUCTION_MODE_FAST,
@@ -1187,7 +1226,11 @@ class CameraEngine(private val context: Context) {
     fun setFlat(on: Boolean) {
         if (on == _flat.value) return
         _flat.value = on
-        applyCaptureOptions()
+        // A rebind, not just session options: the still's builder bakes the flat keys and the
+        // JPEG quality in at bind time now, so a toggle that only touched the session would
+        // leave the next photograph shot with the old bind's opinions. The viewfinder blinks
+        // once; a settings toggle can afford that, and a photograph cannot afford the mismatch.
+        rebind(lastFlash)
     }
 
     fun setZoneFocus(on: Boolean) {
@@ -1224,7 +1267,7 @@ class CameraEngine(private val context: Context) {
     fun setLensCorrection(on: Boolean) {
         if (on == _lensCorrection.value) return
         _lensCorrection.value = on
-        applyCaptureOptions()
+        rebind(lastFlash)
     }
 
     /**
