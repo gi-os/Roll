@@ -850,6 +850,64 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         prefs.toggleFormat(CaptureFormat.Dng)
     }
 
+    /**
+     * The system said memory is tight: drop everything droppable, now.
+     *
+     * A TRIM_MEMORY callback is the low-memory killer clearing its throat, and the black-screen
+     * deaths this app has already died were that killer finishing the sentence. The two heap
+     * caches worth anything are the Reach-back ring (up to eight panel bitmaps) and the map's
+     * decoded tiles; both rebuild themselves in under a second of ordinary use, which is a price
+     * worth paying every single time against a process death that costs the whole queue.
+     */
+    fun shedMemory() {
+        preRollRing.clear()
+        tiles.shed()
+    }
+
+    /**
+     * Surface the last process death the crash log could not have caught.
+     *
+     * Reasons worth announcing: a native crash (a signal, no Java anywhere), the low-memory
+     * killer (the black-screen class of death), and an ANR. A Java CRASH is skipped when the
+     * crash log holds it — one death, one announcement. Everything else — swipes from recents,
+     * force stops, updates, the freezer — is the system doing its job and none of the chip's
+     * business. Each death is announced once, keyed on its timestamp.
+     */
+    private fun reportSilentDeath(app: Application) {
+        val exits = runCatching {
+            app.getSystemService(android.app.ActivityManager::class.java)
+                ?.getHistoricalProcessExitReasons(app.packageName, 0, 5)
+        }.getOrNull().orEmpty()
+        if (exits.isEmpty()) return
+        val newest = exits.maxOf { it.timestamp }
+        val seen = prefs.exitSeen()
+        val telling = exits.filter { it.timestamp > seen }.firstOrNull { info ->
+            when (info.reason) {
+                android.app.ApplicationExitInfo.REASON_CRASH_NATIVE,
+                android.app.ApplicationExitInfo.REASON_LOW_MEMORY,
+                android.app.ApplicationExitInfo.REASON_ANR,
+                android.app.ApplicationExitInfo.REASON_SIGNALED,
+                -> true
+                android.app.ApplicationExitInfo.REASON_CRASH -> CrashLog.last(app) == null
+                else -> false
+            }
+        }
+        if (newest > seen) prefs.setExitSeen(newest)
+        val death = telling ?: return
+        val name = when (death.reason) {
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "a native crash"
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "the low-memory killer"
+            android.app.ApplicationExitInfo.REASON_ANR -> "an ANR"
+            android.app.ApplicationExitInfo.REASON_SIGNALED -> "a signal"
+            else -> "a crash"
+        }
+        recordFault("Killed last run by $name")
+        // The description is the kernel's own line — the signal number, the ANR subject, the
+        // memory pressure — and it rides the report as detail, which is the whole point: the
+        // deaths that leave no stack now leave *something*.
+        Trouble.record("the app was killed by $name", death.description)
+    }
+
     /** Re-read the roll's coordinates — called when a permission has just been granted. */
     fun relocateRoll() = locateRoll()
 
@@ -1205,6 +1263,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         if (crash != null && crash.take(120) != prefs.crashSeen()) {
             recordFault("Crashed last run — shake to report")
         }
+        // **The deaths the crash log cannot see.** CrashLog catches a Java throw; a native crash
+        // and a low-memory kill both end the process with no handler run, no file written, no
+        // report offered — from the phone they are "the app just closed", and from here they used
+        // to be nothing at all. Two shots that killed the app outright arrived exactly that way:
+        // no report, no trace, no lead. Android keeps the coroner's record — ApplicationExitInfo —
+        // so it is read at every launch and a death worth knowing about becomes a fault and a
+        // Trouble line like any other, with the kernel's own description attached to the report.
+        reportSilentDeath(app)
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not

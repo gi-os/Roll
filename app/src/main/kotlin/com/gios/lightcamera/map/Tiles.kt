@@ -43,6 +43,11 @@ class Tiles(context: Context) {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
+    /** Drop the memory tier. The disk keeps everything; re-showing a tile costs a decode. */
+    fun shed() {
+        synchronized(memory) { memory.clear() }
+    }
+
     /**
      * A tile, from memory, then disk, then the network.
      *

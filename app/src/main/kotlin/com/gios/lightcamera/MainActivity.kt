@@ -11,6 +11,7 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -108,6 +109,12 @@ class MainActivity : ComponentActivity() {
     /** Raised by a shake, by a failure Roll noticed, or by a crash log from the last run. */
     private val reportRequest = MutableStateFlow<ReportRequest?>(null)
 
+    /**
+     * The same view model the composition uses — one store, one key, one instance — reachable
+     * from the places a composable cannot be, which today is the memory-trim callback.
+     */
+    private val activityVm: CameraViewModel by viewModels()
+
     /** True once the corner chip has been tapped. Ignoring the chip never gets here. */
     private val reportSheetOpen = MutableStateFlow(false)
 
@@ -161,6 +168,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The low-memory killer clears its throat before it speaks; shedding the droppable
+        // caches at the warning is how the black-screen class of death gets rarer. Registered
+        // rather than overridden so it sits beside the rest of this method's wiring.
+        registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                    activityVm.shedMemory()
+                }
+            }
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
+            @Deprecated("Deprecated in Java")
+            override fun onLowMemory() {
+                activityVm.shedMemory()
+            }
+        })
         shake = ShakeDetector(this, ::onShaken).takeIf { it.available }
         // A crash log still on disk was never sent. RollApp installed the handler; this is the
         // other half, asking about what it caught. Only on a genuinely new launch.

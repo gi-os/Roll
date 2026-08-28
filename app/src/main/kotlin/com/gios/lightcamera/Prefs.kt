@@ -777,6 +777,13 @@ class Prefs(context: Context) {
         prefs.edit().putString(CRASH_SEEN, value).apply()
     }
 
+    /** The newest process-death timestamp the chip has already announced. See the exit check. */
+    fun exitSeen(): Long = prefs.getLong(EXIT_SEEN, 0L)
+
+    fun setExitSeen(value: Long) {
+        prefs.edit().putLong(EXIT_SEEN, value).apply()
+    }
+
     /** True when the negative is wanted. Whether it is *possible* is the camera's answer. */
     fun wantsNegative(): Boolean = CaptureFormat.Dng in _formats.value
 
@@ -980,6 +987,7 @@ class Prefs(context: Context) {
         const val ZONE_FOCUS = "zoneFocus"
         const val EXPOSURE_MODE = "exposureMode"
         const val CRASH_SEEN = "crashSeen"
+        const val EXIT_SEEN = "exitSeenAt"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

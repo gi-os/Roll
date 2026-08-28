@@ -1,3 +1,22 @@
+## Roll v2.79 — the deaths that left no note now leave one
+
+**Two shots killed the whole app, and nothing reported it — which is the bug this release fixes
+first.** The crash log catches a Java throw; a native crash and a low-memory kill both end the
+process with no handler run, no file written, no report offered. From the phone they are "the app
+just closed", and from the code they were nothing at all — no lead to chase. Android keeps the
+coroner's record, and Roll now reads it at every launch: a death by native crash, the low-memory
+killer, an ANR or a signal becomes a fault on the chip and a "SEND ERROR?" offer carrying the
+kernel's own description. **Update, open Roll once, and the crash that prompted this release names
+itself** — the record of it is already on the phone, waiting to be read.
+
+Each death is announced once; a Java crash the log already caught is not announced twice; swipes
+from recents, force stops and updates are the system doing its job and stay out of the chip.
+
+**And the likeliest killer gets less room to work.** A memory-trim warning is the low-memory
+killer clearing its throat, and Roll now answers it by dropping everything droppable — the
+Reach-back ring's frames and the map's decoded tiles, both of which rebuild in under a second of
+ordinary use. Cheap insurance, paid only when the system says money is tight.
+
 ## Roll v2.78 — the RAW freeze, the PNG drag, and the sound of a photograph
 
 Both from one field report, which named them better than the code had.
