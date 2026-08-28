@@ -583,7 +583,21 @@ class CameraEngine(private val context: Context) {
         // DNG. The format is asked for only where it is actually used.
         val wantsRaw = negative && rawJpegSupported && !mode.isSimple
 
-        val zsl = mode.isSimple && zslAllowed
+        // **Quick is the default and the best file is the exception — the same trade Zero makes,
+        // arrived at from the other side.** Pro used to reserve the HAL's high-quality still
+        // pipeline unconditionally, on the argument that Pro is where somebody asked for the best
+        // file. Measured, that argument costs 1.8 seconds a photograph, and the person it was
+        // made for turns out to want the picture *now*. So the deliberate ask is narrowed to the
+        // one gesture that states it: turning RAW on. A negative is a request for everything the
+        // sensor saw, and waiting for it is correct; a JPEG is a photograph of a moment, and the
+        // moment does not wait.
+        val quick = mode.isSimple || (mode == CaptureMode.Photo && !wantsRaw)
+
+        // Zero shutter lag rides the same split, and this line is why it exists at all now: it
+        // was bound only in Simple — the one mode that never calls `takePicture`, because Simple
+        // shoots the panel. A ring buffer nobody captures from is a battery cost with no shutter
+        // attached. Pro is where the 1.8 s lived, so Pro is where the ring pays.
+        val zsl = quick && zslAllowed
         val capture = ImageCapture.Builder()
             .setResolutionSelector(captureSelector)
             // **88 in Simple, 92 elsewhere.** JPEG encode is a real slice of the shutter on a 12MP frame
@@ -612,7 +626,7 @@ class CameraEngine(private val context: Context) {
                 if (wantsRaw) builder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
             }
             .also { builder ->
-                if (!mode.isSimple) return@also
+                if (!quick) return@also
                 // **Measured: 1877 ms inside `takePicture`, 87 ms to save.** The time is entirely the
                 // camera's, and this is the only place an app can reach into it. A still on a modern HAL is
                 // not one exposure — it is a burst, stacked and denoised and sharpened, and every one of
@@ -639,12 +653,18 @@ class CameraEngine(private val context: Context) {
                         CaptureRequest.TONEMAP_MODE,
                         CameraMetadata.TONEMAP_MODE_FAST,
                     )
-                    // Preview-intent on the still request is the blunt version of the same idea: it tells
-                    // the HAL this frame does not need the treatment a photograph gets.
-                    setCaptureRequestOption(
-                        CaptureRequest.CONTROL_CAPTURE_INTENT,
-                        CameraMetadata.CONTROL_CAPTURE_INTENT_PREVIEW,
-                    )
+                    // Preview-intent on the still request is the blunt version of the same idea: it
+                    // tells the HAL this frame does not need the treatment a photograph gets.
+                    // **Simple only, even now that the FAST keys above reach Pro.** FAST picks the
+                    // cheap variant of each stage; preview-intent asks for a preview, which some
+                    // HALs answer with a frame that was never a photograph at all. Simple ships
+                    // panel-grade pictures by definition; Pro must not.
+                    if (mode.isSimple) {
+                        setCaptureRequestOption(
+                            CaptureRequest.CONTROL_CAPTURE_INTENT,
+                            CameraMetadata.CONTROL_CAPTURE_INTENT_PREVIEW,
+                        )
+                    }
                 }
             }
             .build()

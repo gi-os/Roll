@@ -180,6 +180,30 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _picking = MutableStateFlow(false)
     val picking: StateFlow<Boolean> = _picking.asStateFlow()
 
+    /**
+     * Entering Video hands the wheel to zoom.
+     *
+     * The one mode where what you want from the wheel is not a question: there is no filter track,
+     * no shutter dial, and re-framing mid-recording is the entire reason a camcorder puts zoom
+     * under a finger. Set on entry rather than remembered, so leaving Video gives the wheel back
+     * to whatever it held before.
+     */
+    private var channelBeforeVideo: Channel? = null
+
+    private fun channelForMode(mode: CaptureMode) {
+        if (mode == CaptureMode.Video) {
+            channelBeforeVideo = _channel.value
+            _channel.value = Channel.Zoom
+            _picking.value = false
+        } else {
+            channelBeforeVideo?.let { held ->
+                channelBeforeVideo = null
+                if (held in channelsAvailable()) _channel.value = held
+            }
+            settleChannel()
+        }
+    }
+
     /** The click, both of its meanings: open the choice, or lock it in. */
     fun toggleChannelPicking() {
         if (_picking.value) {
@@ -611,6 +635,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 engine.setExposureMode(it)
                 settleChannel()
             }
+        }
+        viewModelScope.launch {
+            prefs.mode.collect { channelForMode(it) }
         }
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }

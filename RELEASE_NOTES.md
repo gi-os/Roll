@@ -1,3 +1,26 @@
+## Roll v2.70 — the shutter stops thinking first
+
+**Pro fires like Simple now, and zero shutter lag finally does something.** Two facts had been
+sitting next to each other in the same function: the ring buffer that makes a shutter instant was
+bound only in Simple — the one mode that never captures from the sensor, because Simple shoots the
+panel — and Pro deliberately asked the HAL for its high-quality still pipeline, which is where the
+1.8 seconds lived. A ring nobody captures from, next to a capture nobody gave a ring.
+
+Pro now binds zero shutter lag and asks for the fast variant of every processing stage, the same
+trade the quickest cameras on this phone make. The deliberate wait is narrowed to the one gesture
+that states it: **RAW on**. A negative is a request for everything the sensor saw, and waiting for
+it is correct; a JPEG is a photograph of a moment, and the moment does not wait. All the old
+guards stay — a ring that is not yet warm is not asked, and a single failed zero-lag capture
+abandons the mode for the session rather than costing a second photograph.
+
+Half-press still helps: focus and exposure locked in advance is work the shutter does not do at
+the press.
+
+**Video hands the wheel to zoom.** No filter track, no shutter dial — re-framing mid-recording is
+the entire reason a camcorder puts zoom under a finger. Leaving Video hands the wheel back to
+whatever it held before. Everywhere else, zoom is on the wheel as a channel: click, turn to ZOOM,
+click, turn.
+
 ## Roll v2.69 — the wheel finally works the way it was described
 
 **Click to pick, turn to choose, click to lock, turn to adjust.** The channel wheel shipped as a
