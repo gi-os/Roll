@@ -507,12 +507,12 @@ fun CameraScreen(
                             // own — the mapping is one place, here.
                             ChromeIcon(
                                 icon = when (channel) {
-                                    Channel.Filter -> LightIcons.List
+                                    Channel.Filter -> LightIcons.Filter
                                     Channel.Exposure -> LightIcons.Exposure
                                     Channel.Shutter -> LightIcons.Camera
                                     Channel.Iso -> LightIcons.Circle
                                     Channel.Focus -> LightIcons.Crosshair
-                                    Channel.Zoom -> LightIcons.Add
+                                    Channel.Zoom -> LightIcons.Zoom
                                 },
                                 lighten = !channelLocked,
                                 onClick = { vm.toggleChannelLock() },

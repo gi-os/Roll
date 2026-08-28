@@ -1,3 +1,10 @@
+## Roll v2.92 — real glyphs for zoom and filters
+
+**Zoom and filters stop borrowing.** The channel button was showing a plus sign for zoom and a
+generic list for filters -- placeholders from the SDK set, which simply has neither. Both are now
+drawn in the SDK's own hairline style: zoom is the magnifier with a plus, filters are three lenses
+overlapped. Same 1px strokes as everything else on the frame, so nothing looks pasted in.
+
 ## Roll v2.91 — the filter ladder takes the whole edge, and the catches come off
 
 **Filters get the full frame line.** On the filter channel the ladder now runs the entire left

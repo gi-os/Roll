@@ -59,6 +59,15 @@ object LightIcons {
     val Reverse = LightIconSpec("reverse", R.drawable.ic_reverse_order_white)
     val Star = LightIconSpec("star", R.drawable.ic_star_white)
     val StarOutline = LightIconSpec("unstarred", R.drawable.ic_star_outline_white)
+
+    /**
+     * The two glyphs the SDK does not have, drawn here in its own hairline style -- 40dp
+     * viewport, 1px strokes, no fills -- so they sit beside the copied ones without a seam.
+     * Zoom is the magnifier with a plus; Filter is three lenses overlapped, which is what a
+     * filter dial holds.
+     */
+    val Zoom = LightIconSpec("zoom", R.drawable.ic_zoom_white)
+    val Filter = LightIconSpec("filters", R.drawable.ic_filter_white)
 }
 
 @Composable
