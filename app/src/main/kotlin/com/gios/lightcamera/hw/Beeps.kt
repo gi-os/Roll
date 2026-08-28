@@ -132,9 +132,16 @@ class Beeps(context: Context) {
 
     private fun warnPcm(): ShortArray = tone(freq = 640.0, ms = 110, amplitude = 0.20)
 
-    /** A fifth up, softer than the focus blips: finished, not ready. */
+    /**
+     * A fifth up, and barely there: finished, not ready.
+     *
+     * Quieter than it was, on request and on reflection. The darkroom made saving something that
+     * happens *behind* the photographer — several times in a row after a burst — and a save tone
+     * near the shutter's own level turned every burst into a small alarm clock. The press is the
+     * event; the filing of paperwork afterwards gets a murmur.
+     */
     private fun savedPcm(): ShortArray =
-        tone(freq = 1180.0, ms = 34, amplitude = 0.16) + tone(freq = 1760.0, ms = 46, amplitude = 0.14)
+        tone(freq = 1180.0, ms = 22, amplitude = 0.06) + tone(freq = 1760.0, ms = 28, amplitude = 0.05)
 
     /**
      * The shutter tick.
@@ -143,13 +150,16 @@ class Beeps(context: Context) {
      * mechanism rather than as a note. A pure sine at this length just sounds like a bleep.
      */
     private fun clickPcm(): ShortArray {
-        val frames = msToFrames(22)
+        // Louder and a shade longer than it was, deliberately paired with the saved tone going
+        // the other way: the press is the one sound that must read over street noise, because it
+        // is the only confirmation the photograph exists — everything after it is bookkeeping.
+        val frames = msToFrames(28)
         val out = ShortArray(frames)
         for (i in 0 until frames) {
             val t = i.toDouble() / SAMPLE_RATE
-            val decay = Math.exp(-t * 260.0)
+            val decay = Math.exp(-t * 210.0)
             val body = sin(2 * PI * 2400.0 * t) * 0.6 + sin(2 * PI * 4800.0 * t) * 0.4
-            val v = body * decay * 0.28 * fade(i, frames)
+            val v = body * decay * 0.45 * fade(i, frames)
             out[i] = (v * Short.MAX_VALUE).toInt().toShort()
         }
         return out

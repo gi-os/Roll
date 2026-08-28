@@ -749,10 +749,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             showNotice("Couldn't save")
             return
         }
-        val needsWork = activeFilter.agsl != null ||
+        // **The lossless setting alone is not work.** A PNG of an untouched sensor JPEG is the
+        // thing the setting's own note refuses — bytes spent preserving damage already done — and
+        // treating `wantPng` as a reason to develop did worse than waste them: it decoded the
+        // ISP's JPEG and *rewrote it recompressed*, degrading every filterless photograph the
+        // setting touched, while the 12MP PNG encode pegged a core per shot. Field report #160
+        // ("lossless PNG has some lag in viewfinder compared to just JPG") was this. The copy is
+        // made only when a filter, a crop or a stamp has produced pixels that exist nowhere else.
+        val changesPixels = activeFilter.agsl != null ||
             aspect != FrameAspect.Full ||
-            stampAt != null ||
-            wantPng
+            stampAt != null
+        val needsWork = changesPixels
         if (!needsWork) {
             stampLocation(uri)
             if (prefs.sounds.value) beeps.saved()
@@ -2482,75 +2489,43 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             if (pair.raw != null && prefs.sounds.value) beeps.saved()
             return
         }
-        // This path never tagged at all — found in review, not on a phone: every RAW capture was
-        // absent from the map and nothing said so. Stamped here only when nothing below is going
-        // to rewrite the file, and again after the rewrite when something is; a stamp before a
-        // rewrite is replaced along with the bytes it was written into.
-        val willRewrite = lookForShot().agsl != null ||
-            prefs.aspect.value != FrameAspect.Full ||
-            stampTime(lookForShot()) != null ||
-            prefs.wantsLossless()
-        if (!willRewrite) stampLocation(jpegUri)
-
         val activeFilter = lookForShot()
-        val wantPng = prefs.wantsLossless()
         val aspect = prefs.aspect.value
         val stampAt = stampTime(activeFilter)
-        val needsDeveloping = activeFilter.agsl != null ||
+        // The same pixels-changed rule as the quick path: lossless-of-untouched is refused, and
+        // rewriting the ISP's JPEG recompressed is the quality bug the refusal prevents.
+        val changesPixels = activeFilter.agsl != null ||
             aspect != FrameAspect.Full ||
-            stampAt != null ||
-            wantPng
-        if (!needsDeveloping) {
+            stampAt != null
+        if (!changesPixels) {
+            stampLocation(jpegUri)
             if (prefs.sounds.value) beeps.saved()
             return
         }
 
-        val original = withContext(Dispatchers.IO) {
-            runCatching { resolver.openInputStream(jpegUri)?.use { it.readBytes() } }.getOrNull()
-        }
-        if (original == null) {
-            showNotice("Saved, but couldn't develop it")
-            // Undeveloped, but saved — so it still gets its coordinate. Nothing below runs.
-            stampLocation(jpegUri)
-            return
-        }
-
-        var pngWritten = false
-        val processed = withContext(darkroomThread) {
-            Frames.process(
-                // Rotation is left to the EXIF the camera wrote, which is why this is zero rather
-                // than the panel's idea of which way up the phone is: CameraX has already applied
-                // `targetRotation` to the file, and turning it a second time is how a photograph
-                // ends up on its side.
-                CapturedFrame(jpeg = original, rotationDegrees = 0, mirrored = false),
-                activeFilter,
-                aspect,
-                Random.nextFloat() * 1000f,
-                stampAt,
-                prefs.stampStyle.value,
-                // Streamed, not buffered — the same heap argument as every other 12MP PNG.
-                pngSink = if (!wantPng) {
-                    null
-                } else {
-                    { bitmap ->
-                        pngWritten = repo.saveStreaming(
-                            takenAt = takenAt,
-                            format = CaptureFormat.Png,
-                            stem = stem,
-                        ) { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) } != null
-                    }
-                },
-            )
-        }
-
-        val rewritten = repo.rewrite(jpegUri, processed.jpeg)
-        if (!rewritten) showNotice("Couldn't develop the JPEG")
-        // After the rewrite, which replaces the whole file: a coordinate written before it would
-        // have gone with the bytes it lived in.
-        stampLocation(jpegUri)
-
-        if (wantPng && !pngWritten) recordFault("Lossless copy failed")
-        if (prefs.sounds.value) beeps.saved()
+        // **Queued, not developed here — this inline develop froze the camera.** v2.77 ran it on
+        // the darkroom's single thread while `_shooting` stayed latched, so a RAW press stood in
+        // line behind every queued develop with the shutter dead the whole wait — field report
+        // #160, "camera freezes on RAW negative", and the likely trigger for the wedged session
+        // behind #158. The negative's JPEG is a saved file wanting a filter, which is exactly
+        // what a FileJob is; the shutter frees the moment the capture lands, like every other
+        // photograph.
+        develop(
+            FileJob(
+                uri = jpegUri,
+                stem = stem,
+                // CameraX already applied targetRotation to the file; EXIF carries the rest.
+                rotationDegrees = 0,
+                mirrored = false,
+                filter = activeFilter,
+                aspect = aspect,
+                seed = Random.nextFloat() * 1000f,
+                stampAt = stampAt,
+                stampStyle = prefs.stampStyle.value,
+                wantPng = prefs.wantsLossless(),
+                takenAt = takenAt,
+            ),
+        )
     }
 
     /**

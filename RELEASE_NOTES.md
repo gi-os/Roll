@@ -1,3 +1,30 @@
+## Roll v2.78 — the RAW freeze, the PNG drag, and the sound of a photograph
+
+Both from one field report, which named them better than the code had.
+
+**"Camera freezes on RAW negative" — it did, and v2.77 caused it.** The RAW path's develop ran
+inline on the darkroom's single thread while the shutter stayed latched, so a RAW press stood in
+line behind every queued develop with the camera dead for the whole wait — and a session held
+frozen like that is the likeliest trigger for the wedge the watchdog later reported as "Preview
+went dark". The negative's JPEG is a saved file waiting for a filter, which is exactly what the
+develop queue holds: it queues now, and the shutter frees the moment the capture lands, like every
+other photograph.
+
+**"Lossless PNG has some lag in viewfinder compared to just JPG" — worse than lag.** The lossless
+setting alone was treated as a reason to develop, so every filterless shot was decoded, PNG-encoded
+at 12MP (a pegged core per shot — the lag), and then had its JPEG **rewritten recompressed**:
+quality lost on every untouched photograph the setting ever saw. The setting's own description
+refuses a PNG of an untouched JPEG as "bytes spent preserving damage", and now the code agrees
+with its comment: the lossless copy is made only when a filter, a crop or a stamp has produced
+pixels that exist nowhere else. Filterless shots with PNG on are back to the untouched-JPEG fast
+path — full speed, original bytes.
+
+**The shutter got louder; the save got quieter.** The darkroom made saving something that happens
+behind the photographer, several times in a row after a burst, and a save tone near the shutter's
+level turned every burst into a small alarm clock. The press is the one sound that must read over
+street noise — it is the only confirmation the photograph exists. Everything after it is
+bookkeeping, and now sounds like it.
+
 ## Roll v2.77 — !54, explained and mostly abolished
 
 A field test came back with the delay fixed and the fault chip at fifty-four — and a chip that
