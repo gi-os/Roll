@@ -1,5 +1,7 @@
 package com.gios.lightcamera.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,6 +21,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.gios.lightcamera.ui.theme.LightThemeTokens
 import kotlin.math.atan2
@@ -42,6 +45,8 @@ fun NeedleGauge(
     onSet: (Int) -> Unit,
     /** A tap that never became a drag. The caller decides what a tap means; here it is a latch. */
     onTap: (() -> Unit)? = null,
+    /** The ladder's long axis. Filters hand the whole viewfinder edge in; everything else the default. */
+    length: Dp = GAUGE_HEIGHT,
     modifier: Modifier = Modifier,
 ) {
     if (labels.isEmpty()) return
@@ -49,11 +54,18 @@ fun NeedleGauge(
     val set by rememberUpdatedState(onSet)
     val count = labels.size
     var heightPx by remember { mutableFloatStateOf(1f) }
+    // The needle travels rather than teleports: a real meter's arm has mass. Short enough that a
+    // spinning wheel still reads as one motion per notch, not a lagging pointer.
+    val sweep by animateFloatAsState(
+        targetValue = index.toFloat(),
+        animationSpec = tween(durationMillis = 120),
+        label = "needle",
+    )
 
     Box(
         modifier
             .width(GAUGE_WIDTH)
-            .height(GAUGE_HEIGHT)
+            .height(length)
             .pointerInput(count) {
                 detectDragGestures { change, _ ->
                     change.consume()
@@ -66,7 +78,7 @@ fun NeedleGauge(
                 detectTapGestures { onTap?.invoke() }
             },
     ) {
-        Canvas(Modifier.width(GAUGE_WIDTH).height(GAUGE_HEIGHT)) {
+        Canvas(Modifier.width(GAUGE_WIDTH).height(length)) {
             heightPx = size.height
             val step = size.height / count
             // **Needle first, labels second: the bar slides in *under* the text.** The pivot sits
@@ -74,7 +86,7 @@ fun NeedleGauge(
             // what appears is only the last stretch of a long arm sweeping on a hidden centre,
             // which is the sketch: a speedometer you see the tip of, not the works.
             val pivot = Offset(-PIVOT_REACH, size.height / 2f)
-            val target = Offset(LABEL_X + OVERLAP, step * index + step * 0.5f)
+            val target = Offset(LABEL_X + OVERLAP, step * sweep + step * 0.5f)
             val angle = Math.toDegrees(
                 atan2((target.y - pivot.y).toDouble(), (target.x - pivot.x).toDouble()),
             ).toFloat()
@@ -84,19 +96,20 @@ fun NeedleGauge(
             ).toFloat()
             rotate(degrees = angle, pivot = pivot) {
                 drawLine(
-                    color = NEEDLE_RED,
+                    color = NEEDLE_RED.copy(alpha = 0.8f),
                     start = pivot,
                     end = Offset(pivot.x + reach, pivot.y),
-                    strokeWidth = 2.dp.toPx(),
+                    strokeWidth = 2.2.dp.toPx(),
                 )
             }
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
-                textSize = step * 0.62f
+                textSize = minOf(step * 0.62f, MAX_TEXT_PX)
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }
             labels.forEachIndexed { i, label ->
+                if (label.isEmpty()) return@forEachIndexed
                 drawContext.canvas.nativeCanvas.drawText(
                     label,
                     LABEL_X,
@@ -119,6 +132,9 @@ private const val LABEL_X = 8f
 
 /** How far the needle's tip rides in under the text. Under: the labels draw over it. */
 private const val OVERLAP = 14f
+
+/** A rung with no text is still a rung — EV marks only the whole stops; the needle lands between. */
+private const val MAX_TEXT_PX = 34f
 
 /** The one colour in the app that is not the theme's: a meter needle is red or it is not one. */
 private val NEEDLE_RED = Color(0xFFCC2A1E)

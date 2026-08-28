@@ -1064,9 +1064,8 @@ half4 main(float2 xy) {
     /**
      * The same slot with adjustments on it.
      *
-     * **Deliberately shares [none]'s id.** The id is what the wheel positions itself by, what the
-     * dwell timer keys on, what is written to preferences and what "the app asked for plain" clears
-     * to — and by every one of those measures this is the same slot, not a nineteenth filter. What
+     * **Deliberately shares [none]'s id.** The id is what the wheel positions itself by, what is
+     * written to preferences and what "the app asked for plain" clears to — and by every one of those measures this is the same slot, not a nineteenth filter. What
      * differs is only whether there is a shader to run, which is decided per photograph by whether
      * the grade is neutral. So there are two `Filter` values for one dial position and [forGrade]
      * picks between them; nothing else in the app has to know.
@@ -1226,35 +1225,4 @@ half4 main(float2 xy) {
         return within[next]
     }
 
-    /**
-     * How long the wheel rests on [none] before it will move again.
-     *
-     * A dial that treats "no filter" as one position among seventeen makes the most common
-     * setting the hardest to find: you spin past it, come back, and spin past it the other way.
-     * The first attempt at fixing that gave None three notches of its own, which worked but
-     * meant three deliberate clicks to leave — the wheel felt broken rather than detented.
-     *
-     * This is the better answer: landing on None **stops the dial dead** for a moment. Every
-     * notch inside that window is swallowed, so a fast spin cannot skate over it, and it costs
-     * nothing to leave once the moment has passed. A film advance that catches at the frame line
-     * does exactly this.
-     */
-    const val NONE_DWELL_MS = 1_500L
-
-    /**
-     * The same catch on Purikura, half as long.
-     *
-     * Purikura is the other filter you are aiming *for* rather than passing through — it has a menu
-     * behind it and four-shot strips behind that — so the dial should hesitate there as well. Shorter
-     * than None's, because None is the way back to an ordinary photograph and this is a place you went
-     * looking for on purpose.
-     */
-    const val PURIKURA_DWELL_MS = 500L
-
-    /** How long the dial should stop dead on [filter], or zero for the ones you scroll past. */
-    fun dwellMs(filter: Filter): Long = when {
-        filter.id == none.id -> NONE_DWELL_MS
-        filter.facesAware -> PURIKURA_DWELL_MS
-        else -> 0L
-    }
 }

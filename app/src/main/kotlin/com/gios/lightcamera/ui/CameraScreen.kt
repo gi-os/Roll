@@ -51,6 +51,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -1036,16 +1037,27 @@ fun CameraScreen(
                 // landscape-left ladder. The pivot stays off-screen; only the needle's tip enters,
                 // under the numbers. A tap latches the dial; a drag slides the value; rotation is
                 // a graphics layer, so touch coordinates arrive already mapped.
+                // Flush with the screen's edge: the ladder's text starts a few pixels in and the
+                // pivot hangs past it, so in the shooting grip the numbers sit right on the frame
+                // line. Filters get the whole edge -- the ladder is the dial's full track laid
+                // out, and a fingertip can land anywhere on it; every other channel stays the
+                // small meter, fixed in place.
+                val gaugeLength =
+                    if (channel == Channel.Filter) {
+                        LocalConfiguration.current.screenWidthDp.dp - 12.dp
+                    } else {
+                        128.dp
+                    }
                 Box(
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 34.dp)
-                        .requiredSize(width = 128.dp, height = 44.dp),
+                        .padding(top = 2.dp)
+                        .requiredSize(width = gaugeLength, height = 44.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         Modifier
-                            .requiredSize(width = 44.dp, height = 128.dp)
+                            .requiredSize(width = 44.dp, height = gaugeLength)
                             .graphicsLayer { rotationZ = 90f },
                     ) {
                         NeedleGauge(
@@ -1053,6 +1065,7 @@ fun CameraScreen(
                             index = spec.index,
                             onSet = spec.onSet,
                             onTap = { vm.toggleDialLock() },
+                            length = gaugeLength,
                         )
                     }
                 }

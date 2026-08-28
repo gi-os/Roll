@@ -1,3 +1,21 @@
+## Roll v2.91 — the filter ladder takes the whole edge, and the catches come off
+
+**Filters get the full frame line.** On the filter channel the ladder now runs the entire left
+edge of the viewfinder -- every filter on the dial, laid out at once, a fingertip away. The other
+channels keep the small fixed meter; only filters stretch.
+
+**And the dwell is gone.** The dial used to stop dead on None and Purikura to keep a fast spin
+from skating past them. With the whole track visible on the edge, a catch is a hesitation you can
+see no reason for -- so it's out, every notch lands, and None is findable by eye instead.
+
+**EV thinks in thirds now.** Each notch of the wheel moves a third of a stop -- the step
+photographers actually use -- instead of the sensor's tenth-stop crawl. The ladder marks only the
+whole stops, -2 to +2, and the needle lands between them.
+
+**The needle got the last of its manners.** The whole gauge sits flush with the frame line, the
+bar is a touch thicker at 80% opacity so the numbers stay legible through it, and it sweeps to a
+new value instead of teleporting -- a meter's arm has mass.
+
 ## Roll v2.90 — the meter stands up, the channels turn to icons, feet arrive
 
 **The meter matches the sketch now.** No box around it, ladder text left-aligned, and the whole

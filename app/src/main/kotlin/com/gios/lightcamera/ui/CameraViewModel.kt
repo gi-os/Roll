@@ -306,10 +306,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         Channel.Exposure -> {
             val range = engine.evRange.value
-            val steps = (range.first..range.last).toList()
+            val evStep = engine.evStep.value
+            // Third-stop grid over whatever the sensor's native index step is, and a mark only at
+            // the whole stops -- the ladder reads -2 -1 0 +1 +2, the needle lands between them.
+            val stride = evStride()
+            val steps = (range.first..range.last).filter { it % stride == 0 }
             GaugeSpec(
-                labels = steps.map { if (it > 0) "+$it" else it.toString() },
-                index = steps.indexOf(engine.ev.value).coerceAtLeast(0),
+                labels = steps.map { i ->
+                    val ev = i * evStep
+                    val whole = kotlin.math.round(ev)
+                    if (kotlin.math.abs(ev - whole) < 0.01f) {
+                        val n = whole.toInt()
+                        if (n > 0) "+$n" else n.toString()
+                    } else {
+                        ""
+                    }
+                },
+                index = steps.indices.minByOrNull { kotlin.math.abs(steps[it] - engine.ev.value) } ?: 0,
             ) { engine.setEv(steps[it.coerceIn(0, steps.lastIndex)]) }
         }
         Channel.Filter -> {
@@ -324,6 +337,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** How many native EV indexes make a third of a stop: the finest move a finger needs. */
+    private fun evStride(): Int =
+        kotlin.math.round(0.3f / engine.evStep.value).toInt().coerceAtLeast(1)
 
     /** The dial's own ordering, so the gauge and the wheel walk the same track. */
     private fun filterTrack(): List<Filters.Filter> = prefs.dial()
@@ -426,7 +443,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         when (_channel.value) {
             Channel.Filter -> stepFilter(if (notches > 0) 1 else -1)
             Channel.Exposure -> {
-                engine.stepEv(notches)
+                engine.stepEv(notches * evStride())
                 showNotice("EV ${engine.evLabel()}")
             }
             Channel.Shutter -> {
@@ -1307,27 +1324,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     var audioGranted: Boolean = false
 
-    /** While the dial is caught on None. See [Filters.NONE_DWELL_MS]. */
-    private var dialHeldUntil = 0L
-
-    /**
-     * The last second of filter turns, for deciding whether the dial is being *spun*.
-     *
-     * The catch on None and Purikura exists for one situation: spinning fast through the track and
-     * needing the landmarks to grab you as they pass. At a browsing pace it is the opposite of
-     * help — the dial stopping dead on a filter you were deliberately stepping past reads as a
-     * stuck wheel. So the catch engages only past four filters a second, which is the design as
-     * originally spoken and now finally as written.
-     */
-    private val turnTimes = ArrayDeque<Long>()
-
-    private fun spinningFast(now: Long): Boolean {
-        turnTimes.addLast(now)
-        while (turnTimes.isNotEmpty() && now - turnTimes.first() > 1_000L) turnTimes.removeFirst()
-        return turnTimes.size > FAST_SPIN_PER_SEC
-    }
-
-    private var observer: AutoCloseable? = null
+        private var observer: AutoCloseable? = null
     private var lastPriorityFace: FaceBox? = null
 
     /** Read from the face collector below, so declared above it. Ints, so harmless either way. */
@@ -1572,9 +1569,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * One notch of the wheel, or one sideways swipe.
      *
      * Every notch buzzes, whether or not it moves the dial — the wheel is a physical control and
-     * silence from it reads as a control that isn't working. The buzz is also what tells you the
-     * dial is *caught* on None rather than dead: notches inside the dwell window are felt and
-     * discarded.
+     * silence from it reads as a control that isn't working.
      */
     fun stepFilter(by: Int) {
         // **The dial stays open while the shutter is.** It used to be closed for the 1.8 seconds a
@@ -1605,11 +1600,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         LightHaptics.advance(getApplication<Application>())
-        val now = System.currentTimeMillis()
-        // Counted before the catch swallows it, so a spin that hits a landmark stays "fast" and
-        // the next landmark catches too.
-        val fast = spinningFast(now)
-        if (now < dialHeldUntil) return
 
         // **Simple sits one notch before None on the same track.** The wheel is the one control this phone
         // has that a camera doesn't, and taking it away in the mode you spend most of your time in would
@@ -1629,7 +1619,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
             setMode(CaptureMode.Photo)
             prefs.setFilter(Filters.none.id)
-            if (fast) dialHeldUntil = now + Filters.NONE_DWELL_MS
             return
         }
         // Only walks into Simple when Simple is switched on; otherwise None is the end of the track.
@@ -1639,13 +1628,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
             setMode(CaptureMode.Simple)
-            if (fast) dialHeldUntil = now + Filters.NONE_DWELL_MS
             return
         }
 
         val next = Filters.step(filter.value, by, prefs.dial())
         prefs.setFilter(next.id)
-        if (fast) dialHeldUntil = now + Filters.dwellMs(next)
         // **No name flashed on screen.** The viewfinder is already showing you the filter — a
         // label naming what you can plainly see is a label in the way of it. The buzz says the
         // dial moved; the picture says where to.
@@ -1655,8 +1642,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // Open during a capture, like the wheel above and for the same reason — the shot in flight
         // is holding its own look in [shootingWith] and cannot be changed out from under itself.
         if (filterLocked) return
-        // Chosen deliberately from the grid, so the dial has no business holding on to it.
-        dialHeldUntil = 0L
         prefs.setFilter(id)
     }
 
@@ -3422,7 +3407,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         const val HOLD_BURST_EVERY_MS = 300L
 
         /** Turns inside a second before the dial counts as spinning and the landmarks catch. */
-        const val FAST_SPIN_PER_SEC = 4
 
         /**
          * How many undeveloped captures the darkroom holds before the shutter waits.

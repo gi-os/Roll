@@ -46,8 +46,8 @@ class LevelAndFilterTrackTest {
 
     @Test
     fun `stepping wraps and reaches everything, one notch per filter`() {
-        // Every filter is one notch now. None gets its emphasis from a dwell in the view model
-        // rather than from extra positions on the track, which meant three clicks to leave it.
+        // Every filter is one notch. The full-edge needle gauge is what makes None findable now;
+        // the dial itself has no special positions and no catches.
         val seen = HashSet<String>()
         var here = Filters.all.first()
         repeat(Filters.all.size) {
@@ -56,13 +56,6 @@ class LevelAndFilterTrackTest {
         }
         assertEquals(Filters.all.map { it.id }.toSet(), seen)
         assertEquals(Filters.all.first().id, here.id)
-    }
-
-    @Test
-    fun `the dwell is long enough to catch a fast spin`() {
-        // The sensor fires a notch every ~35ms, so anything much under a second would be
-        // spun straight through, which was the whole problem.
-        assertTrue(Filters.NONE_DWELL_MS >= 1_000L)
     }
 
     @Test
