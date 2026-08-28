@@ -498,11 +498,19 @@ fun CameraScreen(
                         // opens the pick — the same act as clicking the wheel, for thumbs. When
                         // the wheel is on fixed bindings the old Adjust chip keeps its seat.
                         if (channelWheel) {
+                            val channelLocked by vm.channelLocked.collectAsState()
                             LightText(
-                                text = if (picking) "›${channel.label}‹" else channel.label,
+                                // The lock is the label's own state: a bracketed name is held.
+                                // Tap to lock the wheel onto this channel, tap again to free it —
+                                // the wheel click still opens the pick while unlocked.
+                                text = when {
+                                    channelLocked -> "[${channel.label}]"
+                                    picking -> "›${channel.label}‹"
+                                    else -> channel.label
+                                },
                                 variant = LightTextVariant.Button,
                                 modifier = Modifier
-                                    .lightClickable { vm.toggleChannelPicking() }
+                                    .lightClickable { vm.toggleChannelLock() }
                                     .padding(horizontal = 6.dp, vertical = 10.dp),
                             )
                         } else {
@@ -1027,16 +1035,20 @@ fun CameraScreen(
                 modifier = Modifier.padding(start = BAND),
             )
         }
-        // **The meter, when the wheel holds a value.** A ladder of the channel's stops on the
-        // right edge with a red needle on a fixed pivot — read like a speedometer, dragged like a
-        // slider. It appears only while the wheel is a value dial: filters are names, and a needle
-        // pointing at a name is a list wearing a costume.
+        // **The meter.** A ladder of the channel's stops on the right edge with a red needle on
+        // a fixed pivot — read like a speedometer, dragged like a slider, tapped to lock the
+        // dial. Filters ride it too, as three-letter codes: the viewfinder is already showing
+        // what the filter looks like, so the ladder only has to say where the wheel is.
         if (channelWheel && !picking) {
             vm.gaugeSpec()?.let { spec ->
                 NeedleGauge(
                     labels = spec.labels,
                     index = spec.index,
                     onSet = spec.onSet,
+                    // A tap — not a drag — locks and unlocks the dial itself, so a value you just
+                    // set stays set in a pocket. The drag still slides the value; the meter is
+                    // both the readout and the latch, which is how a physical meter would do it.
+                    onTap = { vm.toggleDialLock() },
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .padding(end = 10.dp),

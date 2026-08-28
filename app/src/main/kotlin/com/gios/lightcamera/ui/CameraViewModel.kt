@@ -193,6 +193,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     val picking: StateFlow<Boolean> = _picking.asStateFlow()
 
     /**
+     * Whether the wheel may change channels at all.
+     *
+     * The dial lock guards *values* from a pocket; this guards the *channel* from a click. Set
+     * your dial to shutter for the evening and lock it: the click no longer opens the pick, the
+     * wheel only ever adjusts the thing you chose. Toggled by tapping the channel label in the
+     * band, which is also where the lock shows itself.
+     */
+    private val _channelLocked = MutableStateFlow(false)
+    val channelLocked: StateFlow<Boolean> = _channelLocked.asStateFlow()
+
+    fun toggleChannelLock() {
+        _channelLocked.value = !_channelLocked.value
+        _picking.value = false
+        showNotice(if (_channelLocked.value) "Channel locked — ${_channel.value.label}" else "Channel unlocked")
+    }
+
+    /**
      * Entering Video hands the wheel to zoom.
      *
      * The one mode where what you want from the wheel is not a question: there is no filter track,
@@ -295,7 +312,39 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 index = steps.indexOf(engine.ev.value).coerceAtLeast(0),
             ) { engine.setEv(steps[it.coerceIn(0, steps.lastIndex)]) }
         }
-        Channel.Filter -> null
+        Channel.Filter -> {
+            val track = filterTrack()
+            if (track.isEmpty()) {
+                null
+            } else {
+                GaugeSpec(
+                    labels = track.map { acronym(it.label) },
+                    index = track.indexOfFirst { it.id == filter.value.id }.coerceAtLeast(0),
+                ) { i -> setFilter(track[i.coerceIn(0, track.lastIndex)].id) }
+            }
+        }
+    }
+
+    /** The dial's own ordering, so the gauge and the wheel walk the same track. */
+    private fun filterTrack(): List<Filters.Filter> = prefs.dial()
+
+    /**
+     * A filter's name at gauge size: initials plus any digits, three characters at most.
+     *
+     * "Dither BW" -> DBW, "Dither 16" -> D16, "Game Boy" -> GB, "Film" -> FLM. Codes, not names —
+     * the ladder is a centimeter wide and the viewfinder underneath is already showing you what
+     * the filter looks like, which no abbreviation could.
+     */
+    private fun acronym(label: String): String {
+        val words = label.split(' ', '-').filter { it.isNotBlank() }
+        val code = if (words.size >= 2) {
+            words.joinToString("") { w ->
+                if (w.all(Char::isDigit)) w else w.first().uppercase()
+            }
+        } else {
+            label.filter { it.isLetterOrDigit() }.take(3).uppercase()
+        }
+        return code.take(3)
     }
 
     private fun zoomGaugeStops(): List<Float> {
@@ -334,6 +383,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The click, both of its meanings: open the choice, or lock it in. */
     fun toggleChannelPicking() {
+        if (_channelLocked.value) {
+            showNotice("Channel locked — tap ${_channel.value.label} to unlock")
+            return
+        }
         if (_picking.value) {
             _picking.value = false
             // **Locking the pick is the AF/MF switch.** FOCUS is on the dial whether or not zone
@@ -1252,6 +1305,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     /** While the dial is caught on None. See [Filters.NONE_DWELL_MS]. */
     private var dialHeldUntil = 0L
 
+    /**
+     * The last second of filter turns, for deciding whether the dial is being *spun*.
+     *
+     * The catch on None and Purikura exists for one situation: spinning fast through the track and
+     * needing the landmarks to grab you as they pass. At a browsing pace it is the opposite of
+     * help — the dial stopping dead on a filter you were deliberately stepping past reads as a
+     * stuck wheel. So the catch engages only past four filters a second, which is the design as
+     * originally spoken and now finally as written.
+     */
+    private val turnTimes = ArrayDeque<Long>()
+
+    private fun spinningFast(now: Long): Boolean {
+        turnTimes.addLast(now)
+        while (turnTimes.isNotEmpty() && now - turnTimes.first() > 1_000L) turnTimes.removeFirst()
+        return turnTimes.size > FAST_SPIN_PER_SEC
+    }
+
     private var observer: AutoCloseable? = null
     private var lastPriorityFace: FaceBox? = null
 
@@ -1528,6 +1598,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         LightHaptics.advance(getApplication<Application>())
         val now = System.currentTimeMillis()
+        // Counted before the catch swallows it, so a spin that hits a landmark stays "fast" and
+        // the next landmark catches too.
+        val fast = spinningFast(now)
         if (now < dialHeldUntil) return
 
         // **Simple sits one notch before None on the same track.** The wheel is the one control this phone
@@ -1548,7 +1621,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
             setMode(CaptureMode.Photo)
             prefs.setFilter(Filters.none.id)
-            dialHeldUntil = now + Filters.NONE_DWELL_MS
+            if (fast) dialHeldUntil = now + Filters.NONE_DWELL_MS
             return
         }
         // Only walks into Simple when Simple is switched on; otherwise None is the end of the track.
@@ -1558,13 +1631,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
             setMode(CaptureMode.Simple)
-            dialHeldUntil = now + Filters.NONE_DWELL_MS
+            if (fast) dialHeldUntil = now + Filters.NONE_DWELL_MS
             return
         }
 
         val next = Filters.step(filter.value, by, prefs.dial())
         prefs.setFilter(next.id)
-        dialHeldUntil = now + Filters.dwellMs(next)
+        if (fast) dialHeldUntil = now + Filters.dwellMs(next)
         // **No name flashed on screen.** The viewfinder is already showing you the filter — a
         // label naming what you can plainly see is a label in the way of it. The buzz says the
         // dial moved; the picture says where to.
@@ -3339,6 +3412,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** The burst cadence: ~3/s, comfortably inside the pipeline's pace. */
         const val HOLD_BURST_EVERY_MS = 300L
+
+        /** Turns inside a second before the dial counts as spinning and the landmarks catch. */
+        const val FAST_SPIN_PER_SEC = 4
 
         /**
          * How many undeveloped captures the darkroom holds before the shutter waits.

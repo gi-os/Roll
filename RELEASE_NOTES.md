@@ -1,3 +1,25 @@
+## Roll v2.89 — the meter learns to latch, the dial learns when to catch
+
+**∞ no longer reads NaN.** Focused at infinity, the depth-of-field formula divided infinity by
+infinity and the readout printed the result, verbatim. The limit is well defined — everything from
+the hyperfocal distance out is sharp — and now it says so.
+
+**Two locks, both a tap.** Tap the meter and the dial latches: wheel turns change nothing until you
+tap it again, so the shutter speed you set stays set in a pocket. Tap the channel label in the band
+and the *channel* locks — the wheel keeps adjusting the thing you chose and the click stops opening
+the pick, shown as [SHUTTER] in the band. Values and channels lock separately because they are
+different promises.
+
+**Filters ride the meter as codes.** DBW, D16, GB, FLM — three letters at most, because the ladder
+is a centimeter wide and the viewfinder is already showing you what the filter looks like. Drag the
+needle to jump the track.
+
+**The catch on None and Purikura engages only when you spin.** The dial stopping dead on a landmark
+is for finding it at speed — past four filters a second, as designed. At a browsing pace the wheel
+now steps cleanly past, because a deliberate turn interrupted by a catch reads as a stuck wheel,
+and Purikura's catch — which had quietly stopped happening at all — is back where the spin rule
+wants it.
+
 ## Roll v2.88 — the meter
 
 **A needle, for whatever the wheel holds.** Put the wheel on shutter, ISO, focus, zoom or EV and a

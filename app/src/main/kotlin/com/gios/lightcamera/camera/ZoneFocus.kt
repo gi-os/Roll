@@ -79,6 +79,12 @@ object ZoneFocus {
         if (subjectMetres <= 0f || hyperfocalMetres <= 0f) {
             return Depth(0f, Float.POSITIVE_INFINITY)
         }
+        // Focused at infinity, the general formula divides infinity by infinity and hands back
+        // NaN — which the readout printed, verbatim, on the ∞ stop. The limit is well defined:
+        // as the subject recedes, the near edge closes on the hyperfocal distance itself.
+        if (subjectMetres.isInfinite()) {
+            return Depth(hyperfocalMetres, Float.POSITIVE_INFINITY)
+        }
         val f = focalLengthMm / 1000f
         val h = hyperfocalMetres
         val s = subjectMetres

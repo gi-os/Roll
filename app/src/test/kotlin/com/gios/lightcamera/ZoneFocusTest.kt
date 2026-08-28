@@ -54,6 +54,17 @@ class ZoneFocusTest {
         assertTrue(depth.far.isInfinite())
     }
 
+    @Test
+    fun `focused at infinity, the readout is numbers and never NaN`() {
+        // The general formula at s=∞ is ∞/∞, which is NaN, which the viewfinder printed. The
+        // limit is the hyperfocal distance: everything from H to ∞ is sharp.
+        val depth = ZoneFocus.depthOfField(Float.POSITIVE_INFINITY, hyperfocal, focal)
+        assertEquals(hyperfocal, depth.near, 0.001f)
+        assertTrue(depth.far.isInfinite())
+        val label = ZoneFocus.label(Float.POSITIVE_INFINITY, depth)
+        assertTrue("got $label", "NaN" !in label)
+    }
+
     /* ---------------- diopters ---------------- */
 
     @Test

@@ -2,6 +2,7 @@ package com.gios.lightcamera.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,8 @@ fun NeedleGauge(
     labels: List<String>,
     index: Int,
     onSet: (Int) -> Unit,
+    /** A tap that never became a drag. The caller decides what a tap means; here it is a latch. */
+    onTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (labels.isEmpty()) return
@@ -58,6 +61,9 @@ fun NeedleGauge(
                     val at = (change.position.y / step).toInt().coerceIn(0, count - 1)
                     set(at)
                 }
+            }
+            .pointerInput(onTap) {
+                detectTapGestures { onTap?.invoke() }
             },
     ) {
         Canvas(Modifier.width(GAUGE_WIDTH).height(GAUGE_HEIGHT)) {
