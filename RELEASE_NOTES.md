@@ -1,3 +1,25 @@
+## Roll v2.75 — the photograph is of the press, always
+
+**A queued press used to expose late.** Presses faster than the sensor waited their turn, and each
+one exposed *when its turn came* — a photograph of the wrong moment, seconds late at the back of a
+burst. That is the one thing a camera must never do, and it is gone: the sensor takes the shot when
+it is free, and when it is busy the live viewfinder frame is seized within milliseconds of the
+finger and queued for developing. The tail of a burst trades resolution for the moment, which is
+the trade every body's buffer makes — the moment is the photograph; the pixels are only how many.
+
+**Nothing waits at the press any more, anywhere.** The panel queue's old cap paused the third
+quick shot until a slot freed — the wait crept back to the finger through the back door. Now the
+frame degrades instead: the first three queue at full panel resolution, the next nine at half, and
+past a dozen the shot is refused out loud ("Buffer full"), with a fault mark. A refusal with a
+named reason is a camera being honest about its limits; a wait is a camera lying about whose time
+it spends. Reach back and sharpest-of-eight still apply to every seized frame.
+
+**The permanent `!1` is cleared.** The crash file is kept on disk until a report is sent — the
+report dialog needs it — but the fault chip read "file exists" as "new crash" and re-raised it at
+every launch: an alarm that cries every morning about the same old fire teaches you to ignore
+alarms. A crash is announced once; tapping the chip acknowledges it; the file still feeds the
+report. A genuinely new crash announces itself again.
+
 ## Roll v2.74 — a mode change starts clean
 
 **Pick a filter in Pro, switch to Video, come back, and the filter was still on.** Reported twice

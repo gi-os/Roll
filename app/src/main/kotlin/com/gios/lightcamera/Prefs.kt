@@ -762,6 +762,21 @@ class Prefs(context: Context) {
     fun setExposureMode(value: ExposureMode) =
         set(_exposureMode, value) { putString(EXPOSURE_MODE, value.name) }
 
+    /**
+     * A fingerprint of the last crash the chip has already announced.
+     *
+     * The crash file is deliberately kept until a report is *sent* — the report dialog needs its
+     * contents. But the fault chip read "file exists" as "new crash", so one dismissed dialog
+     * meant `!1` at every launch for ever: an alarm that cries every morning about the same old
+     * fire teaches you to ignore alarms. The chip now announces a crash once; the file stays for
+     * the report.
+     */
+    fun crashSeen(): String = prefs.getString(CRASH_SEEN, "") ?: ""
+
+    fun setCrashSeen(value: String) {
+        prefs.edit().putString(CRASH_SEEN, value).apply()
+    }
+
     /** True when the negative is wanted. Whether it is *possible* is the camera's answer. */
     fun wantsNegative(): Boolean = CaptureFormat.Dng in _formats.value
 
@@ -964,6 +979,7 @@ class Prefs(context: Context) {
         const val LENS_CORRECTION = "lensCorrection"
         const val ZONE_FOCUS = "zoneFocus"
         const val EXPOSURE_MODE = "exposureMode"
+        const val CRASH_SEEN = "crashSeen"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

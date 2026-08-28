@@ -76,7 +76,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
@@ -397,17 +396,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _inFlight = MutableStateFlow(0)
     val inFlight: StateFlow<Int> = _inFlight.asStateFlow()
 
-    /**
-     * Presses accepted and still waiting for the sensor permit.
-     *
-     * The gauge read "2, 1, 2, 1" however hard the shutter was hammered, because the only shots
-     * it could see were the one at the sensor and whatever had reached the darkroom — the queue
-     * of presses suspended behind [captureGate], which is where a burst actually *is*, was
-     * counted nowhere. This is that number, and the gauge sums all three stages: waiting, at the
-     * sensor, developing.
-     */
-    private val _waiting = MutableStateFlow(0)
-    val waiting: StateFlow<Int> = _waiting.asStateFlow()
+
 
     /** Jobs enqueued and not yet finished, for the buffer gauge in the status row. */
     private val _developing = MutableStateFlow(0)
@@ -451,6 +440,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     fun readFaults() {
         if (_lastFault.value.isNotEmpty()) showNotice(_lastFault.value)
         _faults.value = 0
+        // Reading the chip acknowledges the crash it may be carrying, so it does not return at
+        // the next launch. The first 120 characters are version, time and thread — a fingerprint
+        // that survives the file being appended to and distinguishes a genuinely new crash.
+        CrashLog.last(getApplication())?.let { prefs.setCrashSeen(it.take(120)) }
     }
 
     private sealed class Darkwork
@@ -532,14 +525,63 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * exact experience this queue exists to end.
      */
     private suspend fun develop(job: Darkwork) {
-        // Two panel bitmaps queued is the ceiling — the third press waits for a slot instead of
-        // stacking a heap the phone does not have. File and byte jobs pass straight through.
-        if (job is PanelJob) {
-            while (_panelQueued.value >= MAX_PANEL_QUEUED) delay(25)
-            _panelQueued.value += 1
-        }
         _developing.value += 1
         darkroom.send(job)
+    }
+
+    /**
+     * A panel frame enters the queue, at whatever fidelity the heap can afford right now.
+     *
+     * **Nothing here waits, because the press must not.** The previous shape suspended the third
+     * panel job until a slot freed — which put the wait back at the finger, the exact thing the
+     * darkroom exists to remove. Instead the frame degrades: the first few queue at full panel
+     * resolution, the next several at half (a quarter of the bytes — the moment preserved, some
+     * pixels traded), and past a dozen the shot is refused *out loud*. A refusal with a named
+     * reason is a camera being honest about its limits; a wait is a camera lying about whose time
+     * it is spending.
+     */
+    private suspend fun enqueuePanel(job: PanelJob) {
+        val depth = _panelQueued.value
+        val queued = when {
+            depth < PANEL_FULL_DEPTH -> job
+            depth < PANEL_MAX_DEPTH -> {
+                val half = runCatching {
+                    Bitmap.createScaledBitmap(
+                        job.bitmap,
+                        (job.bitmap.width / 2).coerceAtLeast(1),
+                        (job.bitmap.height / 2).coerceAtLeast(1),
+                        true,
+                    )
+                }.getOrNull()
+                if (half != null && half != job.bitmap) {
+                    runCatching { job.bitmap.recycle() }
+                    PanelJob(
+                        bitmap = half,
+                        turn = job.turn,
+                        filter = job.filter,
+                        aspect = job.aspect,
+                        seed = job.seed,
+                        stampAt = job.stampAt,
+                        stampStyle = job.stampStyle,
+                        faces = job.faces,
+                        overlay = job.overlay,
+                        tune = job.tune,
+                        wantPng = job.wantPng,
+                        takenAt = job.takenAt,
+                    )
+                } else {
+                    job
+                }
+            }
+            else -> {
+                runCatching { job.bitmap.recycle() }
+                recordFault("Buffer full — a shot was dropped")
+                showNotice("Buffer full")
+                return
+            }
+        }
+        _panelQueued.value += 1
+        develop(queued)
     }
 
     /**
@@ -1114,8 +1156,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         // The activity already offers a report dialog for a crash log on disk; the chip is the
         // quieter half — a black screen that killed the process silently gets a mark on the next
-        // viewfinder either way.
-        if (CrashLog.last(app) != null) recordFault("Crashed last run — shake to report")
+        // viewfinder either way. Announced once per distinct crash: the file survives until a
+        // report is sent, and a chip that re-raised it every launch was a permanent !1 nobody
+        // could clear.
+        val crash = CrashLog.last(app)
+        if (crash != null && crash.take(120) != prefs.crashSeen()) {
+            recordFault("Crashed last run — shake to report")
+        }
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
@@ -2155,10 +2202,24 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     val stampStyle = prefs.stampStyle.value
                     val wantPng = prefs.wantsLossless()
                     val pressedAt = System.currentTimeMillis()
-                    _waiting.value += 1
+                    // **The moment is seized at the press, always.** The old shape queued the
+                    // *press* behind the sensor permit, so a queued press exposed whenever its
+                    // turn came — a photograph of the wrong moment, seconds late in a burst,
+                    // which is the one thing a camera must never do. Now: sensor free, the
+                    // sensor takes it; sensor busy, the live viewfinder frame is grabbed within
+                    // milliseconds of the finger and queued for developing. A burst's tail
+                    // trades resolution for the moment, which is the trade every body's buffer
+                    // makes — the moment is the photograph, the pixels are only how many.
+                    if (!captureGate.tryAcquire()) {
+                        viewModelScope.launch {
+                            if (!shootPanelFrame(click = false)) {
+                                showNotice("Nothing on the viewfinder yet")
+                            }
+                        }
+                        return@launch
+                    }
                     viewModelScope.launch {
-                        captureGate.withPermit {
-                            _waiting.value -= 1
+                        try {
                             _inFlight.value += 1
                             try {
                                 val startedAt = System.nanoTime()
@@ -2191,7 +2252,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                             retried, activeFilter, aspect, seed, stampAt,
                                             stampStyle, wantPng, pressedAt,
                                         )
-                                        return@withPermit
+                                        return@launch
                                     }
                                 }
                                 // The panel frame rather than no photograph — the same rescue as
@@ -2210,6 +2271,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                             } finally {
                                 _inFlight.value -= 1
                             }
+                        } finally {
+                            captureGate.release()
                         }
                     }
                     return@launch
@@ -2302,7 +2365,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // Into the darkroom with everything it needs, and the press is over. The rotate, the
         // shader, both encodes and the save all happen behind the viewfinder; what a panel shot
         // charges the finger is the readback above and nothing else.
-        develop(
+        enqueuePanel(
             PanelJob(
                 bitmap = grabbed,
                 turn = turn,
@@ -2644,7 +2707,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // through the same worker as every other photograph. The date back rides
                 // `fromPreview`'s own stamp pass rather than the old rewrite-after-save, which is
                 // one encode instead of two and the same pixels either way.
-                develop(
+                enqueuePanel(
                     PanelJob(
                         bitmap = grabbed,
                         turn = engine.previewRotationDegrees(),
@@ -3047,8 +3110,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          */
         const val MAX_IN_FLIGHT = 1
 
-        /** Panel bitmaps allowed to wait in the darkroom. ~10MB each against a 128MB heap. */
-        const val MAX_PANEL_QUEUED = 2
+        /** Panel frames queued at full resolution before the ladder starts trading pixels. */
+        const val PANEL_FULL_DEPTH = 3
+
+        /** The hard ceiling. Half-resolution frames are ~2.5MB; a dozen is a human-proof burst. */
+        const val PANEL_MAX_DEPTH = 12
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96
