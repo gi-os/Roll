@@ -244,6 +244,16 @@ object Frames {
         overlay: ((android.graphics.Canvas, Int, Int, List<FaceQuad>) -> Unit)? = null,
         /** Which parts of a face-aware filter to apply. Ignored by every other filter. */
         tune: FaceTune = FaceTune(),
+        /**
+         * Also encode the lossless copy, off this same bitmap.
+         *
+         * **The panel path never had one, and the panel path is where PNG matters most.** The
+         * coarse filters — Dither, Halftone, Game Boy, the whole reason a lossless setting exists —
+         * always shoot the panel, so PNG-on produced a JPEG here and a "Lossless copy failed"
+         * notice from `finish`, which read the missing bytes as an encoder fault. It was a missing
+         * parameter: `process` grew [wantPng] in v2.61 and this function was not asked.
+         */
+        wantPng: Boolean = false,
     ): Processed {
         var bitmap = preview
         var quads = faces
@@ -288,7 +298,19 @@ object Frames {
         if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle, filter.mono)
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 4)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-        return Processed(out.toByteArray(), bitmap.width, bitmap.height)
+        // Allowed to fail alone, exactly as in [develop]: a JPEG that saved is a photograph, a
+        // PNG that didn't is a setting that didn't apply.
+        val png = if (wantPng) {
+            runCatching {
+                val bytes = ByteArrayOutputStream(bitmap.width * bitmap.height / 2)
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes)
+                bytes.toByteArray()
+            }.onFailure { Log.e(TAG, "lossless encode failed; the JPEG still saved", it) }
+                .getOrNull()
+        } else {
+            null
+        }
+        return Processed(out.toByteArray(), bitmap.width, bitmap.height, png)
     }
 
     /** The dimensions of a JPEG without decoding it. */

@@ -301,6 +301,9 @@ fun CameraScreen(
     val channel by vm.channel.collectAsState()
     val formats by vm.prefs.formats.collectAsState()
     val developing by vm.developing.collectAsState()
+    // Named apart from the progress bar's own `inFlight` boolean further down — same word,
+    // different question, and Kotlin resolves the nearer one silently.
+    val capturing by vm.inFlight.collectAsState()
     val rawWanted = com.gios.lightcamera.media.CaptureFormat.Dng in formats
     LaunchedEffect(
         liveFilter,
@@ -904,9 +907,9 @@ fun CameraScreen(
                         // shutter can now outrun the develop, and work happening behind a live
                         // viewfinder needs one small mark saying so — otherwise the first slow
                         // filter reads as photographs silently not arriving on the roll.
-                        if (developing > 0) {
+                        if (developing + capturing > 0) {
                             LightText(
-                                " •$developing",
+                                " •${developing + capturing}",
                                 LightTextVariant.Detail,
                                 modifier = Modifier.padding(start = 6.dp),
                             )

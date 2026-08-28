@@ -1,4 +1,28 @@
-## Roll v2.71 — zone focus takes the wheel, the way a GR does
+## Roll v2.71 — press, and the camera is already yours again
+
+**The press no longer waits for anything at all.** v2.70 moved the develop off the shutter; the
+capture itself was still awaited, which billed the sensor's round trip to the finger even with the
+ring buffer warm — zero shutter lag, waited for, which misses its point. A press now snapshots its
+settings, *issues* the capture and returns: the frame lands whenever it lands and walks into the
+darkroom on its own. CameraX queues overlapping captures by design; two may be outstanding at the
+sensor at once, and presses past that queue up in order — a held shutter becomes a burst, which is
+what a held shutter has always meant on a real body. The pipeline is bounded end to end: two at
+the sensor, six in the darkroom, and the shutter honestly pauses only when the whole of that is
+full. The `•N` gauge now counts both.
+
+**Simple and the coarse filters queue too.** A panel shot used to encode its JPEG at the press —
+cheap, but a burst pays every cost it is charged. The press now keeps only the panel readback,
+tens of milliseconds; the rotate, the shader, the encodes and the save run behind the viewfinder
+in press order. Flash and captures another app asked for keep the deliberate, awaited path: a
+flash exposure is a conversation with the scene, and neither is a burst.
+
+**Found while in there: the panel path never wrote the lossless copy.** The coarse filters —
+Dither, Halftone, Game Boy, the entire reason the PNG setting exists — always shoot the panel, and
+`fromPreview` was never taught the parameter `process` learned in v2.61. PNG-on produced a JPEG
+and a "Lossless copy failed" notice that blamed the encoder. It writes the PNG now, off the same
+bitmap the shader produced.
+
+## Zone focus takes the wheel, the way a GR does
 
 **Switch to MF and the distance is on the dial, immediately.** The GR bodies are the model: snap
 focus exists for the street, and on the street the distance is set walking, from the hip, without

@@ -27,7 +27,9 @@ import com.gios.lightcamera.map.Tiles
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
+import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
+import com.gios.lightcamera.filter.FaceTune
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Beeps
@@ -70,6 +72,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 
@@ -341,11 +344,33 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * What is lost if the process dies mid-queue: the undeveloped shots, which existed only here.
      * The same is true of any camera's buffer when the battery comes out.
      */
-    private val darkroom = kotlinx.coroutines.channels.Channel<DevelopJob>(DARKROOM_DEPTH)
+    private val darkroom = kotlinx.coroutines.channels.Channel<Darkwork>(DARKROOM_DEPTH)
+
+    /**
+     * How many captures may be outstanding at the sensor at once.
+     *
+     * **This is what makes the shutter re-arm in milliseconds.** CameraX explicitly permits
+     * `takePicture` while an earlier one is still in flight — it queues requests internally — and
+     * the old shape awaited each frame before unlatching, which billed the whole sensor round trip
+     * to the finger. Now a press *issues* a capture and returns; the frame lands whenever it
+     * lands and walks into the darkroom on its own.
+     *
+     * Two, not more: a ZSL ring holds only a few buffers and refills at frame rate, and asking
+     * for six at once is asking five of them to be the same frame or a failure. Presses beyond
+     * the permits queue — a held shutter becomes a burst, which is what a held shutter means —
+     * and the darkroom's own depth bounds the whole pipeline behind it.
+     */
+    private val captureGate = kotlinx.coroutines.sync.Semaphore(MAX_IN_FLIGHT)
+
+    /** Sensor captures issued and not yet landed, part of the status row's depth gauge. */
+    private val _inFlight = MutableStateFlow(0)
+    val inFlight: StateFlow<Int> = _inFlight.asStateFlow()
 
     /** Jobs enqueued and not yet finished, for the `•N` in the status row. */
     private val _developing = MutableStateFlow(0)
     val developing: StateFlow<Int> = _developing.asStateFlow()
+
+    private sealed class Darkwork
 
     private class DevelopJob(
         val frame: CapturedFrame,
@@ -357,7 +382,31 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         val wantPng: Boolean,
         /** The moment of the press, not of the develop — a queued photograph keeps its time. */
         val takenAt: Long,
-    )
+    ) : Darkwork()
+
+    /**
+     * A panel frame waiting to be made into a photograph.
+     *
+     * The other half of the pipeline: Simple and every coarse filter shoot the panel, and the
+     * rotate-shade-encode used to run inline at the press. It is a develop like any other, so it
+     * queues like any other, and the press keeps only the readback — which is the whole cost a
+     * panel shot has any business charging a finger. The worker recycles [bitmap]; a queued panel
+     * frame is ~10MB, which is why [DARKROOM_DEPTH] is the small number it is.
+     */
+    private class PanelJob(
+        val bitmap: Bitmap,
+        val turn: Int,
+        val filter: Filters.Filter,
+        val aspect: FrameAspect,
+        val seed: Float,
+        val stampAt: Long?,
+        val stampStyle: StampStyle,
+        val faces: List<FaceQuad>,
+        val overlay: ((android.graphics.Canvas, Int, Int, List<FaceQuad>) -> Unit)?,
+        val tune: FaceTune,
+        val wantPng: Boolean,
+        val takenAt: Long,
+    ) : Darkwork()
 
     /**
      * Send one capture to the darkroom. Suspends only when the buffer is full.
@@ -366,7 +415,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * full-buffer wait as well — a shutter that pauses with nothing on screen saying why is the
      * exact experience this queue exists to end.
      */
-    private suspend fun develop(job: DevelopJob) {
+    private suspend fun develop(job: Darkwork) {
         _developing.value += 1
         darkroom.send(job)
     }
@@ -375,23 +424,47 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             for (job in darkroom) {
                 try {
-                    val processed = withContext(Dispatchers.Default) {
-                        Frames.process(
-                            job.frame,
-                            job.filter,
-                            job.aspect,
-                            job.seed,
-                            job.stampAt,
-                            job.stampStyle,
-                            wantPng = job.wantPng,
-                        )
+                    when (job) {
+                        is DevelopJob -> {
+                            val processed = withContext(Dispatchers.Default) {
+                                Frames.process(
+                                    job.frame,
+                                    job.filter,
+                                    job.aspect,
+                                    job.seed,
+                                    job.stampAt,
+                                    job.stampStyle,
+                                    wantPng = job.wantPng,
+                                )
+                            }
+                            finish(processed, job.filter.id, job.takenAt)
+                        }
+                        is PanelJob -> {
+                            val processed = withContext(Dispatchers.Default) {
+                                Frames.fromPreview(
+                                    preview = job.bitmap,
+                                    rotationDegrees = job.turn,
+                                    filter = job.filter,
+                                    aspect = job.aspect,
+                                    seed = job.seed,
+                                    stampAt = job.stampAt,
+                                    stampStyle = job.stampStyle,
+                                    faces = job.faces,
+                                    overlay = job.overlay,
+                                    tune = job.tune,
+                                    wantPng = job.wantPng,
+                                )
+                            }
+                            runCatching { job.bitmap.recycle() }
+                            finish(processed, job.filter.id, job.takenAt)
+                        }
                     }
-                    finish(processed, job.filter.id, job.takenAt)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
                     // Named per job: a failed develop is one photograph, not a dead queue.
                     reportShutterFailure(failure)
+                    if (job is PanelJob) runCatching { job.bitmap.recycle() }
                 } finally {
                     _developing.value -= 1
                 }
@@ -1727,34 +1800,87 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
 
+                // **The press ends here, and that is the entire speed fix.** The old shape
+                // awaited the sensor before unlatching, which billed the whole capture round trip
+                // to the finger — even zero shutter lag was being *waited for*, which misses its
+                // point. A press now snapshots its settings, launches the capture, and returns;
+                // `_shooting` clears in the finally below within a frame or two of the press.
+                //
+                // CameraX explicitly permits overlapping `takePicture` calls — it queues them —
+                // and [captureGate] bounds how many this app lets pile up at the sensor. Presses
+                // past the permits suspend in their own coroutines, oldest first: a held shutter
+                // becomes a burst, which is what a held shutter has always meant on a real body.
+                // The darkroom's depth then bounds the develops behind that, so the pipeline as a
+                // whole cannot outgrow memory: two frames at the sensor, six in the queue, and the
+                // shutter honestly pauses only when both are full.
+                //
+                // The external-capture path (another app asked for a photo) keeps the old awaited
+                // shape further below: it is a conversation, not a burst.
+                if (captureRequestOutput == null && prefs.flash.value == FlashMode.Off) {
+                    val activeFilter = lookForShot()
+                    val aspect = prefs.aspect.value
+                    val seed = Random.nextFloat() * 1000f
+                    val stampAt = stampTime(activeFilter)
+                    val stampStyle = prefs.stampStyle.value
+                    val wantPng = prefs.wantsLossless()
+                    val pressedAt = System.currentTimeMillis()
+                    viewModelScope.launch {
+                        captureGate.withPermit {
+                            _inFlight.value += 1
+                            try {
+                                val startedAt = System.nanoTime()
+                                val frame = withTimeout(CAPTURE_DEADLINE_MS) { engine.capture() }
+                                val took = (System.nanoTime() - startedAt) / 1_000_000
+                                _stillMs.value = (_stillMs.value * 3 + took) / 4
+                                Log.i(TAG, "pro: shot ${took}ms")
+                                if (prefs.timings.value) showNotice("${took}ms shot")
+                                develop(
+                                    DevelopJob(
+                                        frame = frame,
+                                        filter = activeFilter,
+                                        aspect = aspect,
+                                        seed = seed,
+                                        stampAt = stampAt,
+                                        stampStyle = stampStyle,
+                                        wantPng = wantPng,
+                                        takenAt = pressedAt,
+                                    ),
+                                )
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Throwable) {
+                                // The panel frame rather than no photograph — the same rescue as
+                                // ever, now per shot instead of per shutter, so one refused frame
+                                // in a burst costs that frame alone.
+                                Log.e(TAG, "capture failed", failure)
+                                val rescued = shootPanelFrame(click = false)
+                                val why = failure.message?.take(48)
+                                showNotice(
+                                    when {
+                                        rescued -> "Sensor didn't answer — saved the viewfinder frame"
+                                        why.isNullOrBlank() -> "Shutter failed"
+                                        else -> "Shutter: $why"
+                                    },
+                                )
+                            } finally {
+                                _inFlight.value -= 1
+                            }
+                        }
+                    }
+                    return@launch
+                }
+
+                // Flash, and captures another app asked for: the deliberate, awaited path. A flash
+                // exposure is a conversation with the scene and an external capture is one with
+                // another app; neither is a burst, and both want the shutter to mean "done".
                 val startedAt = System.nanoTime()
-                // **A deadline on the capture, because a shutter that hangs never comes back.**
-                // `takePicture` reports both success and failure through a callback, and a HAL that
-                // delivers neither leaves this coroutine suspended for ever — with `_shooting` still
-                // latched, which is the first line of this function, so every press after it is
-                // dropped in silence and the only cure is force-stopping the app. Stills measure 1.8 s
-                // on this camera; twelve seconds is not a budget, it is the line past which the sensor
-                // has plainly stopped answering.
                 val attempt = runCatching { withTimeout(CAPTURE_DEADLINE_MS) { engine.capture() } }
                     .onFailure { Log.e(TAG, "capture failed", it) }
-                // Averaged over four, so one slow shot in the dark does not make every bar wrong afterwards.
                 val took = (System.nanoTime() - startedAt) / 1_000_000
                 _stillMs.value = (_stillMs.value * 3 + took) / 4
-                Log.i(TAG, "pro: shot ${took}ms")
-                // Reported here as well as in Simple: a diagnostic that only measures the fast path cannot
-                // tell you whether a change to the slow one helped.
                 if (prefs.timings.value) showNotice("${took}ms shot")
                 val frame = attempt.getOrNull()
                 if (frame == null) {
-                    // **The frame on the panel rather than no photograph at all.** The shutter was
-                    // pressed and there is a picture on the screen; saving that is worse than the
-                    // capture would have been and better than everything else on offer. It also
-                    // means a camera whose stills unit has stopped answering degrades to a working
-                    // camera instead of a dead button.
-                    //
-                    // Say *what* went wrong either way. "Shutter failed" cost a round trip to work
-                    // out that zero-shutter-lag was accepting the configuration and then refusing
-                    // every capture; the camera's own message would have named it.
                     val rescued = shootPanelFrame(click = false)
                     val why = attempt.exceptionOrNull()?.message?.take(48)
                     showNotice(
@@ -1766,47 +1892,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     return@launch
                 }
-                val activeFilter = lookForShot()
-                val aspect = prefs.aspect.value
-                // A fresh seed per frame, so two shots of the same scene don't carry
-                // identical grain — and so the grain in the file is not the grain that
-                // happened to be on screen at the moment of the press.
-                val seed = Random.nextFloat() * 1000f
-                val stampAt = stampTime(activeFilter)
-                // **Into the darkroom, not developed here.** Everything this coroutine still
-                // holds is a byte array and some settings; the decode, the shader and the encodes
-                // happen behind the shutter, and `_shooting` clears the moment this returns — so
-                // the next press waits for the *capture*, never for the previous photograph's
-                // filter. The one caller that must stay synchronous is an external capture intent,
-                // which is answering another app and has nowhere to be quick to; finish() routes
-                // it before anything else, so it develops inline below instead.
-                if (captureRequestOutput == null) {
-                    develop(
-                        DevelopJob(
-                            frame = frame,
-                            filter = activeFilter,
-                            aspect = aspect,
-                            seed = seed,
-                            stampAt = stampAt,
-                            stampStyle = prefs.stampStyle.value,
-                            wantPng = prefs.wantsLossless(),
-                            takenAt = System.currentTimeMillis(),
-                        ),
+                val processed = withContext(Dispatchers.Default) {
+                    Frames.process(
+                        frame,
+                        lookForShot(),
+                        prefs.aspect.value,
+                        Random.nextFloat() * 1000f,
+                        stampTime(lookForShot()),
+                        prefs.stampStyle.value,
+                        wantPng = prefs.wantsLossless(),
                     )
-                } else {
-                    val processed = withContext(Dispatchers.Default) {
-                        Frames.process(
-                            frame,
-                            activeFilter,
-                            aspect,
-                            seed,
-                            stampAt,
-                            prefs.stampStyle.value,
-                            wantPng = prefs.wantsLossless(),
-                        )
-                    }
-                    finish(processed, activeFilter.id)
                 }
+                finish(processed, lookForShot().id)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -1857,10 +1954,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             withDate = prefs.puriDate.value != PuriArt.OFF,
             millis = System.currentTimeMillis(),
         )
-        val processed = withContext(Dispatchers.Default) {
-            Frames.fromPreview(
-                preview = grabbed,
-                rotationDegrees = turn,
+        // Into the darkroom with everything it needs, and the press is over. The rotate, the
+        // shader, both encodes and the save all happen behind the viewfinder; what a panel shot
+        // charges the finger is the readback above and nothing else.
+        develop(
+            PanelJob(
+                bitmap = grabbed,
+                turn = turn,
                 filter = activeFilter,
                 aspect = aspect,
                 seed = seed,
@@ -1869,11 +1969,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 faces = faces,
                 overlay = puri,
                 tune = prefs.puriTune(),
-            )
-        }
-        finish(processed, activeFilter.id)
+                wantPng = prefs.wantsLossless(),
+                takenAt = System.currentTimeMillis(),
+            ),
+        )
         // A fresh arrangement for the next one, so two shots in a row are not the same
-        // print with a different face in it.
+        // print with a different face in it. At the press, not the develop: the next shot can be
+        // taken before this one is finished, and it must not inherit the same arrangement.
         if (puri != null) reshufflePuri()
         return true
     }
@@ -2181,76 +2283,36 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     showNotice("Nothing on the viewfinder yet")
                     return@launch
                 }
-                val frame = withContext(Dispatchers.Default) {
-                    val made = Frames.fromPreview(
-                        preview = grabbed,
-                        rotationDegrees = engine.previewRotationDegrees(),
+                val grabMs = (System.nanoTime() - startedAt) / 1_000_000
+                _shutterTick.tryEmit(Unit)
+                if (prefs.timings.value) showNotice("${grabMs}ms grab")
+                Log.i(TAG, "simple: grab ${grabMs}ms")
+
+                // **Into the darkroom, like everything else now.** The encode used to run inline
+                // — cheap, but not free, and a burst pays every cost it is charged. What Simple
+                // charges the finger is the panel readback above; the encode, the save, the date
+                // back and the coordinate all happen behind the viewfinder, in press order,
+                // through the same worker as every other photograph. The date back rides
+                // `fromPreview`'s own stamp pass rather than the old rewrite-after-save, which is
+                // one encode instead of two and the same pixels either way.
+                develop(
+                    PanelJob(
+                        bitmap = grabbed,
+                        turn = engine.previewRotationDegrees(),
                         filter = Filters.none,
                         aspect = FrameAspect.Full,
                         seed = 0f,
-                    )
-                    CapturedFrame(jpeg = made.jpeg, rotationDegrees = 0, mirrored = false)
-                }
-                val captureMs = (System.nanoTime() - startedAt) / 1_000_000
-                _shutterTick.tryEmit(Unit)
-
-                // **Everything from here is off the critical path.** The bytes are in hand; the shutter's
-                // work is done. Writing five megabytes and inserting a MediaStore row is fast but not
-                // free, and it used to sit inside the same coroutine as the capture, so the shot was not
-                // "finished" — and `_shooting` not cleared, and the next press ignored — until the file
-                // was on disk. Launched separately, the camera is ready again immediately.
-                val takenAt = System.currentTimeMillis()
-                val stamp = if (prefs.stampPlain.value) prefs.stampStyle.value else null
-                val reportTimings = prefs.timings.value
-                // Its own catch, because it is its own coroutine: a throw in here would not pass
-                // through the one below it and would reach `viewModelScope` unhandled.
-                viewModelScope.launch {
-                    try {
-                        val savedAt = System.nanoTime()
-                        val size = Frames.sizeOf(frame.jpeg)
-                        val uri = repo.save(
-                            jpeg = frame.jpeg,
-                            takenAt = takenAt,
-                            width = size.first,
-                            height = size.second,
-                        )
-                        val saveMs = (System.nanoTime() - savedAt) / 1_000_000
-                        Log.i(
-                            TAG,
-                            "simple: shot ${captureMs}ms, save ${saveMs}ms, " +
-                                "${size.first}x${size.second}",
-                        )
-                        // The achieved resolution is reported rather than assumed: an analysis stream is
-                        // often capped well below the sensor, and what this camera actually hands over is
-                        // a fact about the phone rather than something the code gets to decide.
-                        if (reportTimings) {
-                            val mp = (size.first.toLong() * size.second / 100_000) / 10.0
-                            showNotice("${captureMs}ms shot · ${saveMs}ms save · ${mp}MP")
-                        }
-                        if (uri == null) {
-                            showNotice("Couldn't save")
-                            return@launch
-                        }
-                        // The date goes on after the file exists, for the same reason: printing it means
-                        // decoding a 12MP JPEG and encoding it again, which is a second that has no
-                        // business being between a finger and a photograph. Worst case is an undated
-                        // photograph.
-                        if (stamp != null) {
-                            val stamped = withContext(Dispatchers.Default) {
-                                DateStamp.applyTo(frame.jpeg, takenAt, stamp)
-                            }
-                            if (stamped != null) repo.rewrite(uri, stamped)
-                            refreshRoll()
-                        }
-                        // Last, because the date back above replaces the whole file. Simple was
-                        // never tagged at all before this, so nothing shot in it reached the map.
-                        stampLocation(uri)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        reportShutterFailure(failure)
-                    }
-                }
+                        stampAt = if (prefs.stampPlain.value) System.currentTimeMillis() else null,
+                        stampStyle = prefs.stampStyle.value,
+                        faces = emptyList(),
+                        overlay = null,
+                        tune = FaceTune(),
+                        // Simple never writes the lossless copy: it ships the panel's own frame,
+                        // and that policy is stated in the settings.
+                        wantPng = false,
+                        takenAt = System.currentTimeMillis(),
+                    ),
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -2626,6 +2688,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          * the burst a thumb actually produces; past it, a pause at the shutter is honest.
          */
         const val DARKROOM_DEPTH = 6
+
+        /** Outstanding sensor captures. See [captureGate]. */
+        const val MAX_IN_FLIGHT = 2
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96
