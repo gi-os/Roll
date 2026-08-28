@@ -158,8 +158,13 @@ class MainActivity : ComponentActivity() {
                         wheel = wheel,
                         shutter = ShutterRelease(
                             onHalfPress = { vm.halfPress() },
-                            onFullPress = { vm.shoot() },
-                            onRelease = { vm.engine.releaseFocus() },
+                            // Held is a burst; ShutterRelease cannot time it (the key never
+                            // repeats), so the view model runs the clock and the release stops it.
+                            onFullPress = { vm.shutterHeld() },
+                            onRelease = {
+                                vm.shutterLifted()
+                                vm.engine.releaseFocus()
+                            },
                         ),
                         // The map is read through the view model at the moment of the press, so
                         // a binding changed in settings is live on the next press — and so is the

@@ -1,3 +1,12 @@
+## Roll v2.87 — holding the shutter now means it
+
+Two shots from a held button was the hardware being taken at its word: the camera key sends one
+DOWN and one UP with nothing in between, so "hold to burst" was a promise the release notes made
+and the code never kept. The clock lives in the app now. The first shot fires at the press, as
+always. Keep the button down half a second and shots follow at about three a second until you let
+go — a pace the pipeline absorbs without filling the fault chip. Video, the QR and text readers,
+and a running self-timer never start the clock.
+
 ## Roll v2.86 — two ways to send that need no gesture
 
 The shake gesture asks for four sharp direction changes inside a second. That tuning is right for

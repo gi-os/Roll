@@ -1581,6 +1581,41 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         showNotice(if (on) "Dial locks on launch" else "Dial lock off")
     }
 
+    /**
+     * Hold-to-burst, timed here because the hardware cannot: the camera key sends one DOWN and,
+     * much later, one UP — no repeats, by [com.gios.lightcamera.hw.ShutterRelease]'s own contract.
+     * So "hold the shutter and it bursts" is a clock the caller runs: the first shot fires at the
+     * press as always, and if the button is still down half a second later, shots follow at a
+     * fixed cadence until it lifts.
+     *
+     * The cadence is deliberately slower than the pipeline's best pace. [shoot] carries its own
+     * guards — a full pipeline drops or degrades on its own terms — but a burst that *aims* at
+     * the ceiling turns every hold into a buffer-full apology. Three and a bit a second fills a
+     * motorcade; it does not fill the fault chip. Modes where repeat fire makes no sense — video,
+     * the readers, a running self-timer — never start the clock.
+     */
+    private var holdBurst: Job? = null
+
+    fun shutterHeld() {
+        shoot()
+        val mode = prefs.mode.value
+        if (mode == CaptureMode.Video || mode.isReader) return
+        if (prefs.timer.value.seconds > 0) return
+        holdBurst?.cancel()
+        holdBurst = viewModelScope.launch {
+            delay(HOLD_BURST_AFTER_MS)
+            while (isActive) {
+                shoot()
+                delay(HOLD_BURST_EVERY_MS)
+            }
+        }
+    }
+
+    fun shutterLifted() {
+        holdBurst?.cancel()
+        holdBurst = null
+    }
+
     fun press(action: PressAction) {
         when (action) {
             PressAction.Shutter -> shoot()
@@ -3215,6 +3250,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** The fill loop's pace while the camera is down. Checking, not capturing. */
         const val PRE_ROLL_IDLE_MS = 500L
+
+        /** How long a press must be held before it means "keep firing". */
+        const val HOLD_BURST_AFTER_MS = 450L
+
+        /** The burst cadence: ~3/s, comfortably inside the pipeline's pace. */
+        const val HOLD_BURST_EVERY_MS = 300L
 
         /**
          * How many undeveloped captures the darkroom holds before the shutter waits.
