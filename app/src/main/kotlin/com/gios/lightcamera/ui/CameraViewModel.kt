@@ -432,9 +432,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _lastFault = MutableStateFlow("")
 
+    /**
+     * The tally behind the number: message -> count, insertion-ordered.
+     *
+     * `!54` on the chip with a readout that could only replay the *last* fault answered the
+     * question "how many" and refused the question "of what" — which is the only question 54
+     * raises. Bounded at a dozen distinct messages; a session with more than twelve different
+     * problems has one problem, and its name is not in this map.
+     */
+    private val faultTally = LinkedHashMap<String, Int>()
+
     private fun recordFault(what: String) {
         _faults.value += 1
         _lastFault.value = what
+        synchronized(faultTally) {
+            faultTally[what] = (faultTally[what] ?: 0) + 1
+            if (faultTally.size > 12) faultTally.remove(faultTally.keys.first())
+        }
         // The chip counter is the quiet, persistent half; this is the loud, consented half.
         // Trouble dedupes per message per hour and keeps the first failure of a cascade, and its
         // collector in the activity raises the standard light-common "SEND ERROR?" chip — the
@@ -443,7 +457,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun readFaults() {
-        if (_lastFault.value.isNotEmpty()) showNotice(_lastFault.value)
+        val summary = synchronized(faultTally) {
+            faultTally.entries
+                .sortedByDescending { it.value }
+                .take(3)
+                .joinToString(" · ") { (what, n) -> if (n > 1) "$what ×$n" else what }
+                .also { faultTally.clear() }
+        }
+        if (summary.isNotEmpty()) showNotice(summary)
         _faults.value = 0
         // Reading the chip acknowledges the crash it may be carrying, so it does not return at
         // the next launch. The first 120 characters are version, time and thread — a fingerprint
@@ -546,43 +567,54 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * it is spending.
      */
     private suspend fun enqueuePanel(job: PanelJob) {
+        // Retuned after a field test came back `!54`: sustained hammering outran the drain and
+        // hit the old hard cap of twelve dozens of times — dozens of dropped photographs, each
+        // one honest and each one a failure. Halves are a quarter of the bytes *and* a quarter
+        // of the encode, so they drain four times as fast; quarters, sixteen times. The tiers
+        // are sized so a human finger cannot realistically reach the cliff: full to two, half to
+        // twelve, quarter to thirty-two — roughly 45MB of heap at the very worst, most of it in
+        // the cheap tiers, against a drain that accelerates as the queue deepens.
         val depth = _panelQueued.value
-        val queued = when {
-            depth < PANEL_FULL_DEPTH -> job
-            depth < PANEL_MAX_DEPTH -> {
-                val half = runCatching {
-                    Bitmap.createScaledBitmap(
-                        job.bitmap,
-                        (job.bitmap.width / 2).coerceAtLeast(1),
-                        (job.bitmap.height / 2).coerceAtLeast(1),
-                        true,
-                    )
-                }.getOrNull()
-                if (half != null && half != job.bitmap) {
-                    runCatching { job.bitmap.recycle() }
-                    PanelJob(
-                        bitmap = half,
-                        turn = job.turn,
-                        filter = job.filter,
-                        aspect = job.aspect,
-                        seed = job.seed,
-                        stampAt = job.stampAt,
-                        stampStyle = job.stampStyle,
-                        faces = job.faces,
-                        overlay = job.overlay,
-                        tune = job.tune,
-                        wantPng = job.wantPng,
-                        takenAt = job.takenAt,
-                    )
-                } else {
-                    job
-                }
-            }
+        val divisor = when {
+            depth < PANEL_FULL_DEPTH -> 1
+            depth < PANEL_HALF_DEPTH -> 2
+            depth < PANEL_MAX_DEPTH -> 4
             else -> {
                 runCatching { job.bitmap.recycle() }
                 recordFault("Buffer full — a shot was dropped")
                 showNotice("Buffer full")
                 return
+            }
+        }
+        val queued = if (divisor == 1) {
+            job
+        } else {
+            val scaled = runCatching {
+                Bitmap.createScaledBitmap(
+                    job.bitmap,
+                    (job.bitmap.width / divisor).coerceAtLeast(1),
+                    (job.bitmap.height / divisor).coerceAtLeast(1),
+                    true,
+                )
+            }.getOrNull()
+            if (scaled != null && scaled != job.bitmap) {
+                runCatching { job.bitmap.recycle() }
+                PanelJob(
+                    bitmap = scaled,
+                    turn = job.turn,
+                    filter = job.filter,
+                    aspect = job.aspect,
+                    seed = job.seed,
+                    stampAt = job.stampAt,
+                    stampStyle = job.stampStyle,
+                    faces = job.faces,
+                    overlay = job.overlay,
+                    tune = job.tune,
+                    wantPng = job.wantPng,
+                    takenAt = job.takenAt,
+                )
+            } else {
+                job
             }
         }
         _panelQueued.value += 1
@@ -760,6 +792,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             recordFault("Couldn't read a shot back to develop it")
             return
         }
+        // The lossless copy streams straight to its file from inside the develop, while the
+        // bitmap is whole — a 12MP PNG as a heap buffer beside that bitmap was the allocation
+        // the 128MB heap kept refusing, once per photograph of a burst.
+        var pngWritten = false
         val processed = withContext(darkroomThread) {
             Frames.process(
                 CapturedFrame(original, job.rotationDegrees, job.mirrored),
@@ -768,7 +804,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 job.seed,
                 job.stampAt,
                 job.stampStyle,
-                wantPng = job.wantPng,
+                pngSink = if (!job.wantPng) {
+                    null
+                } else {
+                    { bitmap ->
+                        pngWritten = repo.saveStreaming(
+                            takenAt = job.takenAt,
+                            format = CaptureFormat.Png,
+                            stem = job.stem,
+                        ) { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) } != null
+                    }
+                },
             )
         }
         // Identity means the fast path fired inside process() — nothing to rewrite, and rewriting
@@ -776,23 +822,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         if (processed.jpeg !== original) {
             if (!repo.rewrite(job.uri, processed.jpeg)) recordFault("Couldn't develop a shot")
         }
-        if (job.wantPng) {
-            val png = processed.png
-            if (png == null) {
-                recordFault("Lossless copy failed")
-            } else if (
-                repo.save(
-                    jpeg = png,
-                    takenAt = job.takenAt,
-                    width = processed.width,
-                    height = processed.height,
-                    stem = job.stem,
-                    format = CaptureFormat.Png,
-                ) == null
-            ) {
-                recordFault("Couldn't save the lossless copy")
-            }
-        }
+        if (job.wantPng && !pngWritten) recordFault("Lossless copy failed")
         // Last, as ever: everything above rewrites bytes, and a coordinate lives in them.
         stampLocation(job.uri)
         if (prefs.sounds.value) beeps.saved()
@@ -2485,7 +2515,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val processed = withContext(Dispatchers.Default) {
+        var pngWritten = false
+        val processed = withContext(darkroomThread) {
             Frames.process(
                 // Rotation is left to the EXIF the camera wrote, which is why this is zero rather
                 // than the panel's idea of which way up the phone is: CameraX has already applied
@@ -2497,7 +2528,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 Random.nextFloat() * 1000f,
                 stampAt,
                 prefs.stampStyle.value,
-                wantPng = wantPng,
+                // Streamed, not buffered — the same heap argument as every other 12MP PNG.
+                pngSink = if (!wantPng) {
+                    null
+                } else {
+                    { bitmap ->
+                        pngWritten = repo.saveStreaming(
+                            takenAt = takenAt,
+                            format = CaptureFormat.Png,
+                            stem = stem,
+                        ) { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) } != null
+                    }
+                },
             )
         }
 
@@ -2507,23 +2549,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // have gone with the bytes it lived in.
         stampLocation(jpegUri)
 
-        if (wantPng) {
-            val png = processed.png
-            if (png == null) {
-                showNotice("Lossless copy failed")
-            } else if (
-                repo.save(
-                    jpeg = png,
-                    takenAt = takenAt,
-                    width = processed.width,
-                    height = processed.height,
-                    stem = stem,
-                    format = CaptureFormat.Png,
-                ) == null
-            ) {
-                showNotice("Couldn't save the lossless copy")
-            }
-        }
+        if (wantPng && !pngWritten) recordFault("Lossless copy failed")
         if (prefs.sounds.value) beeps.saved()
     }
 
@@ -3116,10 +3142,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         const val MAX_IN_FLIGHT = 1
 
         /** Panel frames queued at full resolution before the ladder starts trading pixels. */
-        const val PANEL_FULL_DEPTH = 3
+        const val PANEL_FULL_DEPTH = 2
 
-        /** The hard ceiling. Half-resolution frames are ~2.5MB; a dozen is a human-proof burst. */
-        const val PANEL_MAX_DEPTH = 12
+        /** Half resolution to here: ~2.5MB a frame, a quarter of the encode. */
+        const val PANEL_HALF_DEPTH = 12
+
+        /** Quarter resolution to here (~0.6MB); past it a drop is at least a named one. */
+        const val PANEL_MAX_DEPTH = 32
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96

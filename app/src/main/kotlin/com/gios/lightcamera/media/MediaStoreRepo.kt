@@ -311,6 +311,44 @@ class MediaStoreRepo(private val context: Context) {
     fun imagesCollection(): Uri = collection
 
     /**
+     * Write a file by streaming into it, for content that must never exist as one heap buffer.
+     *
+     * The lossless copy is the customer: a 12MP PNG is 20-35MB, and the byte-array route held
+     * that beside the bitmap being encoded — an allocation a 128MB heap refuses often enough
+     * that "Lossless copy failed" arrived once per photograph of a burst. [write] runs against
+     * the opened stream; a false return or a throw deletes the half-written row, so a failure
+     * leaves nothing pending in anyone's gallery.
+     */
+    fun saveStreaming(
+        takenAt: Long,
+        format: CaptureFormat,
+        stem: String,
+        write: (java.io.OutputStream) -> Boolean,
+    ): Uri? {
+        val values = valuesFor(takenAt, format, stem).apply {
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val resolver = context.contentResolver
+        val uri = runCatching { resolver.insert(collection, values) }.getOrNull() ?: return null
+        val ok = runCatching {
+            resolver.openOutputStream(uri)?.use(write) ?: false
+        }.onFailure { Log.e(TAG, "streaming write failed", it) }.getOrDefault(false)
+        if (!ok) {
+            runCatching { resolver.delete(uri, null, null) }
+            return null
+        }
+        runCatching {
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null,
+                null,
+            )
+        }
+        return uri
+    }
+
+    /**
      * Write a JPEG into the camera roll.
      *
      * [takenAt] is passed in rather than read from the clock because a developed roll has to

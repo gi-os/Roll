@@ -1,3 +1,26 @@
+## Roll v2.77 — !54, explained and mostly abolished
+
+A field test came back with the delay fixed and the fault chip at fifty-four — and a chip that
+could only replay the *last* fault answered "how many" while refusing the only question 54 raises.
+
+**The chip now reads its contents out.** Faults tally by message; a tap shows the top three with
+counts — "Buffer full ×41 · Lossless copy failed ×12" — then clears. A number with names is a bug
+report; a bare number is an accusation.
+
+**Most of the 54 should not happen again, twice over:**
+
+**The lossless copy stops fighting the heap.** A 12-megapixel PNG is 20-35MB, and it was being
+encoded into a heap buffer beside the ~48MB bitmap it came from — an allocation a 128MB heap
+refuses often enough that "Lossless copy failed" fired once per photograph of a burst. The encode
+now streams straight into its file while the bitmap is whole; the only large thing alive is the
+bitmap the encoder is reading anyway. Applies to the develop queue and the RAW path both.
+
+**The buffer ladder drains as fast as it fills.** Sustained hammering outran the old drain and hit
+the hard cap at twelve — dozens of dropped shots, each honest, each a failure. Halves are a
+quarter of the bytes *and* a quarter of the encode, quarters a sixteenth, so the queue now speeds
+up as it deepens: full resolution to two deep, half to twelve, quarter to thirty-two. The cliff
+still exists — it says so, once per drop — but a finger can no longer realistically reach it.
+
 ## Roll v2.76 — the chip is the library's, and the library is current
 
 **The report chip shrank back to its intended size.** Roll was drawing its own copy of the chip

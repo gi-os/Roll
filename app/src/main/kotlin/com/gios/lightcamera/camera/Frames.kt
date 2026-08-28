@@ -133,12 +133,25 @@ object Frames {
          * setting says so.
          */
         wantPng: Boolean = false,
+        /**
+         * Where a full-resolution lossless copy goes **instead of** coming back as bytes.
+         *
+         * A 12-megapixel PNG is 20-35MB, and encoding it into a heap buffer beside the ~48MB
+         * bitmap it came from is an allocation this phone's 128MB heap frequently refuses — which
+         * surfaced as "Lossless copy failed" once per photograph of a burst. A sink writes the
+         * encode straight to its destination, so the only large thing alive is the bitmap the
+         * encoder is reading anyway. When set, [Processed.png] stays null and [wantPng] only
+         * forces the develop path.
+         */
+        pngSink: ((Bitmap) -> Unit)? = null,
     ): Processed {
         val needsCrop = aspect != FrameAspect.Full
         // The date back costs a decode and a re-encode on a photograph that would otherwise have
         // been written exactly as the camera produced it. That is the price of printing on the
         // negative, it only applies when the stamp is on, and it is worth saying out loud.
-        if (filter.agsl == null && !needsCrop && stampAt == null && !wantPng) return untouched(frame)
+        if (filter.agsl == null && !needsCrop && stampAt == null && !wantPng && pngSink == null) {
+            return untouched(frame)
+        }
 
         // **A filter must never cost you the photograph.** Everything below decodes a 12-megapixel
         // JPEG into a 48MB bitmap, mirrors it, hands it to a GPU and encodes it again, and any step
@@ -148,7 +161,7 @@ object Frames {
         // sensor's own frame, unfiltered, rather than nothing at all. `runCatching` catches `Error`
         // as well as `Exception`, which for the out-of-memory case is the whole point of it.
         return runCatching {
-            develop(frame, filter, aspect, seed, stampAt, stampStyle, wantPng)
+            develop(frame, filter, aspect, seed, stampAt, stampStyle, wantPng, pngSink)
         }.onFailure {
             Log.e(TAG, "processing failed; writing the frame the sensor gave us", it)
         }.getOrElse { untouched(frame) }
@@ -168,6 +181,7 @@ object Frames {
         stampAt: Long?,
         stampStyle: StampStyle,
         wantPng: Boolean,
+        pngSink: ((Bitmap) -> Unit)? = null,
     ): Processed {
         var bitmap = decodeUpright(frame.jpeg, frame.rotationDegrees, frame.mirrored)
             ?: return untouched(frame)
@@ -193,6 +207,13 @@ object Frames {
         // date on a Mono frame is what light-reports#25 was.
         if (stampAt != null) bitmap = DateStamp.apply(bitmap, stampAt, stampStyle, filter.mono)
 
+        // The sink first, while the bitmap is whole and nothing else big is alive. Its own
+        // catch: a lossless copy that could not be written is a setting that did not apply,
+        // never a lost photograph.
+        if (pngSink != null) {
+            runCatching { pngSink(bitmap) }
+                .onFailure { Log.e(TAG, "lossless sink failed; the JPEG still saved", it) }
+        }
         val out = ByteArrayOutputStream(bitmap.width * bitmap.height / 6)
         bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
         // **PNG first in memory, then the bitmap goes.** A lossless encode of a 12-megapixel frame
@@ -200,7 +221,7 @@ object Frames {
         // are alive is where this runs out. It is also allowed to fail on its own without taking
         // the photograph with it — a JPEG that saved is a photograph, a PNG that didn't is a
         // setting that didn't apply.
-        val png = if (wantPng) {
+        val png = if (wantPng && pngSink == null) {
             runCatching {
                 val bytes = ByteArrayOutputStream(bitmap.width * bitmap.height / 2)
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes)
