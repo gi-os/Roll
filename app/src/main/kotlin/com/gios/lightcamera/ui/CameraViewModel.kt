@@ -2370,9 +2370,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 // when the retry fails too does this become a fault.
                                 if (engine.consumeZslRetry()) {
                                     val retried = runCatching {
-                                        // The recovery rebind was posted to the main queue by the
-                                        // engine; wait for the fresh bind rather than racing it.
-                                        withTimeoutOrNull(2_000) { engine.ready.first { it } }
+                                        // **Wait for the bind to actually change, not for `ready`.**
+                                        // The abandon posts its rebind to the main queue and this
+                                        // catch — also on main — frequently ran first: `ready` was
+                                        // still true from the doomed bind, the retry fired into the
+                                        // exact configuration that had just failed, and the one
+                                        // warranted attempt was spent proving nothing. The epoch
+                                        // only moves when a new session is up.
+                                        val epoch = engine.bindEpoch.value
+                                        withTimeoutOrNull(2_500) {
+                                            engine.bindEpoch.first { it > epoch }
+                                        }
+                                        withTimeoutOrNull(1_000) { engine.ready.first { it } }
                                         withTimeout(CAPTURE_DEADLINE_MS) { engine.capture() }
                                     }.getOrNull()
                                     if (retried != null) {
@@ -2635,6 +2644,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // viewfinder that is not on screen.
                 if (!engine.ready.value) {
                     preRollRing.clear()
+                    delay(PRE_ROLL_IDLE_MS)
+                    continue
+                }
+                // **The ring yields to the darkroom.** A panel readback is main-thread work — the
+                // one thread the viewfinder cannot share — and thirty of them a second while
+                // develops are also fighting for the cores was a visible stutter. When the queue
+                // is working, reach-back thins to a check instead of a capture; the moment it
+                // drains, full cadence resumes. A slightly sparser ring under load still holds
+                // the moment; a janky viewfinder holds nothing.
+                if (_developing.value > 1) {
                     delay(PRE_ROLL_IDLE_MS)
                     continue
                 }
@@ -3173,11 +3192,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         /**
          * How often the ring takes a frame off the panel.
          *
-         * The same interval as the burst, so the reach the setting offers is honest: eight frames
-         * at 34ms is about 270ms of buffer, which is why the longest pre-roll on offer is 250.
-         * Faster would fill the ring with near-duplicates and read the panel for nothing.
+         * 66ms, not the panel's own 33: a readback is main-thread work, and at full frame rate
+         * the ring alone was a measurable slice of viewfinder jank. Eight frames at 66ms is over
+         * half a second of reach — more than the 250ms the setting offers — so the thinning costs
+         * the feature nothing and returns half the tax.
          */
-        const val PRE_ROLL_GAP_MS = 34L
+        const val PRE_ROLL_GAP_MS = 66L
 
         /** The fill loop's pace while the camera is down. Checking, not capturing. */
         const val PRE_ROLL_IDLE_MS = 500L

@@ -1,3 +1,30 @@
+## Roll v2.82 — the wedge loses its common thread
+
+**Every dark-preview report on file shares one fact, and it is not the flat profile.** #158 came
+off v2.77 with flat off; #163 off v2.80 with flat on. What both sessions were doing was holding
+the zero-shutter-lag ring for a long stretch — and rebinding a dead preview back into the same
+configuration asks the HAL to reproduce whatever it just choked on. So the first dark preview now
+costs ZSL its seat for the session: the recovery rebind comes up without the ring. The shutter
+stays instant — the press stopped waiting for the sensor ten releases ago — and what is bought is
+a camera that cannot die the same death twice a minute.
+
+**The zero-lag retry was firing into the bind that had just failed.** The abandon posts its
+rebind to the main queue, and the retry — on the same queue — usually ran first: it saw the
+camera still "ready" (true, of the doomed bind), spent its one warranted attempt reproducing the
+failure, and the shot fell to the panel rescue with a "Sensor didn't answer". The retry now waits
+for the bind itself to change, which is what it always meant to wait for.
+
+**Reach-back's readback stops taxing the viewfinder.** A panel grab is main-thread work — the one
+thread the viewfinder cannot share — and the ring was taking thirty a second while develops fought
+for the cores. The cadence halves (the ring still holds twice the reach the setting offers), and
+while the darkroom is working the ring thins to a check: a slightly sparser ring under load still
+holds the moment; a janky viewfinder holds nothing.
+
+**If it still crashes: the phone has the autopsy — send it.** Since v2.79 every silent death is
+read back at the next launch and offered on the chip and as "SEND ERROR?". Tapping that is the
+difference between fixing the disease and treating symptoms; the last two real fixes both came
+from reports.
+
 ## Roll v2.81 — our style is the default again
 
 **v2.80 made the flat profile the default, and that was wrong twice.** First in taste: Roll's

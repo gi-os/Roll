@@ -810,6 +810,7 @@ class CameraEngine(private val context: Context) {
             // manual exposure or flat profile in force has to be put back or it silently reverts
             // to auto with the readout still claiming otherwise.
             applyCaptureOptions()
+            _bindEpoch.value += 1
             _ready.value = true
         }.onFailure {
             Log.e(TAG, "bind failed", it)
@@ -1609,6 +1610,16 @@ class CameraEngine(private val context: Context) {
     /** Set when a failed ZSL capture triggered the recovery rebind. One retry is warranted. */
     @Volatile private var zslRetryArmed = false
 
+    /**
+     * Counts completed binds, so a retry can tell "the recovery rebind has happened" from "the
+     * old bind is still up". `ready` alone cannot: the abandon posts its rebind to the main
+     * queue, and the retry — also on main — frequently ran *first*, saw `ready` still true from
+     * the doomed bind, and fired into the exact configuration that had just failed. The retry
+     * then burned its one attempt on a foregone conclusion and the shot fell to the panel rescue.
+     */
+    private val _bindEpoch = MutableStateFlow(0)
+    val bindEpoch: StateFlow<Int> = _bindEpoch.asStateFlow()
+
     /** True once per abandonment: the shot that failed may be retried on the fresh bind. */
     fun consumeZslRetry(): Boolean {
         val armed = zslRetryArmed
@@ -1653,6 +1664,17 @@ class CameraEngine(private val context: Context) {
         val last = lastResultAt
         if (last == 0L) return false
         if (SystemClock.elapsedRealtime() - last < staleLimitMs()) return false
+        // **The first dark preview costs ZSL its seat.** Every dark-preview report on file —
+        // v2.77 with flat off, v2.80 with flat on — has one thing in common: a session that had
+        // been holding the zero-shutter-lag ring for a while. Rebinding into the *same*
+        // configuration asks the HAL to reproduce whatever it just choked on; rebinding without
+        // the ring changes the question. The shutter stays quick (the press already stopped
+        // waiting for the sensor); what is lost is a few hundred milliseconds of frame reach,
+        // and what is bought is a camera that stops dying the same death twice a minute.
+        if (zslAllowed) {
+            Log.w(TAG, "preview died under ZSL; quarantining it for this session")
+            zslAllowed = false
+        }
         Log.w(TAG, "no capture results for ${staleLimitMs()}ms; rebinding the camera")
         rebind(lastFlash)
         return true
