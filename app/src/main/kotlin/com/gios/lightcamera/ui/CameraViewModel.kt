@@ -12,6 +12,7 @@ import com.gios.lightcamera.CaptureMode
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.Prefs
 import com.gios.lightcamera.SelfTimer
+import com.gios.lightcamera.StampStyle
 import com.gios.lightcamera.camera.CameraEngine
 import com.gios.lightcamera.camera.CapturedFrame
 import com.gios.lightcamera.camera.DateStamp
@@ -291,6 +292,85 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * returns nothing for every photograph — including ones stamped a second ago.
      */
     private var locateJob: Job? = null
+
+    /**
+     * The darkroom: captures waiting to be developed, drained behind the shutter.
+     *
+     * **The shutter waits for the capture and for nothing else — the buffer model every real
+     * camera body uses.** Developing a frame is a 12-megapixel decode, a GPU pass, one or two
+     * encodes and a MediaStore write, most of a second on this hardware, and it used to sit
+     * inside the same latch as the shutter: press, and the next press waited for the previous
+     * photograph's *filter*. A camera that is quick once and then slow is not a quick camera.
+     *
+     * The channel's capacity is the buffer depth, and `send` suspending on a full buffer is the
+     * entire backpressure design: shoot faster than the darkroom drains for long enough and the
+     * shutter waits exactly as a body's does when the card cannot keep up — briefly, and only
+     * then. Each queued job holds one full-resolution JPEG, so the depth is memory: six of them
+     * is ~30MB, which this phone can hold and a longer queue could not.
+     *
+     * **One worker, deliberately serial.** Developing means a ~48MB bitmap; two at once is an
+     * out-of-memory wearing a throughput argument.
+     *
+     * What is lost if the process dies mid-queue: the undeveloped shots, which existed only here.
+     * The same is true of any camera's buffer when the battery comes out.
+     */
+    private val darkroom = kotlinx.coroutines.channels.Channel<DevelopJob>(DARKROOM_DEPTH)
+
+    /** Jobs enqueued and not yet finished, for the `•N` in the status row. */
+    private val _developing = MutableStateFlow(0)
+    val developing: StateFlow<Int> = _developing.asStateFlow()
+
+    private class DevelopJob(
+        val frame: CapturedFrame,
+        val filter: Filters.Filter,
+        val aspect: FrameAspect,
+        val seed: Float,
+        val stampAt: Long?,
+        val stampStyle: StampStyle,
+        val wantPng: Boolean,
+        /** The moment of the press, not of the develop — a queued photograph keeps its time. */
+        val takenAt: Long,
+    )
+
+    /**
+     * Send one capture to the darkroom. Suspends only when the buffer is full.
+     *
+     * The count is incremented *here*, before the send, so the indicator covers the job during a
+     * full-buffer wait as well — a shutter that pauses with nothing on screen saying why is the
+     * exact experience this queue exists to end.
+     */
+    private suspend fun develop(job: DevelopJob) {
+        _developing.value += 1
+        darkroom.send(job)
+    }
+
+    private fun startDarkroom() {
+        viewModelScope.launch {
+            for (job in darkroom) {
+                try {
+                    val processed = withContext(Dispatchers.Default) {
+                        Frames.process(
+                            job.frame,
+                            job.filter,
+                            job.aspect,
+                            job.seed,
+                            job.stampAt,
+                            job.stampStyle,
+                            wantPng = job.wantPng,
+                        )
+                    }
+                    finish(processed, job.filter.id, job.takenAt)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    // Named per job: a failed develop is one photograph, not a dead queue.
+                    reportShutterFailure(failure)
+                } finally {
+                    _developing.value -= 1
+                }
+            }
+        }
+    }
 
     /**
      * The RAW toggle, from the band.
@@ -639,6 +719,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.mode.collect { channelForMode(it) }
         }
+        startDarkroom()
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
@@ -1665,19 +1746,40 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // happened to be on screen at the moment of the press.
                 val seed = Random.nextFloat() * 1000f
                 val stampAt = stampTime(activeFilter)
-                val processed = withContext(Dispatchers.Default) {
-                    Frames.process(
-                        frame,
-                        activeFilter,
-                        aspect,
-                        seed,
-                        stampAt,
-                        prefs.stampStyle.value,
-                        wantPng = prefs.wantsLossless(),
+                // **Into the darkroom, not developed here.** Everything this coroutine still
+                // holds is a byte array and some settings; the decode, the shader and the encodes
+                // happen behind the shutter, and `_shooting` clears the moment this returns — so
+                // the next press waits for the *capture*, never for the previous photograph's
+                // filter. The one caller that must stay synchronous is an external capture intent,
+                // which is answering another app and has nowhere to be quick to; finish() routes
+                // it before anything else, so it develops inline below instead.
+                if (captureRequestOutput == null) {
+                    develop(
+                        DevelopJob(
+                            frame = frame,
+                            filter = activeFilter,
+                            aspect = aspect,
+                            seed = seed,
+                            stampAt = stampAt,
+                            stampStyle = prefs.stampStyle.value,
+                            wantPng = prefs.wantsLossless(),
+                            takenAt = System.currentTimeMillis(),
+                        ),
                     )
+                } else {
+                    val processed = withContext(Dispatchers.Default) {
+                        Frames.process(
+                            frame,
+                            activeFilter,
+                            aspect,
+                            seed,
+                            stampAt,
+                            prefs.stampStyle.value,
+                            wantPng = prefs.wantsLossless(),
+                        )
+                    }
+                    finish(processed, activeFilter.id)
                 }
-
-                finish(processed, activeFilter.id)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -2260,7 +2362,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * app's `IMAGE_CAPTURE` request, a loaded roll, the gallery — are decided in exactly one place.
      * They were duplicated once and the roll branch was missing from the fast path.
      */
-    private suspend fun finish(processed: Frames.Processed, filterId: String) {
+    private suspend fun finish(
+        processed: Frames.Processed,
+        filterId: String,
+        /**
+         * When the button was pressed, defaulted to now for the callers that develop inline.
+         * A queued photograph must carry the press's clock, not the darkroom's: the develop can
+         * run seconds later, and DATE_TAKEN is the moment the photograph is *of*.
+         */
+        pressedAt: Long = System.currentTimeMillis(),
+    ) {
         val output = captureRequestOutput
         if (output != null) {
             val ok = withContext(Dispatchers.IO) {
@@ -2274,7 +2385,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val takenAt = System.currentTimeMillis()
+        val takenAt = pressedAt
         val updated = filmRoll.expose(
             jpeg = processed.jpeg,
             takenAt = takenAt,
@@ -2479,6 +2590,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** The fill loop's pace while the camera is down. Checking, not capturing. */
         const val PRE_ROLL_IDLE_MS = 500L
+
+        /**
+         * How many undeveloped captures the darkroom holds before the shutter waits.
+         *
+         * Memory, not preference: each job carries a full-resolution JPEG, ~5MB at 12MP, and the
+         * worker's decode adds a ~48MB bitmap on top of whichever job is current. Six queued is
+         * the burst a thumb actually produces; past it, a pause at the shutter is honest.
+         */
+        const val DARKROOM_DEPTH = 6
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96

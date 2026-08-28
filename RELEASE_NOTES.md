@@ -16,6 +16,18 @@ abandons the mode for the session rather than costing a second photograph.
 Half-press still helps: focus and exposure locked in advance is work the shutter does not do at
 the press.
 
+**The darkroom.** Developing a photograph — the 12-megapixel decode, the shader, the encodes —
+used to sit inside the same latch as the shutter, so the second press waited on the first
+picture's *filter*. It now goes into a queue drained behind a live viewfinder, which is the buffer
+model every real camera body uses: the shutter waits for the capture and for nothing else. Shoot
+faster than the darkroom drains for long enough and the shutter pauses exactly as a body's does
+when the card cannot keep up — six deep, briefly, and only then. A small `•N` in the status line
+is the depth gauge while anything is developing.
+
+One worker, deliberately serial: a develop is a ~48MB bitmap, and two at once is an out-of-memory
+wearing a throughput argument. What a process death mid-queue loses is the undeveloped shots — the
+same thing a camera's buffer loses when the battery comes out.
+
 **Video hands the wheel to zoom.** No filter track, no shutter dial — re-framing mid-recording is
 the entire reason a camcorder puts zoom under a finger. Leaving Video hands the wheel back to
 whatever it held before. Everywhere else, zoom is on the wheel as a channel: click, turn to ZOOM,

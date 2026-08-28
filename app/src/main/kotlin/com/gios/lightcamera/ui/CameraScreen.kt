@@ -300,6 +300,7 @@ fun CameraScreen(
     val manualExposure by vm.engine.exposureLabel.collectAsState()
     val channel by vm.channel.collectAsState()
     val formats by vm.prefs.formats.collectAsState()
+    val developing by vm.developing.collectAsState()
     val rawWanted = com.gios.lightcamera.media.CaptureFormat.Dng in formats
     LaunchedEffect(
         liveFilter,
@@ -895,6 +896,17 @@ fun CameraScreen(
                                 // The marks are the picker: same slot, two states, no second
                                 // label. `›FILTER‹` is a question, `FILTER` is an answer.
                                 if (picking) " ›${channel.label}‹" else " ${channel.label}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        // The darkroom's depth gauge, shown only while it holds anything: the
+                        // shutter can now outrun the develop, and work happening behind a live
+                        // viewfinder needs one small mark saying so — otherwise the first slow
+                        // filter reads as photographs silently not arriving on the roll.
+                        if (developing > 0) {
+                            LightText(
+                                " •$developing",
                                 LightTextVariant.Detail,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
