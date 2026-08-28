@@ -1,3 +1,39 @@
+## Roll v2.72 — the buffer moves to disk, where it always belonged
+
+**Three quick shots lagged, then the screen went black. The crash report is the diagnosis:** "Heap
+9 MB of 128 MB", "the app did not die" — no stack trace, because nothing threw. The darkroom was
+holding each queued shot's 12-megapixel JPEG *in memory*, beside a worker whose decode needs 48MB
+and whose filtered copy needs 48 more, inside a heap this phone caps at 128MB. Three shots queued
+was the whole heap: the lag was the garbage collector fighting for scraps, and the black screen was
+Android's low-memory killer taking the process — which is exactly the kind of death that leaves no
+trace and no dialog.
+
+**Now the disk is the buffer, the way a body's buffer is the card.** Every sensor shot is saved
+*untouched, immediately* — it appears on the roll unfiltered within a beat of the press — and what
+queues is a file reference and the settings, a few hundred bytes. The darkroom reads each file
+back, develops it alone, and rewrites it in place, the same pattern the negative's JPEG has used
+since v2.62. Shoot as fast as the sensor answers, for as long as you like: the queue is bounded by
+free space, and the report puts that at 68.9 GB. A process death mid-queue now costs filters,
+never photographs.
+
+The develop also moved to its own thread at minimum priority — a 12MP decode on the shared pool
+was visible jank in the viewfinder — and the sensor takes one capture at a time, because two
+outstanding against a small ZSL ring is a fine way to wedge a HAL, silently.
+
+**The gauge is a bar now, the way a body draws it.** A thin vertical bar fills as the current
+develop finishes; the count beside it is what waits behind. The count falling and the bar
+refilling is the queue draining — the old dot could only say "busy", and once the shutter could
+outrun the darkroom, "busy" stopped being information.
+
+**The fault chip.** A notice lives two seconds; a dropped frame mid-burst deserves a mark that
+stays. `!N` sits in the status line until tapped — tap replays the last fault and clears it. A
+crash from the previous run arrives there too, which is how a silent black screen introduces
+itself on the next launch.
+
+**The wheel is now the AF/MF switch.** FOCUS is always on the dial. Lock the pick onto it and the
+app switches to zone focus; lock any other channel and the lens is the camera's again. The band
+slot and the settings row still work, and agree.
+
 ## Roll v2.71 — press, and the camera is already yours again
 
 **The press no longer waits for anything at all.** v2.70 moved the develop off the shutter; the

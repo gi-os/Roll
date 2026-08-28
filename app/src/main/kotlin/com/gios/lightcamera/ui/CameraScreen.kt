@@ -75,6 +75,7 @@ import com.gios.lightcamera.camera.Zooms
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
 import android.graphics.RenderEffect
+import android.os.SystemClock
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.Channel
@@ -301,6 +302,9 @@ fun CameraScreen(
     val channel by vm.channel.collectAsState()
     val formats by vm.prefs.formats.collectAsState()
     val developing by vm.developing.collectAsState()
+    val developingSince by vm.developingSince.collectAsState()
+    val developEst by vm.developEstMs.collectAsState()
+    val faults by vm.faults.collectAsState()
     // Named apart from the progress bar's own `inFlight` boolean further down — same word,
     // different question, and Kotlin resolves the nearer one silently.
     val capturing by vm.inFlight.collectAsState()
@@ -903,15 +907,57 @@ fun CameraScreen(
                                 modifier = Modifier.padding(start = 6.dp),
                             )
                         }
-                        // The darkroom's depth gauge, shown only while it holds anything: the
-                        // shutter can now outrun the develop, and work happening behind a live
-                        // viewfinder needs one small mark saying so — otherwise the first slow
-                        // filter reads as photographs silently not arriving on the roll.
-                        if (developing + capturing > 0) {
+                        // **The fault chip.** A notice lives two seconds; a dropped frame in the
+                        // middle of a burst deserves a mark that stays until it is read. Tap to
+                        // replay the last fault and clear it. A crash from the previous run
+                        // arrives here too, which is how a silent black screen introduces itself.
+                        if (faults > 0) {
                             LightText(
-                                " •${developing + capturing}",
+                                " !$faults",
                                 LightTextVariant.Detail,
-                                modifier = Modifier.padding(start = 6.dp),
+                                modifier = Modifier
+                                    .lightClickable { vm.readFaults() }
+                                    .padding(start = 6.dp),
+                            )
+                        }
+                        // **The buffer gauge, the way a body draws it:** a thin vertical bar that
+                        // fills as the current develop finishes, with the count of what is still
+                        // behind it. The count falling and the bar refilling is the queue
+                        // draining; a dot could only say "busy", and after the shutter learned to
+                        // outrun the darkroom, "busy" stopped being information.
+                        if (developing + capturing > 0) {
+                            var fill by remember { mutableFloatStateOf(0f) }
+                            LaunchedEffect(developingSince, developEst) {
+                                while (true) {
+                                    fill = if (developingSince == 0L) {
+                                        0f
+                                    } else {
+                                        ((SystemClock.elapsedRealtime() - developingSince)
+                                            .toFloat() / developEst.coerceAtLeast(1L))
+                                            .coerceIn(0f, 0.95f)
+                                    }
+                                    delay(60)
+                                }
+                            }
+                            val ink = LightThemeTokens.colors.content
+                            Canvas(
+                                Modifier
+                                    .padding(start = 6.dp)
+                                    .width(3.dp)
+                                    .height(12.dp),
+                            ) {
+                                drawRect(color = ink.copy(alpha = 0.25f))
+                                val filled = size.height * fill
+                                drawRect(
+                                    color = ink,
+                                    topLeft = Offset(0f, size.height - filled),
+                                    size = Size(size.width, filled),
+                                )
+                            }
+                            LightText(
+                                " ${developing + capturing}",
+                                LightTextVariant.Detail,
+                                modifier = Modifier.padding(start = 2.dp),
                             )
                         }
                         if (manualExposure.isNotEmpty()) {

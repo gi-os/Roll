@@ -30,7 +30,6 @@ enum class Channel(val label: String) {
          */
         fun available(
             exposure: ExposureMode,
-            zoneFocus: Boolean,
             filters: Boolean,
         ): List<Channel> = buildList {
             if (filters) add(Filter)
@@ -39,7 +38,11 @@ enum class Channel(val label: String) {
             if (!exposure.manualAe) add(Exposure)
             if (exposure.holdsShutter) add(Shutter)
             if (exposure.holdsIso) add(Iso)
-            if (zoneFocus) add(Focus)
+            // Always on the dial, because locking the pick onto it IS the AF/MF switch — the
+            // wheel is how zone focus is entered, not merely what it uses once entered. It used
+            // to appear only after zone focus was already on, which made the wheel a control you
+            // had to leave the viewfinder to make exist.
+            add(Focus)
             add(Zoom)
         }
 

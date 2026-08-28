@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gios.lightcamera.CaptureMode
+import com.gios.lightcamera.CrashLog
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.Prefs
 import com.gios.lightcamera.SelfTimer
@@ -59,6 +60,7 @@ import com.gios.lightcamera.ui.theme.LightHaptics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -167,7 +169,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     /** The channels that mean something right now. See [Channel.available]. */
     fun channelsAvailable(): List<Channel> = Channel.available(
         exposure = engine.exposureMode.value,
-        zoneFocus = engine.zoneFocus.value,
         filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
     )
 
@@ -209,14 +210,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun channelForZone(on: Boolean) {
         if (on) {
-            channelBeforeFocus = _channel.value
+            // Not stored when the wheel is already on Focus — zone switched on *by* the wheel
+            // would otherwise remember Focus as the place to go back to, and the dial could
+            // never leave.
+            if (_channel.value != Channel.Focus) channelBeforeFocus = _channel.value
             _channel.value = Channel.Focus
             _picking.value = false
         } else {
-            channelBeforeFocus?.let { held ->
-                channelBeforeFocus = null
-                if (held in channelsAvailable()) _channel.value = held
+            // Restored only if the wheel is still on Focus: zone switched off *by* locking a
+            // different channel has already moved the dial, and that choice outranks a memory.
+            if (_channel.value == Channel.Focus) {
+                channelBeforeFocus?.let { held ->
+                    if (held in channelsAvailable()) _channel.value = held
+                }
             }
+            channelBeforeFocus = null
             settleChannel()
         }
     }
@@ -239,6 +247,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleChannelPicking() {
         if (_picking.value) {
             _picking.value = false
+            // **Locking the pick is the AF/MF switch.** FOCUS is on the dial whether or not zone
+            // focus is on, and choosing it *means* manual focus — asking for a second gesture to
+            // say so would be the modal wheel's own click-turn-click complaint again, one layer
+            // up. Locking anything else says the lens is the camera's again.
+            prefs.setZoneFocus(_channel.value == Channel.Focus)
             showNotice("${_channel.value.label} — turn to adjust")
         } else {
             _picking.value = true
@@ -366,11 +379,84 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _inFlight = MutableStateFlow(0)
     val inFlight: StateFlow<Int> = _inFlight.asStateFlow()
 
-    /** Jobs enqueued and not yet finished, for the `•N` in the status row. */
+    /** Jobs enqueued and not yet finished, for the buffer gauge in the status row. */
     private val _developing = MutableStateFlow(0)
     val developing: StateFlow<Int> = _developing.asStateFlow()
 
+    /**
+     * Panel frames waiting in the queue — the one job type that still holds heap.
+     *
+     * A queued panel frame is a ~10MB bitmap, so these are counted separately and capped at two:
+     * [develop] waits for a slot rather than queueing a third. Everything else in the darkroom is
+     * a Uri or a byte array already accounted for, and file jobs are a few hundred bytes each.
+     */
+    private val _panelQueued = MutableStateFlow(0)
+
+    /** When the worker started the job it is on, elapsed-realtime; zero while idle. */
+    private val _developingSince = MutableStateFlow(0L)
+    val developingSince: StateFlow<Long> = _developingSince.asStateFlow()
+
+    /** Rolling estimate of one develop, for the gauge's fill. Seeded pessimistically. */
+    private val _developEstMs = MutableStateFlow(900L)
+    val developEstMs: StateFlow<Long> = _developEstMs.asStateFlow()
+
+    /**
+     * Faults since launch, for the chip on the viewfinder.
+     *
+     * The notice a failure raises lives for two seconds and then the evidence is gone; a burst
+     * that dropped one frame in the middle deserves a mark that stays until it is read. Tapping
+     * the chip replays the last fault and clears the count. A crash from the previous run counts
+     * as one, so the chip is also how a black screen introduces itself on the next launch.
+     */
+    private val _faults = MutableStateFlow(0)
+    val faults: StateFlow<Int> = _faults.asStateFlow()
+
+    private val _lastFault = MutableStateFlow("")
+
+    private fun recordFault(what: String) {
+        _faults.value += 1
+        _lastFault.value = what
+    }
+
+    fun readFaults() {
+        if (_lastFault.value.isNotEmpty()) showNotice(_lastFault.value)
+        _faults.value = 0
+    }
+
     private sealed class Darkwork
+
+    /**
+     * A photograph already on disk, waiting for its filter.
+     *
+     * **This is the fix for three quick shots killing the app.** The first darkroom queued the
+     * capture's *bytes* — a 12-megapixel JPEG per shot, held in a heap this phone caps at 128MB,
+     * beside a worker whose decode needs ~48MB and whose filtered copy needs ~48MB more. Three
+     * shots in the queue was the whole heap: the "lag" was the garbage collector fighting for
+     * scraps, and the black screen was the low-memory killer taking the process with no stack
+     * trace to leave behind — the crash report said "Heap 9 MB of 128 MB" and "the app did not
+     * die", which is what an LMK kill looks like from the inside.
+     *
+     * So the buffer is the disk now, the way a camera body's buffer is the card. The untouched
+     * frame is *saved immediately* at capture — it appears on the roll unfiltered, which also
+     * means a process death costs the filter and never the photograph — and what queues is this:
+     * a Uri, a stem and the settings, a few hundred bytes. The worker reads the file back,
+     * develops it alone (one decode alive at a time, by construction), and rewrites it in place —
+     * the same shape the negative's JPEG has used since v2.62. "As many shots as it can" is now
+     * bounded by free space, which the same report put at 68.9 GB.
+     */
+    private class FileJob(
+        val uri: Uri,
+        val stem: String,
+        val rotationDegrees: Int,
+        val mirrored: Boolean,
+        val filter: Filters.Filter,
+        val aspect: FrameAspect,
+        val seed: Float,
+        val stampAt: Long?,
+        val stampStyle: StampStyle,
+        val wantPng: Boolean,
+        val takenAt: Long,
+    ) : Darkwork()
 
     private class DevelopJob(
         val frame: CapturedFrame,
@@ -416,17 +502,39 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * exact experience this queue exists to end.
      */
     private suspend fun develop(job: Darkwork) {
+        // Two panel bitmaps queued is the ceiling — the third press waits for a slot instead of
+        // stacking a heap the phone does not have. File and byte jobs pass straight through.
+        if (job is PanelJob) {
+            while (_panelQueued.value >= MAX_PANEL_QUEUED) delay(25)
+            _panelQueued.value += 1
+        }
         _developing.value += 1
         darkroom.send(job)
     }
 
+    /**
+     * The darkroom's own thread, at background priority.
+     *
+     * `Dispatchers.Default` shares a small pool with everything else that computes, and on this
+     * SoC a 12-megapixel decode on it is jank you can see in the viewfinder — the "lag after
+     * three shots" was half garbage collector and half this. A single dedicated thread at
+     * `MIN_PRIORITY` develops just as fast when the phone is idle and yields the moment the
+     * camera needs the cores, which is the correct order of importance for a camera.
+     */
+    private val darkroomThread =
+        java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "darkroom").apply { priority = Thread.MIN_PRIORITY }
+        }.asCoroutineDispatcher()
+
     private fun startDarkroom() {
         viewModelScope.launch {
             for (job in darkroom) {
+                val startedAt = SystemClock.elapsedRealtime()
+                _developingSince.value = startedAt
                 try {
                     when (job) {
                         is DevelopJob -> {
-                            val processed = withContext(Dispatchers.Default) {
+                            val processed = withContext(darkroomThread) {
                                 Frames.process(
                                     job.frame,
                                     job.filter,
@@ -439,8 +547,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             finish(processed, job.filter.id, job.takenAt)
                         }
+                        is FileJob -> developFile(job)
                         is PanelJob -> {
-                            val processed = withContext(Dispatchers.Default) {
+                            val processed = withContext(darkroomThread) {
                                 Frames.fromPreview(
                                     preview = job.bitmap,
                                     rotationDegrees = job.turn,
@@ -459,6 +568,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                             finish(processed, job.filter.id, job.takenAt)
                         }
                     }
+                    // The estimate feeds the gauge's fill, averaged over four like the shutter's
+                    // own readout, so one slow Purikura does not stretch every bar after it.
+                    val took = SystemClock.elapsedRealtime() - startedAt
+                    _developEstMs.value = (_developEstMs.value * 3 + took) / 4
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
@@ -466,10 +579,67 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     reportShutterFailure(failure)
                     if (job is PanelJob) runCatching { job.bitmap.recycle() }
                 } finally {
+                    if (job is PanelJob) _panelQueued.value -= 1
                     _developing.value -= 1
+                    if (_developing.value <= 0) _developingSince.value = 0L
                 }
             }
         }
+    }
+
+    /**
+     * Develop a photograph that is already a file: read, filter, rewrite in place.
+     *
+     * The same shape the negative's JPEG has used since v2.62, generalised. Everything here may
+     * fail alone: the untouched photograph was saved at the press and is already real, so the
+     * worst any line below can do is leave it unfiltered — which is a lesser photograph, never a
+     * lost one.
+     */
+    private suspend fun developFile(job: FileJob) {
+        val resolver = getApplication<Application>().contentResolver
+        val original = withContext(Dispatchers.IO) {
+            runCatching { resolver.openInputStream(job.uri)?.use { it.readBytes() } }.getOrNull()
+        }
+        if (original == null) {
+            recordFault("Couldn't read a shot back to develop it")
+            return
+        }
+        val processed = withContext(darkroomThread) {
+            Frames.process(
+                CapturedFrame(original, job.rotationDegrees, job.mirrored),
+                job.filter,
+                job.aspect,
+                job.seed,
+                job.stampAt,
+                job.stampStyle,
+                wantPng = job.wantPng,
+            )
+        }
+        // Identity means the fast path fired inside process() — nothing to rewrite, and rewriting
+        // the same bytes would only churn the file's dates.
+        if (processed.jpeg !== original) {
+            if (!repo.rewrite(job.uri, processed.jpeg)) recordFault("Couldn't develop a shot")
+        }
+        if (job.wantPng) {
+            val png = processed.png
+            if (png == null) {
+                recordFault("Lossless copy failed")
+            } else if (
+                repo.save(
+                    jpeg = png,
+                    takenAt = job.takenAt,
+                    width = processed.width,
+                    height = processed.height,
+                    stem = job.stem,
+                    format = CaptureFormat.Png,
+                ) == null
+            ) {
+                recordFault("Couldn't save the lossless copy")
+            }
+        }
+        // Last, as ever: everything above rewrites bytes, and a coordinate lives in them.
+        stampLocation(job.uri)
+        if (prefs.sounds.value) beeps.saved()
     }
 
     /**
@@ -820,6 +990,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             prefs.mode.collect { channelForMode(it) }
         }
         startDarkroom()
+        // The activity already offers a report dialog for a crash log on disk; the chip is the
+        // quieter half — a black screen that killed the process silently gets a mark on the next
+        // viewfinder either way.
+        if (CrashLog.last(app) != null) recordFault("Crashed last run — shake to report")
         viewModelScope.launch { prefs.scope.collect { locateRoll() } }
         viewModelScope.launch { photos.collect { locateRoll() } }
         // So is the output format. Asking for a negative changes what the `ImageCapture` is, not
@@ -1834,18 +2008,68 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 _stillMs.value = (_stillMs.value * 3 + took) / 4
                                 Log.i(TAG, "pro: shot ${took}ms")
                                 if (prefs.timings.value) showNotice("${took}ms shot")
-                                develop(
-                                    DevelopJob(
-                                        frame = frame,
-                                        filter = activeFilter,
-                                        aspect = aspect,
-                                        seed = seed,
-                                        stampAt = stampAt,
-                                        stampStyle = stampStyle,
-                                        wantPng = wantPng,
-                                        takenAt = pressedAt,
-                                    ),
+                                // **The film roll is the one place the bytes still queue whole:**
+                                // an exposure onto a loaded roll is not a file on the camera roll,
+                                // so there is nothing to save first. Rolls are 12 to 36 shots at a
+                                // person's pace; the heap argument does not reach them.
+                                if (roll.value != null) {
+                                    develop(
+                                        DevelopJob(
+                                            frame = frame,
+                                            filter = activeFilter,
+                                            aspect = aspect,
+                                            seed = seed,
+                                            stampAt = stampAt,
+                                            stampStyle = stampStyle,
+                                            wantPng = wantPng,
+                                            takenAt = pressedAt,
+                                        ),
+                                    )
+                                    return@withPermit
+                                }
+                                // **Saved untouched, immediately — the disk is the buffer.** The
+                                // frame lands on the roll unfiltered within a beat of the press,
+                                // heap holds nothing per queued shot, and a process death from
+                                // here on costs a filter, never a photograph. The develop reads
+                                // the file back and rewrites it in place, the negative's pattern.
+                                val stem = repo.stemFor(pressedAt)
+                                val size = Frames.sizeOf(frame.jpeg)
+                                val uri = repo.save(
+                                    jpeg = frame.jpeg,
+                                    takenAt = pressedAt,
+                                    width = size.first,
+                                    height = size.second,
+                                    stem = stem,
                                 )
+                                if (uri == null) {
+                                    recordFault("Couldn't save")
+                                    showNotice("Couldn't save")
+                                    return@withPermit
+                                }
+                                val needsWork = activeFilter.agsl != null ||
+                                    aspect != FrameAspect.Full ||
+                                    stampAt != null ||
+                                    wantPng
+                                if (!needsWork) {
+                                    stampLocation(uri)
+                                    if (prefs.sounds.value) beeps.saved()
+                                } else {
+                                    develop(
+                                        FileJob(
+                                            uri = uri,
+                                            stem = stem,
+                                            rotationDegrees = frame.rotationDegrees,
+                                            mirrored = frame.mirrored,
+                                            filter = activeFilter,
+                                            aspect = aspect,
+                                            seed = seed,
+                                            stampAt = stampAt,
+                                            stampStyle = stampStyle,
+                                            wantPng = wantPng,
+                                            takenAt = pressedAt,
+                                        ),
+                                    )
+                                }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (failure: Throwable) {
@@ -1855,13 +2079,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 Log.e(TAG, "capture failed", failure)
                                 val rescued = shootPanelFrame(click = false)
                                 val why = failure.message?.take(48)
-                                showNotice(
-                                    when {
-                                        rescued -> "Sensor didn't answer — saved the viewfinder frame"
-                                        why.isNullOrBlank() -> "Shutter failed"
-                                        else -> "Shutter: $why"
-                                    },
-                                )
+                                val said = when {
+                                    rescued -> "Sensor didn't answer — saved the viewfinder frame"
+                                    why.isNullOrBlank() -> "Shutter failed"
+                                    else -> "Shutter: $why"
+                                }
+                                showNotice(said)
+                                recordFault(said)
                             } finally {
                                 _inFlight.value -= 1
                             }
@@ -2233,7 +2457,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private fun reportShutterFailure(failure: Throwable) {
         Log.e(TAG, "shutter failed", failure)
         val why = failure.message?.take(48)
-        showNotice(if (why.isNullOrBlank()) "Shutter failed" else "Shutter: $why")
+        val said = if (why.isNullOrBlank()) "Shutter failed" else "Shutter: $why"
+        showNotice(said)
+        // The notice fades; the chip stays until read. A burst that dropped one frame in the
+        // middle is otherwise a photograph you only miss at home.
+        recordFault(said)
     }
 
     /**
@@ -2689,8 +2917,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          */
         const val DARKROOM_DEPTH = 6
 
-        /** Outstanding sensor captures. See [captureGate]. */
-        const val MAX_IN_FLIGHT = 2
+        /**
+         * Outstanding sensor captures: one.
+         *
+         * Two overlapped captures was the other suspect in the three-shot fault — a ZSL ring on
+         * this HAL is a handful of buffers, and two outstanding acquisitions against it while the
+         * preview holds its own is how a HAL wedges with no Java stack to show for it. One at a
+         * time still re-arms in milliseconds, because the press stopped waiting for the sensor;
+         * the queue of presses behind the permit is what a burst is.
+         */
+        const val MAX_IN_FLIGHT = 1
+
+        /** Panel bitmaps allowed to wait in the darkroom. ~10MB each against a 128MB heap. */
+        const val MAX_PANEL_QUEUED = 2
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96
