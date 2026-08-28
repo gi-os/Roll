@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gios.lightcamera.CaptureMode
-import com.gios.lightcamera.CrashLog
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.Prefs
 import com.gios.lightcamera.SelfTimer
@@ -53,7 +52,7 @@ import com.gios.lightcamera.media.MediaStoreRepo
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.media.RollScope
 import com.gios.lightcamera.media.Thumbs
-import com.gios.lightcamera.report.Trouble
+import com.gios.light.common.report.Trouble
 import com.gios.lightcamera.roll.FilmRoll
 import com.gios.lightcamera.roll.Roll
 import com.gios.lightcamera.ui.theme.LightHaptics
@@ -466,10 +465,6 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (summary.isNotEmpty()) showNotice(summary)
         _faults.value = 0
-        // Reading the chip acknowledges the crash it may be carrying, so it does not return at
-        // the next launch. The first 120 characters are version, time and thread — a fingerprint
-        // that survives the file being appended to and distinguishes a genuinely new crash.
-        CrashLog.last(getApplication())?.let { prefs.setCrashSeen(it.take(120)) }
     }
 
     private sealed class Darkwork
@@ -888,7 +883,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 android.app.ApplicationExitInfo.REASON_ANR,
                 android.app.ApplicationExitInfo.REASON_SIGNALED,
                 -> true
-                android.app.ApplicationExitInfo.REASON_CRASH -> CrashLog.last(app) == null
+                // A Java crash writes a stack the overlay offers on its own; announcing the
+                // exit record too would be the same death twice.
+                android.app.ApplicationExitInfo.REASON_CRASH -> false
                 else -> false
             }
         }
@@ -1282,10 +1279,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // viewfinder either way. Announced once per distinct crash: the file survives until a
         // report is sent, and a chip that re-raised it every launch was a permanent !1 nobody
         // could clear.
-        val crash = CrashLog.last(app)
-        if (crash != null && crash.take(120) != prefs.crashSeen()) {
-            recordFault("Crashed last run — shake to report")
-        }
+        // A Java crash is the overlay's to offer now — light-common's CrashLog reads it once
+        // per process and raises the chip itself. What stays here is the class the crash log
+        // cannot see:
         // **The deaths the crash log cannot see.** CrashLog catches a Java throw; a native crash
         // and a low-memory kill both end the process with no handler run, no file written, no
         // report offered — from the phone they are "the app just closed", and from here they used

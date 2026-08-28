@@ -18,37 +18,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gios.light.common.hw.LocalWheelBus
+import com.gios.light.common.report.ReportOverlay
 import com.gios.light.common.hw.WheelBus
 import com.gios.lightcamera.hw.LightControls
 import com.gios.lightcamera.hw.WheelClickWitness
 import com.gios.lightcamera.hw.ShutterRelease
-import com.gios.lightcamera.report.ReportContext
-import com.gios.lightcamera.report.Reports
-import com.gios.lightcamera.report.Screenshot
-import com.gios.lightcamera.report.ShakeDetector
-import com.gios.lightcamera.report.Symptom
-import com.gios.lightcamera.report.Trouble
 import com.gios.lightcamera.ui.CameraViewModel
 import com.gios.lightcamera.ui.ColorMode
-import com.gios.light.common.report.ReportChip
-import com.gios.lightcamera.ui.ReportReason
-import com.gios.lightcamera.ui.ReportSheet
 import com.gios.lightcamera.ui.Shell
 import com.gios.lightcamera.ui.lightInset
 import com.gios.lightcamera.ui.theme.LightCameraTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * One activity, because a camera is one thing.
@@ -63,15 +50,6 @@ import kotlinx.coroutines.withContext
  *    photograph, write it where the caller asked, and get out of the way. That is what makes
  *    this installable as the default camera rather than merely as an app with a viewfinder.
  */
-/**
- * A report waiting to be offered. The screenshot is taken at the moment of the shake rather than
- * when the sheet asks for it — by then the sheet is what is on screen.
- */
-private data class ReportRequest(
-    val reason: ReportReason,
-    val shot: Bitmap?,
-    val failure: com.gios.lightcamera.report.Failure? = null,
-)
 
 /**
  * The half of the `IMAGE_CAPTURE` output check that needs nothing but the `Uri`.
@@ -106,52 +84,18 @@ class MainActivity : ComponentActivity() {
     private var controls: LightControls? = null
     private var viewModel: CameraViewModel? = null
 
-    /** Raised by a shake, by a failure Roll noticed, or by a crash log from the last run. */
-    private val reportRequest = MutableStateFlow<ReportRequest?>(null)
-
     /**
      * The same view model the composition uses — one store, one key, one instance — reachable
      * from the places a composable cannot be, which today is the memory-trim callback.
      */
     private val activityVm: CameraViewModel by viewModels()
 
-    /** True once the corner chip has been tapped. Ignoring the chip never gets here. */
-    private val reportSheetOpen = MutableStateFlow(false)
-
-    /** Null on a phone with no accelerometer, where the whole feature quietly does not exist. */
-    private var shake: ShakeDetector? = null
-
-    /**
-     * A shake, caught. Take the picture first and ask afterwards — the chip is about to sit on
-     * top of whatever it was that looked wrong.
-     */
-    private fun onShaken() {
-        if (reportRequest.value != null) return
-        shake?.stop()
-        Screenshot.capture(window) { bitmap ->
-            reportRequest.value = ReportRequest(ReportReason.Shaken, bitmap)
-        }
-    }
-
-    /**
-     * The accelerometer runs only while Roll is the app you are looking at.
-     *
-     * More load-bearing here than in the other apps: a camera is carried, pointed and moved for
-     * a living, so the gesture has more chances to be misread than anywhere else. That is what
-     * the four-second chip is for — being wrong has to be cheap.
-     */
     override fun onResume() {
         super.onResume()
         // The wheel-click readout counts from the last time the camera came to the front, because
         // "never, in the two minutes you have been in here" is the useful window and a timestamp
         // from a session yesterday answers nothing. See [WheelClickWitness].
         WheelClickWitness.watchFrom()
-        if (reportRequest.value == null) shake?.start()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        shake?.stop()
     }
 
     /**
@@ -183,12 +127,6 @@ class MainActivity : ComponentActivity() {
                 activityVm.shedMemory()
             }
         })
-        shake = ShakeDetector(this, ::onShaken).takeIf { it.available }
-        // A crash log still on disk was never sent. RollApp installed the handler; this is the
-        // other half, asking about what it caught. Only on a genuinely new launch.
-        if (savedInstanceState == null && CrashLog.last(this) != null) {
-            reportRequest.value = ReportRequest(ReportReason.Crashed, null)
-        }
 
         // Edge to edge, and never dim while framing a shot: a camera that sleeps on a tripod
         // is a camera you stop using on a tripod.
@@ -241,103 +179,25 @@ class MainActivity : ComponentActivity() {
 
                 // Anything written while the phone was offline, or while the last build had no
                 // key in it, goes out now.
-                LaunchedEffect(Unit) { Reports.flush(this@MainActivity) }
-
-                val reports = rememberCoroutineScope()
-                val report by reportRequest.collectAsStateWithLifecycle()
-                val sheetOpen by reportSheetOpen.collectAsStateWithLifecycle()
-
-                // A failure Roll noticed on its own — a shutter that produced nothing, a filter
-                // the GPU refused — offers itself rather than waiting to be shaken about.
-                val trouble by Trouble.latest.collectAsStateWithLifecycle()
-                LaunchedEffect(trouble) {
-                    val failure = trouble ?: return@LaunchedEffect
-                    Trouble.clear()
-                    if (reportRequest.value != null) return@LaunchedEffect
-                    shake?.stop()
-                    Screenshot.capture(window) { bitmap ->
-                        reportRequest.value = ReportRequest(ReportReason.Failed, bitmap, failure)
-                    }
-                }
 
                 CompositionLocalProvider(LocalWheelBus provides wheel) {
                     Box(Modifier.fillMaxSize()) {
                         Shell(vm = vm, captureRequest = isCaptureRequest)
 
-                        // Bottom-start, not bottom-end: the shutter and the album live on the
-                        // right of the viewfinder chrome, and a chip over the shutter would be
-                        // the one place it must never be.
-                        //
-                        // **The library's chip, not a local copy.** Roll's own drew with the
-                        // Button text variant at grid scale, which on this panel is a banner
-                        // wearing a chip's name; light-common's is the 11sp popup every Bright
-                        // app shows, it fades on the same clock everywhere, and it places
-                        // itself — a Popup owns its own window, so there is no Box to align.
-                        report?.takeIf { !sheetOpen }?.let { pending ->
-                            ReportChip(
-                                reason = pending.reason,
-                                inset = lightInset(),
-                                onOpen = { reportSheetOpen.value = true },
-                                onExpire = {
-                                    // Silence is "not now": an unsent crash log stays on
-                                    // disk for the next launch to offer again.
-                                    reportRequest.value = null
-                                    shake?.start()
-                                },
-                            )
-                        }
+                        // **The whole reporting feature is the library's now, as one line.** Roll
+                        // ran its own aging copies of the shake detector, the screenshot, the
+                        // trouble collector, the chip and the sheet — and the shake path aged
+                        // until it silently stopped offering, with nothing on the phone able to
+                        // say whether the gesture, the sensor or the wiring had died. The
+                        // overlay owns all of it, lifecycle-scoped: sensor on RESUME, off on
+                        // PAUSE, crash offered once per process, Trouble collected, queue
+                        // flushed. Bottom-start, as before — the shutter and the album live on
+                        // the right, and a chip over the shutter is the one place it must never
+                        // be.
+                        ReportOverlay(inset = lightInset())
                     }
                 }
 
-                report?.takeIf { sheetOpen }?.let { pending ->
-                    ReportSheet(
-                        reason = pending.reason,
-                        hasScreenshot = pending.shot != null,
-                        failure = pending.failure?.what,
-                        seedNote = pending.failure?.let { "Could not ${it.what}" }.orEmpty(),
-                        onDismiss = {
-                            // Cancelling an opened sheet discards a crash log, because you
-                            // looked at it and decided. Letting the chip fade does not.
-                            if (pending.reason == ReportReason.Crashed) CrashLog.clear(this@MainActivity)
-                            reportSheetOpen.value = false
-                            reportRequest.value = null
-                            shake?.start()
-                        },
-                        onSend = { symptom, note, includeScreenshot ->
-                            reportSheetOpen.value = false
-                            reportRequest.value = null
-                            shake?.start()
-                            reports.launch {
-                                withContext(Dispatchers.IO) {
-                                    val crash = if (
-                                        pending.reason == ReportReason.Crashed ||
-                                        symptom == Symptom.Crashed
-                                    ) {
-                                        CrashLog.last(this@MainActivity)
-                                    } else {
-                                        null
-                                    }
-                                    Reports.enqueue(
-                                        this@MainActivity,
-                                        Reports.compose(
-                                            context = this@MainActivity,
-                                            symptom = symptom,
-                                            note = note,
-                                            screen = ReportContext.screen,
-                                            crash = crash,
-                                            shot = pending.shot
-                                                ?.takeIf { includeScreenshot }
-                                                ?.let { Screenshot.encode(it) },
-                                            failure = pending.failure,
-                                        ),
-                                    )
-                                    if (crash != null) CrashLog.clear(this@MainActivity)
-                                }
-                                Reports.flush(this@MainActivity)
-                            }
-                        },
-                    )
-                }
             }
         }
     }

@@ -1,3 +1,26 @@
+## Roll v2.84 — the reporting feature is the library's, all of it
+
+**"Make sure it's using the latest shake-to-send code from bright common" — now it is, wholesale.**
+Roll had adopted light-common's chip and kept running its own aging copies of everything behind it:
+the shake detector, the screenshot, the trouble collector, the crash offer, the sheet. The shake
+path aged until it silently stopped offering, and nothing on the phone could say whether the
+gesture, the sensor or the wiring had died — the exact class of failure shared code exists to
+prevent, because shared code ages in public.
+
+It is one line now. `ReportOverlay` owns the whole feature, lifecycle-scoped: the accelerometer
+runs only while Roll is in front, a crash is offered once per real launch (activity recreations no
+longer re-raise it), the app's own noticed failures raise the chip through the same door, and the
+send queue flushes itself. Eight local files are gone; what Roll keeps is what only Roll knows —
+which faults to record.
+
+Two behavioural notes. The chip and sheet are exactly the ones every Bright app shows, sizes
+included. And the crash-log viewer in settings now reads the library's file — a trace from before
+this update was in the old file and is not shown; it was also already offered on every launch
+since it happened.
+
+If the shake still refuses to offer on 2.84, that is a report in itself — from settings, where the
+send-feedback row goes through the same pipeline.
+
 ## Roll v2.83 — the gallery stops "restarting" the camera, and the ring becomes a choice
 
 **Opening the roll restarted the camera — every time, and it was the watchdog being wrong.** The

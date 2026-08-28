@@ -27,7 +27,7 @@ import com.gios.light.common.hw.WheelScroll
 import com.gios.lightcamera.BandSlot
 import com.gios.lightcamera.Chrome
 import com.gios.lightcamera.Colour
-import com.gios.lightcamera.CrashLog
+import com.gios.light.common.report.CrashLog
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.SelfTimer
 import com.gios.lightcamera.StampStyle
@@ -750,7 +750,7 @@ private fun AboutTab(vm: CameraViewModel, context: android.content.Context, rule
     }
     Setting("Shutter timings", if (timings) "On" else "Off") { vm.prefs.setTimings(!timings) }
 
-    val crash = remember { CrashLog.last(context) }
+    val crash = remember { CrashLog.read(context) }
     if (crash != null) {
         Section("Last crash") {
             Note("Roll fell over. The trace is below — the first few lines are the ones that matter. Tap to clear it.")
