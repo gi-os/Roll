@@ -1240,6 +1240,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.mode.collect { channelForMode(it) }
         }
+        viewModelScope.launch {
+            prefs.zslRing.collect { engine.setZslWanted(it) }
+        }
         startDarkroom()
         // **The preview's watchdog.** The engine stamps every capture result; this asks, twice a
         // second, whether the stamps stopped while the camera claims to be bound — which is the

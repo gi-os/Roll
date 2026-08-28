@@ -784,6 +784,18 @@ class Prefs(context: Context) {
         prefs.edit().putString(CRASH_SEEN, value).apply()
     }
 
+    /**
+     * The zero-shutter-lag ring, off by default.
+     *
+     * A second full-resolution stream beside the preview is a real cost on this hardware — the
+     * laggy-viewfinder and dying-preview reports both track it — and the press stopped waiting
+     * for the sensor anyway. On is for hardware that takes it gracefully.
+     */
+    private val _zslRing = MutableStateFlow(prefs.getBoolean(ZSL_RING, false))
+    val zslRing: StateFlow<Boolean> = _zslRing.asStateFlow()
+
+    fun setZslRing(value: Boolean) = set(_zslRing, value) { putBoolean(ZSL_RING, value) }
+
     /** The newest process-death timestamp the chip has already announced. See the exit check. */
     fun exitSeen(): Long = prefs.getLong(EXIT_SEEN, 0L)
 
@@ -995,6 +1007,7 @@ class Prefs(context: Context) {
         const val EXPOSURE_MODE = "exposureMode"
         const val CRASH_SEEN = "crashSeen"
         const val EXIT_SEEN = "exitSeenAt"
+        const val ZSL_RING = "zslRing"
         const val BAND_ONE = "bandSlot1"
         const val BAND_TWO = "bandSlot2"
 

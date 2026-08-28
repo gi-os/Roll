@@ -330,6 +330,7 @@ class CameraEngine(private val context: Context) {
      * rotation right, and nothing is being captured.
      */
     fun release() {
+        lastResultAt = 0L
         if (_recording.value) return
         runCatching { orientation.disable() }
         runCatching { provider?.unbindAll() }
@@ -487,6 +488,12 @@ class CameraEngine(private val context: Context) {
 
     private fun rebind(flash: FlashMode) {
         lastFlash = flash
+        // **A new bind starts with no heartbeat, not a stale one.** The stamp survives a release —
+        // open the roll for ten seconds, flick back, and the watchdog compared "now" against a
+        // timestamp from before you left: a healthy, freshly bound camera was "restarted" on
+        // every return from the gallery. Zero means "no data yet", which the watchdog already
+        // treats as not-evidence.
+        lastResultAt = 0L
         val provider = provider ?: return
         val owner = owner ?: return
         val view = previewView ?: return
@@ -602,7 +609,7 @@ class CameraEngine(private val context: Context) {
         // was bound only in Simple — the one mode that never calls `takePicture`, because Simple
         // shoots the panel. A ring buffer nobody captures from is a battery cost with no shutter
         // attached. Pro is where the 1.8 s lived, so Pro is where the ring pays.
-        val zsl = quick && zslAllowed
+        val zsl = quick && zslAllowed && zslWanted
         val capture = ImageCapture.Builder()
             .setResolutionSelector(captureSelector)
             // **88 in Simple, 92 elsewhere.** JPEG encode is a real slice of the shutter on a 12MP frame
@@ -1605,6 +1612,25 @@ class CameraEngine(private val context: Context) {
                 }
             },
         )
+    }
+
+    /**
+     * Whether the person asked for the ring at all. Off by default.
+     *
+     * **The ring is not free, and on this HAL it is not even cheap.** Zero shutter lag means a
+     * second stream at full still resolution running beside the preview, thirty times a second,
+     * whatever the shutter is doing — and the two persistent complaints on this hardware, the
+     * laggy viewfinder and the dying preview, both track sessions where that stream was up. The
+     * press already stopped waiting for the sensor, so a capture without the ring is late by the
+     * sensor's own pipeline only; Reach back covers the moment for the panel paths. The ring is
+     * still here for hardware that likes it — as a switch, whose cost is written on it.
+     */
+    @Volatile private var zslWanted = false
+
+    fun setZslWanted(on: Boolean) {
+        if (on == zslWanted) return
+        zslWanted = on
+        ContextCompat.getMainExecutor(context).execute { if (_ready.value) rebind(lastFlash) }
     }
 
     /** Set when a failed ZSL capture triggered the recovery rebind. One retry is warranted. */

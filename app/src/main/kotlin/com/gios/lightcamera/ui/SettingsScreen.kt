@@ -300,6 +300,12 @@ private fun CameraTab(vm: CameraViewModel) {
         vm.prefs.setPreRollMs(all[(all.indexOf(preRoll).coerceAtLeast(0) + 1) % all.size])
     }
     Setting("Sounds", if (sounds) "Focus beep" else "Off") { vm.prefs.setSounds(!sounds) }
+    val zslRing by vm.prefs.zslRing.collectAsState()
+    // Its cost written on the switch, because the switch is the cost: the ring runs a second
+    // full-resolution stream beside the preview the whole time the camera is up.
+    Setting("Sensor ring buffer", if (zslRing) "On — smoother shots, heavier preview" else "Off") {
+        vm.prefs.setZslRing(!zslRing)
+    }
 
     Section("Exposure") {
         Note(

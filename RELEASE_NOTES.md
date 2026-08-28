@@ -1,3 +1,23 @@
+## Roll v2.83 — the gallery stops "restarting" the camera, and the ring becomes a choice
+
+**Opening the roll restarted the camera — every time, and it was the watchdog being wrong.** The
+roll releases the camera (deliberately: no viewfinder, no sensor), but the preview's heartbeat
+timestamp survived the release. Flick back and the watchdog compared "now" against a stamp from
+before you left, found ten stale seconds, and "recovered" a healthy, freshly bound camera — one
+false restart and one false fault per gallery visit. A new bind now starts with no heartbeat at
+all, which the watchdog already knows is not evidence.
+
+**The zero-shutter-lag ring is now a switch, and it ships off.** The ring is a second stream at
+full still resolution running beside the preview, thirty times a second, whatever the shutter is
+doing — and on this hardware both persistent complaints, the laggy viewfinder and the dying
+preview, track sessions where that stream was up. The press stopped waiting for the sensor ten
+releases ago, so a capture without the ring is late only by the sensor's own pipeline; Reach back
+still covers the exact moment for panel shots. Hardware that takes the ring gracefully can have
+it: Settings -> CAMERA -> "Sensor ring buffer", its cost written on the switch.
+
+If the viewfinder is still not glassy after this one, the next report to send is exactly that —
+the autopsy pipeline is listening.
+
 ## Roll v2.82 — the wedge loses its common thread
 
 **Every dark-preview report on file shares one fact, and it is not the flat profile.** #158 came
