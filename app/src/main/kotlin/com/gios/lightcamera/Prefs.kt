@@ -737,11 +737,14 @@ class Prefs(context: Context) {
      * source of truth for what the camera is *doing*; these are what was *chosen*, and a collector
      * in the view model keeps the two in agreement.
      */
-    // **On by default, which is a statement of what this camera is for.** Flat is Zero's
-    // look — the ISP asked to do nothing — and the request that set it as the default was
-    // "top priority is extremely high quality photos". Off remains one tap away for anyone
-    // who wants the ISP's punchier opinion.
-    private val _flat = MutableStateFlow(prefs.getBoolean(FLAT, true))
+    // **Off by default — Roll keeps its own look.** v2.80 shipped flat as the default on the
+    // theory that Zero's unprocessed file was the top priority, and the field answered twice in
+    // one day: the person it was for said "keep it our style", and the watchdog filed a
+    // preview-went-dark report — a linear tonemap and disabled processing on the *repeating*
+    // request is something this HAL tolerates poorly at 30fps, whatever it thinks of it on a
+    // still. Flat stays exactly as capable as v2.80 made it (Zero's keys baked into the still,
+    // JPEG at 95); it is a choice again, not an opinion.
+    private val _flat = MutableStateFlow(prefs.getBoolean(FLAT, false))
     val flat: StateFlow<Boolean> = _flat.asStateFlow()
 
     fun setFlat(value: Boolean) = set(_flat, value) { putBoolean(FLAT, value) }

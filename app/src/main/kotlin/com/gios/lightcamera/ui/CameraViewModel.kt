@@ -1246,11 +1246,31 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // black viewfinder as a number. Recovery is a rebind, named out loud and marked as a
         // fault, because a camera that silently heals is a camera whose disease nobody reports.
         viewModelScope.launch {
+            var recoveries = 0
+            var firstRecoveryAt = 0L
             while (isActive) {
                 delay(1_500)
                 if (engine.recoverIfDead()) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - firstRecoveryAt > 60_000L) {
+                        firstRecoveryAt = now
+                        recoveries = 0
+                    }
+                    recoveries += 1
+                    // **Three strikes inside a minute and the watchdog stands down.** A preview
+                    // that dies again immediately after a rebind is not asleep, it is allergic —
+                    // to a session option, a use case, something a rebind faithfully reproduces —
+                    // and a watchdog that keeps administering the same cure tallies a fault every
+                    // few seconds (`!8` in the field), heats the phone, and fixes nothing. One
+                    // honest sentence beats eight identical ones; the next app launch starts the
+                    // watchdog fresh.
+                    if (recoveries >= 3) {
+                        showNotice("Camera keeps dying — close and reopen Roll")
+                        recordFault("Camera kept dying after restarts — reopen the app")
+                        return@launch
+                    }
                     showNotice("Camera restarted")
-                    recordFault("Preview went dark — camera restarted")
+                    if (recoveries == 1) recordFault("Preview went dark — camera restarted")
                 }
             }
         }

@@ -1,3 +1,21 @@
+## Roll v2.81 — our style is the default again
+
+**v2.80 made the flat profile the default, and that was wrong twice.** First in taste: Roll's
+photographs have a look of their own, and shipping every unfiltered shot flat traded it for
+another camera's opinion — "keep it our style" is the whole review, and it is accepted. Second in
+fact: the very first field report off 2.80 was the watchdog catching a dead preview, and the
+prime suspect is the default itself — a linear tone curve with processing disabled is one thing
+on a still and another on the *repeating* request, thirty times a second, where this HAL
+evidently tolerates it poorly.
+
+So flat is opt-in again, exactly as capable as v2.80 made it: choose it and the still carries
+Zero's keys baked in — noise reduction, edge, hot pixels and aberration off, linear tonemap —
+with the JPEG written at 95, riding the zero-lag path. Unset phones revert on update; a flat
+profile you switched on yourself stays switched on.
+
+The default Roll: the ISP's own processed JPEG, untouched on the filterless path, at the speed
+the last ten releases built. Our style.
+
 ## Roll v2.80 — Zero-grade files, by default, at zero-lag speed
 
 **The insight this release is built on: Zero's quality and Zero's speed are the same decision.**
