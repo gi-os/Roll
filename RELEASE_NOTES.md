@@ -1,3 +1,27 @@
+## Roll v2.93 — the ladder behaves, the heavy filters keep the wheel
+
+**The ladder comes and goes on its own terms.** Three seconds after you stop touching the dial the
+gauge retreats — a slow fade that reads as the meter looking away — and the moment the wheel turns,
+or a finger lands on the ladder, it's back in under a beat. The viewfinder stays clean between
+adjustments; the meter only claims the edge while you're actually using it.
+
+**The filter ladder fits between the bars.** It used to run the full width of the frame and spill
+over the black chrome at both ends. Now it sits fifteen percent in from each edge — on the
+viewfinder, where it belongs, with every rung still a fingertip away.
+
+**EV stops shouting in tiny print.** The gauge sized its numbers to the whole ladder, blank rungs
+included, so the third-stop grid shrank "-2" until it was dust. Now each label is sized to the
+labels around it — the whole-stop numbers you actually read are three times the size they were.
+
+**The needle keeps up with a fast spin.** It used to take 120ms per notch, so a quick turn left the
+red bar limping after the wheel. Half that, and one notch reads as one motion again.
+
+**The heavy filters keep the wheel to themselves.** Film and Mono are looks over a scene the camera
+still reads, so EV, zone focus and zoom stay on the dial under them. Everything else — the dithers,
+Game Boy, datamosh, the distorting ones — replaces the scene, and EV/zone/zoom under a look you
+can't see through would be adjusting a photograph nobody can see. Those channels leave the wheel
+until a plain look is back.
+
 ## Roll v2.92 — real glyphs for zoom and filters
 
 **Zoom and filters stop borrowing.** The channel button was showing a plus sign for zoom and a

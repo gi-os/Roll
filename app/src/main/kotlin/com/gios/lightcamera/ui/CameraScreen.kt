@@ -36,6 +36,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -430,6 +432,7 @@ fun CameraScreen(
             (channelWheel || bareDial != DialAction.Nothing),
         armed = !oneStepPerGesture,
     ) { notches ->
+        vm.touchLadder()
         if (dialLive) {
             if (channelWheel) vm.channelTurn(notches) else turnDial(vm, engine, bareDial, notches)
         } else {
@@ -447,6 +450,7 @@ fun CameraScreen(
         armed = heldDial != DialAction.Filter,
         pressed = true,
     ) { notches ->
+        vm.touchLadder()
         turnDial(vm, engine, heldDial, notches)
     }
 
@@ -1044,15 +1048,30 @@ fun CameraScreen(
                 // small meter, fixed in place.
                 val gaugeLength =
                     if (channel == Channel.Filter) {
-                        LocalConfiguration.current.screenWidthDp.dp - 12.dp
+                        // Not the whole edge: the ladder used to run the full width and spill over
+                        // the black chrome at both ends — the report was "filters go over the black
+                        // bar". Fifteen percent off each end puts the ladder's rungs between the
+                        // bars, on the viewfinder, where a fingertip can still land on any of them.
+                        LocalConfiguration.current.screenWidthDp.dp * 0.7f
                     } else {
                         128.dp
                     }
+                // Fast in, slow out: the ladder is summoned by a dial touch, so it arrives in the
+                // same gesture; it retreats on its own, so the retreat reads as a drift rather than
+                // a flicker. Hidden, it draws nothing and takes no touches — a ghost ladder would
+                // still swallow the swipe down to the roll.
+                val ladderVisible by vm.ladderVisible.collectAsState()
+                val ladderAlpha by animateFloatAsState(
+                    targetValue = if (ladderVisible) 1f else 0f,
+                    animationSpec = tween(durationMillis = if (ladderVisible) 120 else 700),
+                    label = "ladder",
+                )
                 Box(
                     Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 2.dp)
-                        .requiredSize(width = gaugeLength, height = 44.dp),
+                        .requiredSize(width = gaugeLength, height = 44.dp)
+                        .graphicsLayer { alpha = ladderAlpha },
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
@@ -1063,9 +1082,16 @@ fun CameraScreen(
                         NeedleGauge(
                             labels = spec.labels,
                             index = spec.index,
-                            onSet = spec.onSet,
-                            onTap = { vm.toggleDialLock() },
+                            onSet = { i ->
+                                vm.touchLadder()
+                                spec.onSet(i)
+                            },
+                            onTap = {
+                                vm.touchLadder()
+                                vm.toggleDialLock()
+                            },
                             length = gaugeLength,
+                            enabled = ladderAlpha > 0.5f,
                         )
                     }
                 }

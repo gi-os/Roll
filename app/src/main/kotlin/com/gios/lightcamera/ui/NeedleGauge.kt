@@ -47,6 +47,8 @@ fun NeedleGauge(
     onTap: (() -> Unit)? = null,
     /** The ladder's long axis. Filters hand the whole viewfinder edge in; everything else the default. */
     length: Dp = GAUGE_HEIGHT,
+    /** False while the ladder is faded out, so a hidden gauge does not eat touches. */
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     if (labels.isEmpty()) return
@@ -55,10 +57,12 @@ fun NeedleGauge(
     val count = labels.size
     var heightPx by remember { mutableFloatStateOf(1f) }
     // The needle travels rather than teleports: a real meter's arm has mass. Short enough that a
-    // spinning wheel still reads as one motion per notch, not a lagging pointer.
+    // spinning wheel still reads as one motion per notch, not a lagging pointer. Sixty not a
+    // hundred-and-twenty: at 120ms the needle was still arriving when the next notch landed, so a
+    // fast spin read as a pointer limping after the wheel.
     val sweep by animateFloatAsState(
         targetValue = index.toFloat(),
-        animationSpec = tween(durationMillis = 120),
+        animationSpec = tween(durationMillis = 60),
         label = "needle",
     )
 
@@ -66,7 +70,8 @@ fun NeedleGauge(
         modifier
             .width(GAUGE_WIDTH)
             .height(length)
-            .pointerInput(count) {
+            .pointerInput(count, enabled) {
+                if (!enabled) return@pointerInput
                 detectDragGestures { change, _ ->
                     change.consume()
                     val step = size.height.toFloat() / count
@@ -74,7 +79,8 @@ fun NeedleGauge(
                     set(at)
                 }
             }
-            .pointerInput(onTap) {
+            .pointerInput(onTap, enabled) {
+                if (!enabled) return@pointerInput
                 detectTapGestures { onTap?.invoke() }
             },
     ) {
@@ -102,9 +108,19 @@ fun NeedleGauge(
                     strokeWidth = 2.2.dp.toPx(),
                 )
             }
+            // **Sized off the labels that actually draw, not the raw rung pitch.** EV lays a rung
+            // down for every third of a stop but prints only the whole stops, so sizing off the
+            // blank rungs shrank "-2" until it was dust; a ladder that labels every rung keeps the
+            // old size. The pitch is the average gap between consecutive *printed* rungs.
+            val labelled = labels.mapIndexedNotNull { i, l -> if (l.isNotEmpty()) i else null }
+            val pitch = if (labelled.size >= 2) {
+                step * (labelled.last() - labelled.first()) / (labelled.size - 1)
+            } else {
+                step
+            }
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
-                textSize = minOf(step * 0.62f, MAX_TEXT_PX)
+                textSize = minOf(pitch * 0.62f, MAX_TEXT_PX)
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }

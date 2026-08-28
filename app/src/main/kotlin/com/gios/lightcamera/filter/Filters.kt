@@ -1160,6 +1160,18 @@ half4 main(float2 xy) {
     fun indexOf(filter: Filter): Int = all.indexOfFirst { it.id == filter.id }.coerceAtLeast(0)
 
     /**
+     * Whether the wheel may leave the filter track while this filter is on.
+     *
+     * Film and Mono are looks, not worlds: a colour grade and a desaturation leave the scene's
+     * exposure and framing alone, so EV, zone focus and zoom still mean something underneath them.
+     * Every other filter takes the photograph over — the low-res ones, the distorting ones, the
+     * datamosh — and offering those channels under a look you cannot see through is a control
+     * that lies. The wheel stays on the filter until one of the plain looks is back.
+     */
+    fun keepsOtherChannels(filter: Filter): Boolean =
+        filter.id == none.id || filter.id == "film" || filter.id == "mono"
+
+    /**
      * The dial as the user has arranged it: their order, minus what they switched off.
      *
      * [all] is the catalog and stays the catalog — this is the view of it that the wheel turns
