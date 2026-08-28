@@ -1,31 +1,28 @@
 ## Roll v2.85 — the fast one
 
-The first official release since v2.60, and the whole of it is one sentence: **the press is the
-photograph.** The shot is seized the instant your finger lands; the filter, the encodes and the
-save drain through a queue behind a live viewfinder, the way a real camera body's buffer works.
-Hold the shutter and it bursts. A thin bar in the status line is the buffer gauge.
+The first official release since v2.60, and it comes down to one sentence: the press is the photograph. Your finger lands, the shot exists. Filters, encoding and saving drain through a queue behind a live viewfinder, the way a camera body's buffer works. A thin bar in the status line shows the queue doing its job. Hold the shutter down and Roll bursts until you let go.
 
-Since v2.60, in the order you will meet them:
+Twenty-five nightlies went into this build. Here is what they carry.
 
-- **RAW.** One press writes the DNG and its JPEG from the same exposure, one photograph on the
-  roll; a corner control in the viewer picks which file Send uses. Lossless PNG for the dither
-  filters JPEG smears. Formats live in Settings → CAMERA → Files.
-- **Manual exposure** on the wheel: Auto, shutter-priority, ISO-priority, manual. A flat profile
-  (the ISP asked to do nothing) is one switch; RAW keeps the sensor's best file.
-- **Zone focus, GR-style.** Lock the wheel's pick onto FOCUS and you are in manual focus:
-  detented distances, a live depth-of-field readout, focus peaking. AF/MF fits on a band slot.
-- **The modal wheel.** Bind the click to Wheel channel: click to pick — filter, EV, shutter, ISO,
-  focus, zoom — turn to choose, click to lock, turn to adjust. Video takes the wheel to zoom.
-- **A map of the roll**, photographs placed where they were taken. Off until you grant location.
-- **Batch delete**: long-press a day heading, take the day, trash it.
-- **Settings** split into FRAME (the picture) and CAMERA (the act).
-- **A camera that reports on itself.** Every fault lands on a small tally chip; a shake offers a
-  report; silent deaths — the kind that leave no crash log — name themselves on the next launch.
-  Nothing sends without your tap.
-- The shutter and save sounds traded places in the mix: the press must carry over street noise,
-  the filing afterwards is bookkeeping.
+**RAW.** One press writes the DNG and its JPEG from a single exposure, and the roll shows them as one photograph. A corner control in the viewer picks which file you send. There is a lossless PNG option too, made for the dither filters. Those patterns are the picture, and JPEG smudges them.
 
-Sixty-odd fixes rode along, most found by this camera's own reports. Thanks for shaking.
+**Manual exposure, on the wheel.** Auto, shutter priority, ISO priority, full manual. A flat profile turns the ISP's processing off for files you plan to grade. RAW keeps the sensor's best output either way.
+
+**Zone focus.** Lock the wheel onto FOCUS and you are in manual focus, street style. You get detented distances, a live depth-of-field readout, and focus peaking that marks sharp edges by inverting them, so the marks stay visible on a gray panel. Put AF/MF on a band slot and the switch is one tap.
+
+**The wheel became a dial.** Bind the click to Wheel channel and it works like a camera menu: click to open the pick, turn to choose between filter, EV, shutter, ISO, focus and zoom, click to lock, turn to adjust. Switch to video and the wheel takes zoom on its own.
+
+**A map of the roll.** Photographs placed where you took them, clustered by street as you zoom in. Location stays off until you grant it. Tagging uses the phone's last known fix, so the shutter never waits on GPS.
+
+**Batch delete.** Long-press a day heading to select the whole day, then tap trash. Cleaning up a burst takes three taps.
+
+**Sizes, verified.** The sensor is 50 megapixels. Its default output is 12, with four pixels binned into one, which is also why 12MP shots handle low light better. Roll defaults to 12MP like the phone itself does, and the 50MP setting gives you the full unbinned readout. That mode is slow by design. You are asking for the whole sensor.
+
+**A camera that reports on itself.** Faults land on a small tally you can tap to read. A shake offers a report with a screenshot. Deaths that leave no crash log used to look like a black screen and no answers. They now name themselves on the next launch, with the kernel's own description attached. Nothing is ever sent without your tap.
+
+The shutter sound got louder and the save sound got quieter, because the press is the only confirmation that matters and the filing afterwards is bookkeeping.
+
+This camera's own reports found most of the fixes in here. If something looks wrong, shake the phone. That report is how the next release gets better.
 
 ## Roll v2.85 — the watchdog stops shooting the surgeon
 
