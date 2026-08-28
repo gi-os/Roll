@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -65,8 +66,20 @@ fun ReportSheet(
         containerColor = colors.background,
         dragHandle = null,
     ) {
+        // The keyboard is a window over this one, and this sheet is inside a scroll, so
+        // without an inset the note field slides underneath it as the text grows: the caret
+        // stays where it was and the line you are typing disappears behind the keys. Reported
+        // as the note line "becoming hidden by keyboard as text becomes longer", which is
+        // exactly what it looks like — the field is fine, the sheet simply does not know the
+        // bottom of the screen moved.
+        //
+        // `imePadding` moves the whole column up by the keyboard's height, which is what lets
+        // the scroll do the rest: a focused text field inside a vertical scroll is already
+        // brought into view by Compose, and it was being brought into a region the keyboard
+        // was covering.
         Column(
             Modifier
+                .imePadding()
                 .verticalScroll(scroll)
                 .padding(
                     start = lightInset(),

@@ -28,3 +28,12 @@ shoot with is a property of your camera rather than of this frame, and throwing 
 gesture nobody thinks of as destructive would be a worse bug than the one being fixed here.
 
 Fixes [light-reports#123] and [light-reports#128].
+
+### The note field no longer hides under the keyboard
+
+Typing a long note in the report sheet pushed the line you were writing behind the keyboard. The
+sheet scrolls, and Compose already brings a focused field into view inside a scroll — but it was
+bringing it into a region the keyboard was covering, because the sheet had no idea the bottom of
+the screen had moved.
+
+Fixes [light-reports#134].
