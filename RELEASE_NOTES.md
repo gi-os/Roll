@@ -1,3 +1,15 @@
+## Roll v2.71 — zone focus takes the wheel, the way a GR does
+
+**Switch to MF and the distance is on the dial, immediately.** The GR bodies are the model: snap
+focus exists for the street, and on the street the distance is set walking, from the hip, without
+looking at anything. A wheel that needed click-turn-click to reach focus after you had already
+said "manual focus" was asking you to say it twice — switching MF on is the statement, and the
+dial now follows it. Turn for 0.3, 0.5, 1, 2, 5 metres, the hyperfocal and infinity; the readout
+says what is sharp; peaking marks it on the frame.
+
+Switching back to AF hands the wheel whatever it held before, so AF -> MF -> AF round-trips leave
+the dial where you had it. Fastest loop: put AF/MF on a band slot (Settings -> KEYS), tap it, turn.
+
 ## Roll v2.70 — the shutter stops thinking first
 
 **Pro fires like Simple now, and zero shutter lag finally does something.** Two facts had been

@@ -191,6 +191,33 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var channelBeforeVideo: Channel? = null
 
+    /**
+     * Zone focus puts the distance on the wheel the moment it is switched on.
+     *
+     * The GR bodies are the model: their snap-focus mode exists for the street, and on the street
+     * the distance *is* the exposure — you set it walking, from the hip, without looking. A wheel
+     * that needs click-turn-click to reach focus after you already said "manual focus" is asking
+     * you to say it twice. Switching MF on is the statement; the dial follows it.
+     *
+     * Same shape as [channelForMode]'s Video claim, and it hands back what the wheel held before,
+     * so AF -> MF -> AF round-trips leave the dial where you had it.
+     */
+    private var channelBeforeFocus: Channel? = null
+
+    private fun channelForZone(on: Boolean) {
+        if (on) {
+            channelBeforeFocus = _channel.value
+            _channel.value = Channel.Focus
+            _picking.value = false
+        } else {
+            channelBeforeFocus?.let { held ->
+                channelBeforeFocus = null
+                if (held in channelsAvailable()) _channel.value = held
+            }
+            settleChannel()
+        }
+    }
+
     private fun channelForMode(mode: CaptureMode) {
         if (mode == CaptureMode.Video) {
             channelBeforeVideo = _channel.value
@@ -707,7 +734,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.zoneFocus.collect {
                 engine.setZoneFocus(it)
-                settleChannel()
+                channelForZone(it)
             }
         }
         viewModelScope.launch {
