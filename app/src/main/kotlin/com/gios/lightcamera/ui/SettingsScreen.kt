@@ -279,13 +279,15 @@ private fun CameraTab(vm: CameraViewModel) {
 
     Section("Shutter") {
         Note(
-            "Reach back keeps the last few frames as they arrive, so the shutter can take the one from " +
-                "just before you pressed — you see the expression, then decide, then your thumb moves, and " +
-                "by then it is a third of a second later. It costs power the whole time it is on, and it " +
-                "changes which moment you get, so it is wrong for anything you are timing deliberately.\n\n" +
-                "With both on, the sharpest of the frames already held is taken, which is the version of " +
-                "the burst below that costs nothing at the press.\n\n" +
-                "Keeping the sharpest of a short burst costs nothing at the shutter — the frames are already arriving for the viewfinder, so this picks between ones the camera had rather than asking it for more. It only applies where the photograph comes off the panel, which is Simple and every coarse filter.",
+            "The press is the photograph: the shot is taken the instant your finger lands, and the slow " +
+                "work — filters, encodes, saving — drains through a queue behind the viewfinder. The thin " +
+                "bar in the status line is the gauge of that queue.\n\n" +
+                "Reach back keeps the last moments of the viewfinder so the shutter can take the frame from " +
+                "just before you pressed — you see the expression, then decide, then your thumb moves. It " +
+                "costs power while on, and it changes which moment you get, so it is wrong for anything you " +
+                "are timing deliberately. With Sharpest of eight on as well, the sharpest held frame wins.\n\n" +
+                "The sensor ring buffer trades a heavier live preview for buffered captures; on this phone " +
+                "the preview usually matters more, which is why it ships off",
         )
     }
     val burst by vm.prefs.burst.collectAsState()

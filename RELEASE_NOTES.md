@@ -1,3 +1,32 @@
+## Roll v2.85 — the fast one
+
+The first official release since v2.60, and the whole of it is one sentence: **the press is the
+photograph.** The shot is seized the instant your finger lands; the filter, the encodes and the
+save drain through a queue behind a live viewfinder, the way a real camera body's buffer works.
+Hold the shutter and it bursts. A thin bar in the status line is the buffer gauge.
+
+Since v2.60, in the order you will meet them:
+
+- **RAW.** One press writes the DNG and its JPEG from the same exposure, one photograph on the
+  roll; a corner control in the viewer picks which file Send uses. Lossless PNG for the dither
+  filters JPEG smears. Formats live in Settings → CAMERA → Files.
+- **Manual exposure** on the wheel: Auto, shutter-priority, ISO-priority, manual. A flat profile
+  (the ISP asked to do nothing) is one switch; RAW keeps the sensor's best file.
+- **Zone focus, GR-style.** Lock the wheel's pick onto FOCUS and you are in manual focus:
+  detented distances, a live depth-of-field readout, focus peaking. AF/MF fits on a band slot.
+- **The modal wheel.** Bind the click to Wheel channel: click to pick — filter, EV, shutter, ISO,
+  focus, zoom — turn to choose, click to lock, turn to adjust. Video takes the wheel to zoom.
+- **A map of the roll**, photographs placed where they were taken. Off until you grant location.
+- **Batch delete**: long-press a day heading, take the day, trash it.
+- **Settings** split into FRAME (the picture) and CAMERA (the act).
+- **A camera that reports on itself.** Every fault lands on a small tally chip; a shake offers a
+  report; silent deaths — the kind that leave no crash log — name themselves on the next launch.
+  Nothing sends without your tap.
+- The shutter and save sounds traded places in the mix: the press must carry over street noise,
+  the filing afterwards is bookkeeping.
+
+Sixty-odd fixes rode along, most found by this camera's own reports. Thanks for shaking.
+
 ## Roll v2.85 — the watchdog stops shooting the surgeon
 
 **"Shutter timeout and camera restarted on RAW mode" — the restart caused the timeout.** A

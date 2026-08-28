@@ -54,12 +54,16 @@ Uninstall it and the stock camera is exactly as it was.
 
 | | |
 |---|---|
-| **A shutter that fires** | The stock one-to-three-second delay is the sensor reading out at 50MP. Roll caps capture at 12MP, so the photograph happens when you press the button. Select 50MP if you want it. |
+| **A shutter that never waits** | The press *is* the photograph: the shot is seized the instant your finger lands and everything slow — the filter, the encodes, the save — drains through a queue behind the live viewfinder, the way a camera body's buffer works. Hold the shutter and it bursts; a thin bar in the status line is the buffer gauge. Roll shoots 12MP by default (the stock camera's 1–3 s delay is the 50MP readout); select 50MP when you want the whole sensor. |
+| **RAW** | One press writes the DNG and its JPEG from the same exposure, shown as one photograph on the roll. A corner control in the viewer picks which file gets sent. Lossless PNG is there too, for the dither filters JPEG smears. |
+| **Manual exposure** | Auto, shutter-priority, ISO-priority, full manual — on the wheel. A flat profile (the ISP asked to do nothing, Zero-style) is one switch away, and RAW keeps the sensor's best. |
+| **Zone focus, like a GR** | Lock the wheel's pick onto FOCUS and the app switches to manual focus: distances on the dial with detents at 0.5/1/2 m, the hyperfocal and ∞, a live depth-of-field readout, and focus peaking marking what is sharp. AF/MF fits on a band slot for one-tap street work. |
+| **A map of your roll** | A scope beside the camera roll: photographs placed where they were taken, clustered by street as you zoom. Tagging uses the phone's last known fix, so it costs the shutter nothing. |
 | **18 live filters** | Real fragment shaders, on the viewfinder *and* on the saved file. Film, Dither BW, Dither 16, Dither 32, Halftone, Game Boy, Thermal, Purikura, and the Photo Booth distortions. Turn the wheel to change filter. |
-| **The wheel does things** | A bare turn steps filters. Held and turned, it sets exposure. A click gives you the torch. It also scrolls the roll. No service, no permission. |
+| **The wheel does things** | A bare turn steps filters; held and turned, exposure; a click, the torch. Or bind the click to *Wheel channel* and the wheel becomes a real dial: click to pick — filter, EV, shutter, ISO, focus, zoom — turn to choose, click to lock, turn to adjust. Video hands the wheel to zoom by itself. No service, no permission. |
 | **A two-stage shutter** | The half press locks focus. The full press shoots. LightOS itself uses only the second detent. |
 | **Face detection** | From the camera's own hardware detector, not a bundled model. Focus follows the face the lens works on. |
-| **A gallery worth using** | Every photo on the phone, day headings, multi-select, and trash. The send button picks a person, not an app. |
+| **A gallery worth using** | Every photo on the phone, day headings, multi-select, and trash — long-press a day heading to take the whole day, which is how a burst gets cleaned up in three taps. The send button picks a person, not an app. |
 | **Film-roll mode** | Load 12, 24 or 36 frames. No preview and no review, just a counter and a click, until you develop the roll. |
 | **QR scanning** | A camera mode rather than a separate app. Nothing opens by itself. |
 | **Date backs** | Three of them, drawn the way the originals worked: an LED dot matrix, a seven-segment quartz back, and a camcorder character generator. |
@@ -93,7 +97,7 @@ file, unzip it, and run `adb` from that folder. On a Mac, run
 2. Install it:
 
 ```sh
-adb install -r LightCamera-v2.38.55.apk
+adb install -r LightCamera-v2.85.120.apk
 ```
 
 The app appears in the launcher as **Roll**. On first use, grant it access to the camera and to
