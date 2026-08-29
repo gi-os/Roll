@@ -334,6 +334,23 @@ class Prefs(context: Context) {
         set(_filtersOff, next) { putString(FILTERS_OFF, next.joinToString("\n")) }
     }
 
+    /**
+     * The state a new camera starts with: only the monochrome film look and the plain
+     * photograph, every other filter off.
+     *
+     * Applied the first time the filter picker shows itself — before the user has made any
+     * choice — so the wheel and the grid inherit exactly what the picker presents, rather
+     * than a dial of everything-turned-on that the user then has to walk back from. [Filters.none]
+     * is never stored off (it is the plain photograph and always on), and "mono" stays on as
+     * the one look worth carrying out of the box.
+     */
+    fun seedDefaultFilterChoice() {
+        if (_filtersPicked.value) return
+        val off = Filters.all.map { it.id }.filter { it != Filters.none.id && it != "mono" }.toSet()
+        if (_filterId.value in off) _filterId.value = Filters.none.id
+        set(_filtersOff, off) { putString(FILTERS_OFF, off.joinToString("\n")) }
+    }
+
     fun resetFilters() {
         set(_filterOrder, emptyList()) { remove(FILTER_ORDER) }
         set(_filtersOff, emptySet()) { remove(FILTERS_OFF) }

@@ -78,6 +78,14 @@ fun FilterPickerScreen(
 
     var previews by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
+    // The state a fresh camera sees: only Mono and Preset on, everything else off. Runs the
+    // first time the picker opens (before the user has chosen), so the wheel and the grid
+    // inherit what the picker shows rather than a dial of everything-turned-on. Idempotent —
+    // once a choice has been saved, reopening the picker from Look settings leaves it alone.
+    LaunchedEffect(Unit) {
+        vm.prefs.seedDefaultFilterChoice()
+    }
+
     // Render every filter once into the sample. Keyed on grade and the datamosh look so a
     // change in Look settings is reflected here, but not on `off` — toggling must be instant,
     // not wait on a GPU pass for the page you just tapped.
