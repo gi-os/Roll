@@ -1538,6 +1538,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     delay(500)
                 }
                 _recordSeconds.value = 0
+                // recording only goes false once the muxer's Finalize lands, so this is the moment
+                // the clip is a real, queryable row. Refresh once here, deferred out of the
+                // encoder's way, instead of racing the finalize — see the observer below.
+                refreshWanted.value = SystemClock.elapsedRealtime()
             }
         }
     }
@@ -1563,6 +1567,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             var seen = 0L
             while (isActive) {
                 delay(300)
+                // While a recording is in flight the encoder owns the device; re-querying
+                // MediaStore and decoding thumbnails would steal the CPU and IO the muxer needs,
+                // which is the "the phone lags while the video saves" report. The IS_PENDING row
+                // the recorder owns is excluded from the query anyway, so a refresh would show
+                // nothing. Finalize fires the single refresh from the recording collector above.
+                if (engine.recording.value) continue
                 val wanted = refreshWanted.value
                 if (wanted != seen) {
                     seen = wanted

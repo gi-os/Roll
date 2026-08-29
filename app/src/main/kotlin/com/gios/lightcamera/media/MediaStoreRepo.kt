@@ -123,11 +123,18 @@ class MediaStoreRepo(private val context: Context) {
         // the same three seconds filling a whole screen of the grid is not what you were looking for.
         // They live in their own folder for exactly this reason, and every query excludes it.
         val hide = "${MediaStore.Images.Media.RELATIVE_PATH} NOT LIKE ?"
+        // IS_PENDING rows are in flight — a half-written clip while the muxer runs, or a still the
+        // darkroom is still developing. MediaStore hides them from every other gallery this way,
+        // and the roll is the real camera roll, so it does the same: a broken cell with no
+        // duration and a thumbnail decode of a partial file is worse than the row simply not being
+        // there yet. The row appears the instant it is finalised, which is the only moment it is
+        // worth showing.
+        val done = "${MediaStore.MediaColumns.IS_PENDING} = 0"
         val selection = when (scope) {
-            RollScope.Camera -> "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND $hide"
+            RollScope.Camera -> "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND $hide AND $done"
             // Starred photographs can be anywhere, so the query is the wide one and the narrowing
             // happens after.
-            RollScope.Everything, RollScope.Favourites, RollScope.Map -> hide
+            RollScope.Everything, RollScope.Favourites, RollScope.Map -> "$hide AND $done"
         }
         val args = when (scope) {
             RollScope.Camera -> arrayOf("DCIM/%", "$STRIP_PATH%")
