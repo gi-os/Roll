@@ -79,6 +79,7 @@ import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Zooms
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
+import com.gios.lightcamera.filter.Filters
 import android.graphics.RenderEffect
 import android.os.SystemClock
 import com.gios.lightcamera.filter.ShaderRuntime
@@ -100,7 +101,11 @@ import kotlin.math.abs
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.random.Random
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /** How wide the strips of chrome down the left edge are. */
 private val BAND = 54.dp
@@ -179,6 +184,7 @@ fun CameraScreen(
     var gridOpen by remember { mutableStateOf(false) }
     var modeOpen by remember { mutableStateOf(false) }
     var puriOpen by remember { mutableStateOf(false) }
+    var moshOpen by remember { mutableStateOf(false) }
     val openStrip by vm.strip.collectAsState()
     val evOpen = openStrip == Strip.Exposure
     val zoomOpen = openStrip == Strip.Zoom
@@ -192,6 +198,7 @@ fun CameraScreen(
             modeOpen = false
             gridOpen = false
             puriOpen = false
+            moshOpen = false
             presetOpen = false
         }
     }
@@ -299,6 +306,7 @@ fun CameraScreen(
     val puriEyes by vm.prefs.puriEyes.collectAsState()
     val puriChin by vm.prefs.puriChin.collectAsState()
     val puriSlim by vm.prefs.puriSlim.collectAsState()
+    val moshModeId by vm.prefs.moshMode.collectAsState()
     val simpleOffered by vm.prefs.simpleMode.collectAsState()
     val puriSeed by vm.puriSeed.collectAsState()
     // Which way up the photograph will be, from the same number the shutter uses.
@@ -432,7 +440,7 @@ fun CameraScreen(
     val oneStepPerGesture = channelWheel && (picking || channel == Channel.Filter) ||
         !channelWheel && bareDial == DialAction.Filter
     WheelTurns(
-        active = active && wheelEnabled && !puriOpen &&
+        active = active && wheelEnabled && !puriOpen && !moshOpen &&
             (channelWheel || bareDial != DialAction.Nothing),
         armed = !oneStepPerGesture,
     ) { notches ->
@@ -450,7 +458,7 @@ fun CameraScreen(
     // wheel held in — so there is nothing here to protect against, and locking it would take
     // exposure away from the one turn that was never the problem.
     WheelTurns(
-        active = active && wheelEnabled && !puriOpen && heldDial != DialAction.Nothing,
+        active = active && wheelEnabled && !puriOpen && !moshOpen && heldDial != DialAction.Nothing,
         armed = heldDial != DialAction.Filter,
         pressed = true,
     ) { notches ->
@@ -566,26 +574,31 @@ fun CameraScreen(
                             Chevron(pointingUp = modeOpen)
                         }
                         Spacer(Modifier.weight(1f))
-                        // The Purikura chip, and only while Purikura is on. It opens the menu rather
-                        // than stepping the frame: there are fourteen frames, two kinds of sticker, a
-                        // date and a strip layout behind it, and a chip that cycled one of those and
-                        // hid the rest would be a worse version of both.
-                        if (liveFilter.facesAware) {
+                        // The options chip, and only while a filter with options is on. It opens the
+                        // menu rather than stepping the option: there are fourteen frames, two kinds
+                        // of sticker, a date and a strip layout behind Purikura, and eleven datamosh
+                        // looks behind Datamosh, and a chip that cycled one of those and hid the
+                        // rest would be a worse version of both.
+                        val moshOptions = liveFilter.id == com.gios.lightcamera.filter.Filters.datamosh.id
+                        if (liveFilter.facesAware || moshOptions) {
                             Row(
                                 modifier = Modifier
-                                    .lightClickable { puriOpen = !puriOpen }
+                                    .lightClickable {
+                                        if (moshOptions) moshOpen = !moshOpen else puriOpen = !puriOpen
+                                    }
                                     .padding(horizontal = 6.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 LightText(
                                     // "Options", because that is what is behind it: a frame, two kinds of
-                                    // sticker, a date, a strip and five parts of the look.
+                                    // sticker, a date, a strip and five parts of the look — or, for
+                                    // Datamosh, the eleven looks it can be.
                                     text = "OPTIONS",
                                     variant = LightTextVariant.Button,
                                     align = TextAlign.Center,
                                 )
                                 Spacer(Modifier.width(7.dp))
-                                Chevron(pointingUp = puriOpen)
+                                Chevron(pointingUp = if (moshOptions) moshOpen else puriOpen)
                             }
                             Spacer(Modifier.weight(1f))
                         }
@@ -669,7 +682,7 @@ fun CameraScreen(
                             vm.onViewSized(it.width, it.height)
                         }
                         .viewfinderGestures(
-                            enabled = active && !puriOpen,
+                            enabled = active && !puriOpen && !moshOpen,
                             onTapFocus = { x, y ->
                                 // A buzz for the *ask*. The buzz and beep for the lens landing
                                 // come off the camera's own AF result, in the view model.
@@ -775,7 +788,7 @@ fun CameraScreen(
                     luma = rememberLuma(
                         engine = engine,
                         active = active && (histogramOn || clippingOn) &&
-                            !puriOpen && !gridOpen && !modeOpen && held == null,
+                            !puriOpen && !moshOpen && !gridOpen && !modeOpen && held == null,
                     ),
                     histogram = histogramOn,
                     clipping = clippingOn,
@@ -1021,6 +1034,16 @@ fun CameraScreen(
                 onChin = { vm.prefs.setPuriChin(!puriChin) },
                 onSlim = { vm.prefs.setPuriSlim(!puriSlim) },
                 onClose = { puriOpen = false },
+            )
+        }
+
+        if (moshOpen) {
+            MoshMenu(
+                previewView = previewView,
+                turn = turn,
+                modeId = moshModeId,
+                onMode = { vm.prefs.setMoshMode(it) },
+                onClose = { moshOpen = false },
             )
         }
 
@@ -1511,6 +1534,149 @@ private fun PuriMenu(
                 )
             }
         }
+    }
+}
+
+/**
+ * Datamosh's options, in the same shape as [PuriMenu]: one dial position, the looks it can be
+ * picked inside it, and a sample of what you are about to get.
+ *
+ * The rows are the real shaders run over a grabbed frame — the same call the photograph makes,
+ * the way [puriTile] is the same call for the frames. They are not illustrations of the modes,
+ * they are the modes.
+ */
+@Composable
+private fun MoshMenu(
+    previewView: PreviewView,
+    turn: Int,
+    modeId: String,
+    onMode: (String) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colours = LightThemeTokens.colors
+    var tiles by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
+
+    LaunchedEffect(previewView, turn) {
+        val renderer = withContext(Dispatchers.Default) {
+            ShaderRuntime.Offscreen(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
+        }
+        try {
+            // One frame, eleven shaders. Same grab the grid uses: small, unfiltered, cheap.
+            val source = previewView.grabFrame(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
+            if (source != null) {
+                val seed = Random.nextFloat() * 1000f
+                tiles = withContext(Dispatchers.Default) {
+                    Filters.moshModes.associate { mode ->
+                        val filter = Filters.forMosh(Filters.datamosh, mode)
+                        val bitmap = renderer?.render(source, filter, seed, turn = turn / 90) ?: source
+                        mode.id to bitmap.asImageBitmap()
+                    }
+                }
+            }
+        } finally {
+            withContext(Dispatchers.Default) { renderer?.close() }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colours.background)
+            // Eats every touch: the swipe down to the roll is a drag on a pager two levels up, and a
+            // background does not stop one.
+            .swallowTaps(),
+    ) {
+        HeldSideways {
+            Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LightText("DATAMOSH", LightTextVariant.Detail)
+                        Spacer(Modifier.weight(1f))
+                        ChromeIcon(icon = LightIcons.Close, lighten = true, onClick = onClose)
+                    }
+                    MoshPicker(tiles = tiles, chosen = modeId, onPick = onMode)
+                    Spacer(Modifier.weight(1f))
+                    LightText(
+                        "The look is remembered, like Purikura's frame — it is what Datamosh means until you change it.",
+                        LightTextVariant.Superfine,
+                        lighten = true,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                MoshSample(tiles = tiles, modeId = modeId)
+            }
+        }
+    }
+}
+
+/** One row per look: the shader over a grabbed frame, and the name. */
+@Composable
+private fun MoshPicker(
+    tiles: Map<String, ImageBitmap>,
+    chosen: String,
+    onPick: (String) -> Unit,
+) {
+    val colours = LightThemeTokens.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Filters.moshModes.forEach { mode ->
+            val here = mode.id == chosen
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .lightClickable { onPick(mode.id) }
+                    .background(if (here) colours.content else Color.Transparent)
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val tile = tiles[mode.id]
+                if (tile != null) {
+                    Image(
+                        bitmap = tile,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.width(26.dp).height(35.dp),
+                    )
+                    Spacer(Modifier.width(9.dp))
+                }
+                LightText(
+                    text = mode.label,
+                    variant = LightTextVariant.Copy,
+                    color = if (here) colours.background else colours.content,
+                )
+            }
+        }
+    }
+}
+
+/** The chosen look, as large as the panel allows. */
+@Composable
+private fun MoshSample(tiles: Map<String, ImageBitmap>, modeId: String) {
+    val sample = tiles[modeId]
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(124.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (sample != null) {
+            Image(
+                bitmap = sample,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        }
+        LightText(
+            text = "MOSH",
+            variant = LightTextVariant.Micro,
+            lighten = true,
+            modifier = Modifier.padding(top = 3.dp),
+        )
     }
 }
 

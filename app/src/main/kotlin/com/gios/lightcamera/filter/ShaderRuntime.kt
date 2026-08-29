@@ -36,11 +36,15 @@ object ShaderRuntime {
     private const val TAG = "ShaderRuntime"
 
     /**
-     * Compiled shaders, by filter id. Compilation is not free and the filter grid asks for
-     * fifteen of them several times a second.
+     * Compiled shaders, keyed by their source. Compilation is not free and the filter grid asks
+     * for fifteen of them several times a second.
      *
      * A `RuntimeShader`'s uniforms are mutable state on the object, so callers must set
      * `size` and `seed` before every use rather than assuming what the last caller left.
+     *
+     * **Keyed by [Filters.Filter.source], not id.** Datamosh is one dial position whose look is
+     * picked inside it — `Filters.forMosh` hands back different shaders that all claim the id
+     * `"datamosh"` — so a cache keyed by id would give every mode the first mode compiled.
      */
     private val compiled = HashMap<String, RuntimeShader>()
 
@@ -58,11 +62,11 @@ object ShaderRuntime {
         cache: MutableMap<String, RuntimeShader>,
     ): RuntimeShader? {
         val source = filter.source ?: return null
-        cache[filter.id]?.let { return it }
+        cache[source]?.let { return it }
         val made = runCatching { RuntimeShader(source) }
             .onFailure { Log.e(TAG, "AGSL failed to compile for ${filter.id}", it) }
             .getOrNull() ?: return null
-        cache[filter.id] = made
+        cache[source] = made
         return made
     }
 

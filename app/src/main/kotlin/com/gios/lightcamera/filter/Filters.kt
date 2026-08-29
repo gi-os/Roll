@@ -1396,6 +1396,57 @@ half4 main(float2 xy) {
     val datamosh = Filter("datamosh", "Datamosh", DATAMOSH, turnAware = true)
 
     /**
+     * A selectable datamosh look, and its shader.
+     *
+     * Datamosh is one dial position whose look is picked inside it, the way Purikura is one
+     * dial position whose frame, date and stickers are picked inside it. Each of these is a
+     * `Filter` with [Filter.id] `"datamosh"` so the wheel, the preferences and the capture
+     * path all keep treating it as the same slot — only the shader that slot runs differs.
+     */
+    data class MoshMode(
+        val id: String,
+        val label: String,
+        val agsl: String,
+        val turnAware: Boolean = false,
+    )
+
+    /**
+     * The looks Datamosh can be. First is the classic smear [DATAMOSH] itself, then the
+     * datamosh.js mode library as ported shaders. `abna` and `schifty` are not here: they
+     * rearrange the *buffer* rather than the pixels and cannot be a per-pixel shader.
+     */
+    val moshModes: List<MoshMode> = listOf(
+        MoshMode("classic", "Classic", DATAMOSH, turnAware = true),
+        MoshMode("vaporwave", "Vaporwave", VAPORWAVE),
+        MoshMode("fatcat", "Fatcat", FATCAT),
+        MoshMode("vana", "Vana", VANA),
+        MoshMode("walter", "Walter", WALTER),
+        MoshMode("gazette", "Gazette", GAZETTE),
+        MoshMode("castles", "Castles", CASTLES),
+        MoshMode("veneneux", "Veneneux", VENENEUX, turnAware = true),
+        MoshMode("void", "Void", VOID),
+        MoshMode("blurbobb", "Blurbobb", BLURBOBB),
+        MoshMode("chimera", "Chimera", CHIMERA, turnAware = true),
+        MoshMode("manticore", "Manticore", MANTICORE, turnAware = true),
+    )
+
+    fun moshById(id: String?): MoshMode = moshModes.firstOrNull { it.id == id } ?: moshModes.first()
+
+    /**
+     * The datamosh slot wearing the chosen [MoshMode], or [filter] unchanged.
+     *
+     * The same shape as [forGrade]: the dial position's identity is fixed, and the shader it
+     * runs is resolved wherever a filter is about to be rendered. Everything downstream — the
+     * viewfinder, the shutter, the filter grid — keeps treating it as one opaque `Filter`.
+     */
+    fun forMosh(filter: Filter, mode: MoshMode): Filter =
+        if (filter.id == datamosh.id) {
+            Filter("datamosh", "Datamosh", mode.agsl, turnAware = mode.turnAware)
+        } else {
+            filter
+        }
+
+    /**
      * Which filter to actually run.
      *
      * The only place the [none] / [preset] pair is resolved. Call it wherever a filter is about to
@@ -1414,12 +1465,13 @@ half4 main(float2 xy) {
      * the plain photograph and overshooting by a single click landed on the one filter that
      * deliberately damages the file, and it was being switched on by accident (light-reports#27).
      *
-     * It is now at index 11 of thirty-three, which is as far from Preset as any entry can be: eleven
-     * notches forwards and twenty-two back. Nothing else moved, and the wrap stayed — a physical dial
+     * It is now at index 11 of twenty-two, which is as far from Preset as any entry can be: eleven
+     * notches forwards and eleven back. Nothing else moved, and the wrap stayed — a physical dial
      * should never dead-end, and special-casing the step to refuse one neighbour would have made
-     * the wheel feel broken to fix an ordering problem. The datamosh.js modes that joined it in the
-     * list below cluster right after it for the same reason: they are all looks you would not shoot
-     * with, so they walk no closer to Preset either.
+     * the wheel feel broken to fix an ordering problem. The datamosh.js modes are not dial
+     * positions of their own — Datamosh is one slot and the look is picked inside it, the way
+     * Purikura's frame and date are — so they add nothing to this walk, and the one entry stays
+     * exactly where it is.
      */
     val all: List<Filter> = listOf(
         none,
@@ -1434,20 +1486,6 @@ half4 main(float2 xy) {
         Filter("gbcolor", "GB Color", GB_COLOR, lowRes = true),
         Filter("comic", "Comic", COMIC),
         datamosh,
-        // The datamosh.js mode library, ported to shaders. These are all looks you would
-        // not shoot with, so they cluster with Datamosh rather than walking any closer to
-        // Preset; see the note on [datamosh]'s placement.
-        Filter("vaporwave", "Vaporwave", VAPORWAVE),
-        Filter("fatcat", "Fatcat", FATCAT),
-        Filter("vana", "Vana", VANA),
-        Filter("walter", "Walter", WALTER),
-        Filter("gazette", "Gazette", GAZETTE),
-        Filter("castles", "Castles", CASTLES),
-        Filter("veneneux", "Veneneux", VENENEUX, turnAware = true),
-        Filter("void", "Void", VOID),
-        Filter("blurbobb", "Blurbobb", BLURBOBB),
-        Filter("chimera", "Chimera", CHIMERA, turnAware = true),
-        Filter("manticore", "Manticore", MANTICORE, turnAware = true),
         Filter("purikura", "Purikura", PURIKURA, animated = true, facesAware = true),
         Filter("thermal", "Thermal", THERMAL),
         Filter("xray", "X-Ray", X_RAY),

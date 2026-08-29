@@ -77,6 +77,7 @@ fun FilterGrid(
     val colours = LightThemeTokens.colors
     val current by vm.filter.collectAsState()
     val grade by vm.prefs.grade.collectAsState()
+    val moshModeId by vm.prefs.moshMode.collectAsState()
     val order by vm.prefs.filterOrder.collectAsState()
     val off by vm.prefs.filtersOff.collectAsState()
     // The dial as the user arranged it in settings, not the whole catalog. The grid and the wheel
@@ -88,7 +89,7 @@ fun FilterGrid(
     val turn by vm.engine.previewRotation.collectAsState()
     var frames by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
-    LaunchedEffect(previewView, grade, dial, turn) {
+    LaunchedEffect(previewView, grade, moshModeId, dial, turn) {
         val renderer = withContext(Dispatchers.Default) {
             ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
         }
@@ -100,8 +101,12 @@ fun FilterGrid(
                     val rendered = withContext(Dispatchers.Default) {
                         dial.associate { entry ->
                             // Resolved here too, or the Preset cell would be the one tile in the
-                            // grid showing you something other than what picking it would give you.
-                            val filter = Filters.forGrade(entry, grade)
+                            // grid showing you something other than what picking it would give you —
+                            // and the Datamosh cell would keep showing Classic after you changed it.
+                            val filter = Filters.forMosh(
+                                Filters.forGrade(entry, grade),
+                                Filters.moshById(moshModeId),
+                            )
                             val bitmap = if (filter.agsl == null) {
                                 source
                             } else {
@@ -238,7 +243,7 @@ private fun SelectionBrackets(modifier: Modifier) {
  * the camera's surface directly. So the grid can show fifteen filters of the same frame
  * without any of them being applied twice.
  */
-private fun PreviewView.grabFrame(width: Int, height: Int): Bitmap? {
+internal fun PreviewView.grabFrame(width: Int, height: Int): Bitmap? {
     val texture = findTextureView(this)
     if (texture != null && texture.isAvailable) {
         return runCatching { texture.getBitmap(width, height) }.getOrNull()
@@ -246,7 +251,7 @@ private fun PreviewView.grabFrame(width: Int, height: Int): Bitmap? {
     return runCatching { bitmap }.getOrNull()
 }
 
-private fun findTextureView(group: ViewGroup): TextureView? {
+internal fun findTextureView(group: ViewGroup): TextureView? {
     for (i in 0 until group.childCount) {
         val child = group.getChildAt(i)
         if (child is TextureView) return child
@@ -263,6 +268,10 @@ private fun findTextureView(group: ViewGroup): TextureView? {
  * whereas fifteen sharp ones cost three times the fill rate. Six frames a second is fast
  * enough to see yourself move, which is all the grid has to prove.
  */
-private const val CELL_PX_W = 108
-private const val CELL_PX_H = 144
-private const val FRAME_MS = 160L
+internal const val CELL_PX_W = 108
+internal const val CELL_PX_H = 144
+internal const val FRAME_MS = 160L
+
+/** The mosh menu's thumbnails: a little larger than the grid's cells, still a postage stamp. */
+internal const val MOSH_SAMPLE_W = 150
+internal const val MOSH_SAMPLE_H = 200

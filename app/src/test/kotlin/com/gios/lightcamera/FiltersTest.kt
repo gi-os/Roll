@@ -24,8 +24,15 @@ class FiltersTest {
      * it was the one shader no structural check here ever looked at, which is exactly the shader
      * you least want unchecked: it is the default filter, so a brace out of place in it would take
      * out the app's most-used position rather than its least.
+     *
+     * The datamosh looks are the same story one level down: they live in [Filters.moshModes], not
+     * in [Filters.all], so they have to be resolved into the Datamosh slot here for the structural
+     * checks to see them at all.
      */
-    private val shaders = (Filters.all + Filters.preset).filter { it.agsl != null }
+    private val shaders = (
+        Filters.all + Filters.preset +
+            Filters.moshModes.map { Filters.forMosh(Filters.datamosh, it) }
+        ).filter { it.agsl != null }
 
     @Test
     fun `ids are unique`() {
@@ -243,7 +250,7 @@ class FiltersTest {
     @Test
     fun `the directional filters know which way up the world is`() {
         assertEquals(
-            listOf("datamosh", "veneneux", "chimera", "manticore", "mirror", "kaleido"),
+            listOf("datamosh", "mirror", "kaleido"),
             Filters.all.filter { it.turnAware }.map { it.id },
         )
         Filters.all.filter { it.turnAware }.forEach { filter ->
@@ -263,6 +270,36 @@ class FiltersTest {
                 "SHADER works upright but is not flagged turnAware: " + filter.id,
                 !body.contains("toUp(") && !body.contains("fromUp(") &&
                     !body.contains("tapUp(") && !body.contains("upSize("),
+            )
+        }
+    }
+
+    /**
+     * The datamosh looks live inside the one Datamosh slot, so the turnAware rules above —
+     * which walk [Filters.all] — never see them. Same two checks, over [Filters.moshModes].
+     */
+    @Test
+    fun `every datamosh look resolves to a shader`() {
+        Filters.moshModes.forEach { mode ->
+            val resolved = Filters.forMosh(Filters.datamosh, mode)
+            assertTrue("mosh mode ${mode.id} has no shader", resolved.agsl != null)
+            assertTrue("mosh mode ${mode.id} lost the datamosh id", resolved.id == "datamosh")
+        }
+    }
+
+    @Test
+    fun `the directional datamosh looks know which way up the world is`() {
+        Filters.moshModes.filter { it.turnAware }.forEach { mode ->
+            assertTrue(
+                "MOSH SHADER is turn-aware but never reads the frame's turn: " + mode.id,
+                mode.agsl.contains("toUp(") || mode.agsl.contains("upSize("),
+            )
+        }
+        Filters.moshModes.filterNot { it.turnAware }.forEach { mode ->
+            assertTrue(
+                "MOSH SHADER works upright but is not flagged turnAware: " + mode.id,
+                !mode.agsl.contains("toUp(") && !mode.agsl.contains("fromUp(") &&
+                    !mode.agsl.contains("tapUp(") && !mode.agsl.contains("upSize("),
             )
         }
     }

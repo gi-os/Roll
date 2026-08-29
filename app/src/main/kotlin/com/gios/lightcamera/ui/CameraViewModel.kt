@@ -1275,8 +1275,23 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * always meant. Resolving in one place is what stops the preview and the file disagreeing about
      * whether there is a shader to run.
      */
+    /**
+     * The filter the dial position [id] actually is, with the persisted grade and datamosh look.
+     *
+     * The one place [Filters.forGrade] and [Filters.forMosh] are both resolved, so the preview,
+     * the shutter and the capture all agree about what a slot means. Datamosh is one dial
+     * position whose shader is chosen inside it, so this reads `prefs.moshMode` — the same way
+     * Purikura reads its frame and stickers at render time, except here the choice swaps the
+     * whole shader rather than a uniform.
+     */
+    private fun resolveFilter(id: String, grade: Grade): Filters.Filter =
+        Filters.forMosh(
+            Filters.forGrade(Filters.byId(id), grade),
+            Filters.moshById(prefs.moshMode.value),
+        )
+
     private val _filter = MutableStateFlow(
-        Filters.forGrade(Filters.byId(prefs.filterId.value), prefs.grade.value),
+        resolveFilter(prefs.filterId.value, prefs.grade.value),
     )
     val filter: StateFlow<Filters.Filter> = _filter.asStateFlow()
 
@@ -1369,7 +1384,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             // set after construction, and a user changing the filter in the grid mid-request
             // must not leak into somebody else's photograph either.
             prefs.filterId.collect { id ->
-                if (!filterLocked) _filter.value = Filters.forGrade(Filters.byId(id), prefs.grade.value)
+                if (!filterLocked) _filter.value = resolveFilter(id, prefs.grade.value)
             }
         }
         // Turning an adjustment has to change the viewfinder in the same frame, and on the first
@@ -1379,7 +1394,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.grade.collect { grade ->
                 if (filterLocked) return@collect
-                _filter.value = Filters.forGrade(Filters.byId(prefs.filterId.value), grade)
+                _filter.value = resolveFilter(prefs.filterId.value, grade)
+            }
+        }
+        // Picking a datamosh look swaps the shader the one Datamosh slot runs, which is a change
+        // of filter for the same reason a grade is — the preview's `LaunchedEffect` keys on it.
+        viewModelScope.launch {
+            prefs.moshMode.collect { _ ->
+                if (filterLocked) return@collect
+                _filter.value = resolveFilter(prefs.filterId.value, prefs.grade.value)
             }
         }
         viewModelScope.launch {

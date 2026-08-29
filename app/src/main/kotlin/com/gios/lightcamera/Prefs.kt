@@ -281,6 +281,16 @@ class Prefs(context: Context) {
     val filterId: StateFlow<String> = _filterId.asStateFlow()
 
     /**
+     * Which datamosh look the one Datamosh slot wears.
+     *
+     * Datamosh is a single dial position whose look is picked inside it, the way Purikura's
+     * frame and date are — so this is persisted, like those, rather than being a decision about
+     * one photograph. Defaults to the first [Filters.MoshMode], the classic smear.
+     */
+    private val _moshMode = MutableStateFlow(Filters.moshModes.first().id)
+    val moshMode: StateFlow<String> = _moshMode.asStateFlow()
+
+    /**
      * Which filters are on the dial, and in what order. **This one is persisted** — and the
      * contrast with [filterId] above is the point, not an inconsistency.
      *
@@ -927,6 +937,8 @@ class Prefs(context: Context) {
 
     fun setPuriSlim(value: Boolean) = set(_puriSlim, value) { putBoolean(PURI_SLIM, value) }
 
+    fun setMoshMode(value: String) = set(_moshMode, value) { putString(MOSH_MODE, value) }
+
     fun setStampPlain(value: Boolean) = set(_stampPlain, value) { putBoolean(STAMP_PLAIN, value) }
 
     fun setStampFiltered(value: Boolean) =
@@ -973,6 +985,7 @@ class Prefs(context: Context) {
         const val PURI_FACE = "puriFace"
         const val PURI_MARGIN = "puriMargin"
         const val PURI_WASH = "puriWash"
+        const val MOSH_MODE = "moshMode"
         const val PURI_SKIN = "puriSkin"
         const val PURI_EYES = "puriEyes"
         const val PURI_CHIN = "puriChin"
