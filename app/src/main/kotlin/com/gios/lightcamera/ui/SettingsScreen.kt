@@ -33,6 +33,8 @@ import com.gios.lightcamera.SelfTimer
 import com.gios.lightcamera.StampStyle
 import com.gios.lightcamera.camera.AfMode
 import com.gios.lightcamera.camera.FrameAspect
+import com.gios.lightcamera.camera.PuriArt
+import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.filter.Filters
 import com.gios.lightcamera.hw.Binding
 import com.gios.lightcamera.hw.CameraKeyAdvice
@@ -462,9 +464,10 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context) {
 
     Section("Purikura") {
         Note(
-            "Purikura has its own menu, in the viewfinder: choose Purikura on the wheel and tap OPTIONS in the band. The frame, the two kinds of sticker, the date and the four-shot strip are all in there, next to the picture they change. Every one of them is rolled at random when the app starts — a booth does not remember what you chose last week — so nothing here is kept between launches.",
+            "The same controls as the viewfinder's Purikura menu — choose Purikura on the wheel and tap OPTIONS to change the frame, stickers, date and strip next to the picture. Everything here is remembered between launches: set it once, and the booth keeps it.",
         )
     }
+    PurikuraList(vm)
 
     Section("Colour") {
         Note(
@@ -893,6 +896,67 @@ private fun FilterRow(
         Arrow("↑", enabled = !atTop, onTap = onUp)
         Arrow("↓", enabled = !atBottom, onTap = onDown)
     }
+}
+
+/**
+ * The purikura switches, mirroring the viewfinder's OPTIONS menu: frame, the two sticker kinds,
+ * date, four-shot, and the five look filters. Everything is persisted — the old note claiming
+ * "nothing here is kept between launches" was a lie from before the prefs were written down.
+ */
+@Composable
+private fun PurikuraList(vm: CameraViewModel) {
+    val frameId by vm.prefs.puriFrame.collectAsState()
+    val faceStickers by vm.prefs.puriFaceStickers.collectAsState()
+    val marginStickers by vm.prefs.puriMarginStickers.collectAsState()
+    val dateId by vm.prefs.puriDate.collectAsState()
+    val stripId by vm.prefs.puriStrip.collectAsState()
+    val wash by vm.prefs.puriWash.collectAsState()
+    val skin by vm.prefs.puriSkin.collectAsState()
+    val eyes by vm.prefs.puriEyes.collectAsState()
+    val chin by vm.prefs.puriChin.collectAsState()
+    val slim by vm.prefs.puriSlim.collectAsState()
+
+    val frameOptions = listOf(PuriArt.RANDOM to "Random") +
+        PuriArt.frames.map { it.id to it.label }
+    val dateOptions = listOf(PuriArt.RANDOM to "Random", PuriArt.OFF to "Off") +
+        PuriArt.dates.map { it.id to it.label }
+    val stripOptions = listOf(PuriStrip.OFF to "Off", PuriArt.RANDOM to "Random") +
+        PuriStrip.layouts.drop(1).map { it.id to it.label }
+
+    Setting("Frame", labelFor(frameId, frameOptions)) {
+        vm.prefs.setPuriFrame(nextAfter(frameId, frameOptions))
+    }
+    Setting("Face stickers", if (faceStickers) "On" else "Off") {
+        vm.prefs.setPuriFaceStickers(!faceStickers)
+    }
+    Setting("Margin stickers", if (marginStickers) "On" else "Off") {
+        vm.prefs.setPuriMarginStickers(!marginStickers)
+    }
+    Setting("Date", labelFor(dateId, dateOptions)) {
+        vm.prefs.setPuriDate(nextAfter(dateId, dateOptions))
+    }
+    Setting("Four-shot", labelFor(stripId, stripOptions)) {
+        vm.prefs.setPuriStrip(nextAfter(stripId, stripOptions))
+    }
+    Setting("Pink wash", if (wash) "On" else "Off") { vm.prefs.setPuriWash(!wash) }
+    Setting("Skin", if (skin) "On" else "Off") { vm.prefs.setPuriSkin(!skin) }
+    Setting("Bigger eyes", if (eyes) "On" else "Off") { vm.prefs.setPuriEyes(!eyes) }
+    Setting("Narrow chin", if (chin) "On" else "Off") { vm.prefs.setPuriChin(!chin) }
+    Setting("Smaller face", if (slim) "On" else "Off") { vm.prefs.setPuriSlim(!slim) }
+}
+
+/** "Random", "Off", or the label of whatever was chosen. */
+private fun labelFor(id: String, options: List<Pair<String, String>>): String = when (id) {
+    PuriArt.RANDOM -> "Random"
+    PuriArt.OFF -> "Off"
+    else -> options.firstOrNull { it.first == id }?.second ?: "Random"
+}
+
+/** The option after [id] in [options], wrapping around the end. */
+private fun nextAfter(id: String, options: List<Pair<String, String>>): String {
+    val i = options.indexOfFirst { it.first == id }
+    val next = if (i < 0) 0 else (i + 1) % options.size
+    return options[next].first
 }
 
 @Composable
