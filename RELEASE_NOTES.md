@@ -1,3 +1,19 @@
+## Roll v2.94 — choose your filters, all of them, on the beach
+
+**Filter picker in Look settings.** Look → View Filters now opens the full filter list — every look,
+not just the ones on the wheel — so you can see them all and switch any of them on or off any time
+you want. Each page swipes to the next and renders on a photo the camera knows: a copy of that beach
+shot, put through the real filter, live, on the phone. Tap a page to turn that filter off (or back
+on). Your choices are saved the moment you make them, and the wheel and Photo Booth grid follow.
+
+**Shows itself when there's nothing saved.** A fresh install — or a filter reset — has no filter
+choice on the device, so Roll can't know what you want yet. In that case the picker offers itself
+on first launch, then gets out of the way once you've decided. You can always get back to it from
+Look settings.
+
+**Void is gone.** It never looked like anything, so it's removed for good — one less name on the
+wheel and in the picker.
+
 ## Roll v2.93 — the ladder behaves, the heavy filters keep the wheel
 
 **The ladder comes and goes on its own terms.** Three seconds after you stop touching the dial the

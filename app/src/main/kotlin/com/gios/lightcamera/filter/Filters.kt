@@ -1424,7 +1424,6 @@ half4 main(float2 xy) {
         MoshMode("gazette", "Gazette", GAZETTE),
         MoshMode("castles", "Castles", CASTLES),
         MoshMode("veneneux", "Veneneux", VENENEUX, turnAware = true),
-        MoshMode("void", "Void", VOID),
         MoshMode("blurbobb", "Blurbobb", BLURBOBB),
         MoshMode("chimera", "Chimera", CHIMERA, turnAware = true),
         MoshMode("manticore", "Manticore", MANTICORE, turnAware = true),

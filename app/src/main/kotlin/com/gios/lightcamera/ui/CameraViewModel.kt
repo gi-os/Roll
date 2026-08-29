@@ -32,6 +32,7 @@ import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.FaceTune
 import com.gios.lightcamera.filter.Filters
+import com.gios.lightcamera.filter.Grade
 import com.gios.lightcamera.filter.ShaderRuntime
 import com.gios.lightcamera.hw.Beeps
 import com.gios.lightcamera.hw.Binding

@@ -337,6 +337,26 @@ class Prefs(context: Context) {
     fun resetFilters() {
         set(_filterOrder, emptyList()) { remove(FILTER_ORDER) }
         set(_filtersOff, emptySet()) { remove(FILTERS_OFF) }
+        set(_filtersPicked, false) { remove(FILTERS_PICKED) }
+    }
+
+    /**
+     * Whether the user has ever made a filter choice (or dismissed the picker).
+     *
+     * **A fresh install has no saved filter config**, so Roll cannot tell "all filters on,
+     * by default" from "the user has deliberately not chosen yet" — and the Look → Filters
+     * picker is how a new camera decides what it carries. Absent this flag, the picker
+     * offers itself on first launch (after permissions), then never again unless the user
+     * opens it from Look settings. Marked on close, not on toggle: dismissing it without
+     * touching anything is still a decision, and a picker that re-appears every launch is
+     * the one that gets closed without being read.
+     */
+    private val _filtersPicked = MutableStateFlow(prefs.getBoolean(FILTERS_PICKED, false))
+    val filtersPicked: StateFlow<Boolean> = _filtersPicked.asStateFlow()
+
+    fun markFiltersPicked() {
+        if (_filtersPicked.value) return
+        set(_filtersPicked, true) { putBoolean(FILTERS_PICKED, true) }
     }
 
     private fun readLines(key: String): List<String> =
@@ -1005,6 +1025,7 @@ class Prefs(context: Context) {
         const val RECENT_RECIPIENTS = "recentRecipients"
         const val FILTER_ORDER = "filterOrder"
         const val FILTERS_OFF = "filtersOff"
+        const val FILTERS_PICKED = "filtersPicked"
         const val HISTOGRAM = "histogram"
         const val CLIPPING = "clipping"
         const val BURST = "burst"

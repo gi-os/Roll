@@ -139,6 +139,17 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
 
     var viewing by remember { mutableStateOf<Photo?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var filterPickerOpen by remember { mutableStateOf(false) }
+
+    // Choose the filters once, up front. The picker shows itself whenever no filter choice
+    // has been saved to the device — a fresh install, or a reset — so the wheel always
+    // starts as a decision the user actually made, never a default they have to discover.
+    // Keyed on the flag as well as permission: after the picker closes, closing marks the
+    // choice as made (so it does not re-open); after a reset clears the flag, it opens again.
+    val filtersPicked by vm.prefs.filtersPicked.collectAsState()
+    LaunchedEffect(cameraGranted, filtersPicked) {
+        if (cameraGranted && !filtersPicked) filterPickerOpen = true
+    }
 
     /**
      * The photographs waiting for a recipient.
@@ -217,7 +228,22 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
         }
 
         AnimatedVisibility(visible = settingsOpen, enter = fadeIn(), exit = fadeOut()) {
-            SettingsScreen(vm = vm, onClose = { settingsOpen = false })
+            SettingsScreen(
+                vm = vm,
+                onClose = { settingsOpen = false },
+                onOpenFilterPicker = { filterPickerOpen = true },
+            )
+        }
+
+        // Above settings, so the picker can be opened from Look and drawn over it.
+        AnimatedVisibility(visible = filterPickerOpen, enter = fadeIn(), exit = fadeOut()) {
+            FilterPickerScreen(
+                vm = vm,
+                onClose = {
+                    filterPickerOpen = false
+                    vm.prefs.markFiltersPicked()
+                },
+            )
         }
 
         // Above the viewer, so sending from a photograph leaves the photograph behind it and

@@ -84,7 +84,7 @@ enum class SettingsTab(val label: String) {
  * Each section now carries a `?`, and what is behind it is unchanged.
  */
 @Composable
-fun SettingsScreen(vm: CameraViewModel, onClose: () -> Unit) {
+fun SettingsScreen(vm: CameraViewModel, onClose: () -> Unit, onOpenFilterPicker: () -> Unit = {}) {
     val colours = LightThemeTokens.colors
     val context = androidx.compose.ui.platform.LocalContext.current
     var tab by remember { mutableStateOf(SettingsTab.Frame) }
@@ -127,7 +127,7 @@ fun SettingsScreen(vm: CameraViewModel, onClose: () -> Unit) {
             when (tab) {
                 SettingsTab.Frame -> FrameTab(vm)
                 SettingsTab.Camera -> CameraTab(vm)
-                SettingsTab.Look -> LookTab(vm, context)
+                SettingsTab.Look -> LookTab(vm, context, onOpenFilterPicker)
                 SettingsTab.Controls -> ControlsTab(vm, context, colours.content, colours.background)
                 SettingsTab.Film -> FilmTab(vm, context, onClose, roll != null)
                 SettingsTab.About -> AboutTab(vm, context, colours.rule)
@@ -427,7 +427,7 @@ private fun CameraTab(vm: CameraViewModel) {
 /* ---------------------------------- look ---------------------------------- */
 
 @Composable
-private fun LookTab(vm: CameraViewModel, context: android.content.Context) {
+private fun LookTab(vm: CameraViewModel, context: android.content.Context, onOpenFilterPicker: () -> Unit) {
     val stampPlain by vm.prefs.stampPlain.collectAsState()
     val stampFiltered by vm.prefs.stampFiltered.collectAsState()
     val stampCoarse by vm.prefs.stampCoarse.collectAsState()
@@ -461,6 +461,7 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context) {
         )
     }
     FilterList(vm)
+    Action("VIEW FILTERS") { onOpenFilterPicker() }
 
     Section("Purikura") {
         Note(
