@@ -154,6 +154,10 @@ fun CameraScreen(
     // Read up here rather than beside the overlay that draws it: the exposure meter below has to
     // know a still is being held, and a `by` declared further down the function is not in scope.
     val held by vm.held.collectAsState()
+    // The wheel's heartbeat for the meter: every channel turn nudges this, so the gauge block
+    // below recomposes on the wheel's own authority and a Shutter or ISO turn (which changes no
+    // other collected state) still moves its needle.
+    val wheelTick by vm.wheelTick.collectAsState()
 
     // Latched across the capture and the save, and true for the shots that hold no frame — the
     // saving bar below reads this rather than `held`, so a flash shot is not a silent wait.
@@ -1091,7 +1095,10 @@ fun CameraScreen(
                                 vm.toggleDialLock()
                             },
                             length = gaugeLength,
-                            enabled = ladderAlpha > 0.5f,
+                            // Gate on the boolean, not the animated alpha: the float flips this key
+                            // at 0.5 mid-fade and restarts the gesture detectors every frame of the
+                            // animation, which swallows the very tap or drag that summoned the ladder.
+                            enabled = ladderVisible,
                         )
                     }
                 }

@@ -446,6 +446,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * are read one at a time. Locked in: the turn adjusts the held channel's value, every notch.
      */
     fun channelTurn(notches: Int) {
+        // Tell the gauge a turn happened even when the channel is Shutter or ISO, whose exposure
+        // state no collected StateFlow observes — otherwise their needles sit still while the
+        // value moves. The counter is the wheel's own heartbeat for the meter.
+        _wheelTick.value = _wheelTick.value + 1
         if (_picking.value) {
             val available = channelsAvailable()
             if (available.isEmpty()) return
@@ -1767,6 +1771,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _ladderVisible = MutableStateFlow(true)
     val ladderVisible: StateFlow<Boolean> = _ladderVisible.asStateFlow()
 
+    // Every wheel turn nudges this counter. The gauge block collects it so the ladder and the
+    // needle recompose on the wheel's own authority, instead of riding on whatever exposure state
+    // happens to be collected above. Shutter and ISO turns changed no collected StateFlow at all,
+    // so on those channels the needle sat still even though the value had moved; one counter for
+    // all channels ends that. Read in the screen; written nowhere else.
+    private val _wheelTick = MutableStateFlow(0L)
+    val wheelTick: StateFlow<Long> = _wheelTick.asStateFlow()
+
     private var ladderHideJob: Job? = null
 
     /** Called on any dial touch: wake the ladder and restart the countdown to its retreat. */
@@ -1777,6 +1789,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             delay(LADDER_IDLE_MS)
             _ladderVisible.value = false
         }
+    }
+
+    // The ladder greets once, then retreats on its own: three seconds after launch with no dial
+    // touch it fades, and every turn since starts the countdown over. Without this first arm it
+    // would sit up forever on a screen nobody touched — the report was "the ladder never hides".
+    init {
+        touchLadder()
     }
 
     /**
