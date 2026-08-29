@@ -243,7 +243,7 @@ class FiltersTest {
     @Test
     fun `the directional filters know which way up the world is`() {
         assertEquals(
-            listOf("datamosh", "mirror", "kaleido"),
+            listOf("datamosh", "veneneux", "chimera", "manticore", "mirror", "kaleido"),
             Filters.all.filter { it.turnAware }.map { it.id },
         )
         Filters.all.filter { it.turnAware }.forEach { filter ->

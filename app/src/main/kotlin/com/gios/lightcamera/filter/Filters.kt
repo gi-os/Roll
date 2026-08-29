@@ -877,6 +877,295 @@ half4 main(float2 xy) {
 """
 
     /**
+     * The datamosh.js modes, ported. [DATAMOSH] draws its own idea of the look; these are
+     * the actual algorithms from the `Datamosh-js/datamosh` library, each one a fragment
+     * shader that reproduces what the library does to a pixel buffer. The two modes that
+     * rearrange the *buffer* rather than the pixels — `abna` reverses and re-rotates the
+     * byte stream and `schifty` concatenates random chunks, both changing the buffer's
+     * length — cannot be a per-pixel shader and are not here. Everything expressible
+     * per-pixel is.
+     */
+
+    /**
+     * The library's five luminance bands become four neon colours; a pixel is only
+     * recoloured when all three of its channels agree on a band, so saturated pixels keep
+     * their own colour — which is half of why the look reads as Vaporwave rather than as a
+     * posterise.
+     */
+    private const val VAPORWAVE = """
+float band(float v) {
+    if (v <= 15.0) return 0.0;
+    if (v <= 60.0) return 1.0;
+    if (v <= 120.0) return 2.0;
+    if (v <= 180.0) return 3.0;
+    if (v <= 234.0) return 4.0;
+    return 5.0;
+}
+
+half4 main(float2 xy) {
+    float3 c = tap(xy);
+    float3 b = c * 255.0;
+    float b0 = band(b.r), b1 = band(b.g), b2 = band(b.b);
+    if (b0 == b1 && b1 == b2) {
+        float3 pal = float3(0.0, 0.0, 0.0);
+        if (b0 == 1.0) pal = float3(0.0, 184.0, 255.0);
+        else if (b0 == 2.0) pal = float3(255.0, 0.0, 193.0);
+        else if (b0 == 3.0) pal = float3(150.0, 0.0, 255.0);
+        else if (b0 == 4.0) pal = float3(0.0, 255.0, 249.0);
+        else if (b0 == 5.0) pal = float3(255.0, 255.0, 255.0);
+        c = pal / 255.0;
+    }
+    return half4(float4(c, 1.0));
+}
+"""
+
+    /**
+     * Four passes of the same 1.4x gain, clamps relaxing 280 → 256 → 255 in the source.
+     * In 0..1 that is gain-to-white either way; written as the four passes so the constant
+     * matches the library and a future tuning pass has somewhere to point.
+     */
+    private const val FATCAT = """
+half4 main(float2 xy) {
+    float3 c = tap(xy);
+    c = min(c * 1.4, float3(1.0));
+    c = min(c * 1.4, float3(1.0));
+    c = min(c * 1.4, float3(1.0));
+    c = min(c * 1.4, float3(1.0));
+    return half4(float4(c, 1.0));
+}
+"""
+
+    /**
+     * `giveSeed` rolled one channel a gain of at least 0.3 and a second one half the time;
+     * each channel is then scaled by its seed and offset with another channel's. The hash
+     * calls are fixed points, so the roll is decided by `seed` and changes per capture the
+     * way `Math.random()` did per run.
+     */
+    private const val VANA = """
+float3 vanaSeed() {
+    float3 s = float3(0.0, 0.0, 0.0);
+    float i1 = floor(hash(float2(17.0, 19.0)) * 3.0);
+    float i2 = floor(hash(float2(23.0, 29.0)) * 3.0);
+    float v1 = max(hash(float2(31.0, 37.0)), 0.3);
+    if (i1 == 0.0) s.x = v1; else if (i1 == 1.0) s.y = v1; else s.z = v1;
+    if (i2 != i1 && hash(float2(41.0, 43.0)) > 0.5) {
+        float v2 = max(hash(float2(47.0, 53.0)), 0.3);
+        if (i2 == 0.0) s.x = v2; else if (i2 == 1.0) s.y = v2; else s.z = v2;
+    }
+    return s;
+}
+
+half4 main(float2 xy) {
+    float3 s = vanaSeed();
+    float3 c = tap(xy) * 255.0;
+    c.r = min(c.r * s.x + 100.0 * s.z, 255.0);
+    c.g = min(c.g * s.y + 100.0 * s.x, 255.0);
+    c.b = min(c.b * s.z + 100.0 * s.y, 255.0);
+    return half4(float4(c / 255.0, 1.0));
+}
+"""
+
+    /**
+     * Random per-channel high/low gates; a channel outside its gate is remapped to
+     * `high - low + value * multiplier`. The library's blue line writes `data[1 + 2]` —
+     * the alpha byte — which is a typo; it is ported here as the blue channel it was
+     * clearly meant to be.
+     */
+    private const val WALTER = """
+half4 main(float2 xy) {
+    float3 h = float3(hash(float2(1.0, 1.0)), hash(float2(1.0, 2.0)), hash(float2(1.0, 3.0))) * 255.0;
+    float3 l = float3(hash(float2(2.0, 1.0)), hash(float2(2.0, 2.0)), hash(float2(2.0, 3.0))) * 255.0;
+    float mx = max(max(max(h.r, max(h.g, h.b)), max(l.r, max(l.g, l.b))), 0.0);
+    float m = hash(float2(3.0, 1.0)) * (255.0 - mx);
+    float3 b = tap(xy) * 255.0;
+    float3 o = b;
+    if (b.r < l.r || b.r > h.r) o.r = h.r - l.r + (b.r / 255.0) * m;
+    if (b.g < l.g || b.g > h.g) o.g = h.g - l.g + (b.g / 255.0) * m;
+    if (b.b < l.b || b.b > h.b) o.b = h.b - l.b + (b.b / 255.0) * m;
+    return half4(float4(clamp(o, 0.0, 255.0) / 255.0, 1.0));
+}
+"""
+
+    /**
+     * Every third pixel keeps its own colours — `i % 12 == 0` on the byte index is the
+     * same test as pixel % 3 == 0 — and the rest are driven to white (bright) or a random
+     * pick between the pixel's own min and max (everything else). The library's `value`
+     * is `0` for dark pixels and `0` is falsy in its `if (!value)`, so dark pixels take
+     * the random branch too — ported as written, not as the comment in the source implies.
+     * The kept pixels are what stop it reading as a plain posterise.
+     */
+    private const val GAZETTE = """
+half4 main(float2 xy) {
+    float3 c = tap(xy);
+    if (mod(xy.x + xy.y * size.x, 3.0) < 1.0) {
+        return half4(float4(c, 1.0));
+    }
+    float mx = max(max(c.r, c.g), c.b);
+    float mn = min(min(c.r, c.g), c.b);
+    float L = (c.r + c.g + c.b) / 3.0;
+    if (L > 0.65) return half4(1.0, 1.0, 1.0, 1.0);
+    float3 q = float3(
+        hash(xy) > 0.5 ? mx : mn,
+        hash(xy + 7.0) > 0.5 ? mx : mn,
+        hash(xy + 13.0) > 0.5 ? mx : mn);
+    return half4(float4(q, 1.0));
+}
+"""
+
+    /** A band-pass per channel: kept only inside (80, 165), dropped to black outside it. */
+    private const val CASTLES = """
+half4 main(float2 xy) {
+    float3 b = tap(xy) * 255.0;
+    b.r = (b.r > 80.0 && b.r < 165.0) ? b.r : 0.0;
+    b.g = (b.g > 80.0 && b.g < 165.0) ? b.g : 0.0;
+    b.b = (b.b > 80.0 && b.b < 165.0) ? b.b : 0.0;
+    return half4(float4(b / 255.0, 1.0));
+}
+"""
+
+    /**
+     * Row-aligned like the library: the seed is re-rolled every few rows and the channel
+     * maths wraps at 256, so each band of rows slides through its own colour.
+     * [TURN]-aware for the same reason [DATAMOSH] is — "rows" are the picture's rows, and
+     * the panel is portrait-locked.
+     */
+    private const val VENENEUX = """
+half4 main(float2 xy) {
+    float2 p = toUp(xy);
+    float band = floor(p.y / max(1.0, upSize().y / 8.0));
+    float s0 = max(hash(float2(band, 1.0)), 0.1);
+    float s1 = max(hash(float2(band, 3.0)), 0.1);
+    float s2 = max(hash(float2(band, 5.0)), 0.1);
+    float3 b = tapUp(p) * 255.0;
+    b.r = mod(b.r * s0 + 1000.0 * s2, 256.0);
+    b.g = mod(b.g * s1 + 1000.0 * s1, 256.0);
+    b.b = mod(b.b * s2 + 1000.0 * s0, 256.0);
+    return half4(float4(b / 255.0, 1.0));
+}
+"""
+
+    /**
+     * The void: subtract 1..15 with wraparound at zero (mod, not clamp — the library lets
+     * it roll back around to 255), a per-pixel noise flip, a darken of 20..40, and a grain
+     * that puts 0..19 back on a fifth of pixels.
+     */
+    private const val VOID = """
+half4 main(float2 xy) {
+    float3 v = tap(xy) * 255.0;
+    float3 n;
+    n.r = hash(xy + 1.0); n.g = hash(xy + 2.0); n.b = hash(xy + 3.0);
+    v = mod(v - (1.0 + n * 14.0), 255.0);
+    if (hash(xy + 4.0) < 0.2) {
+        v.r += 1.0 + hash(xy + 5.0) * 14.0;
+        v.g += 1.0 + hash(xy + 6.0) * 9.0;
+        v.b += 1.0 + hash(xy + 7.0) * 9.0;
+    }
+    v += hash(xy + 8.0) * 20.0 - 40.0;
+    float g = hash(xy + 9.0);
+    if (g < 0.4) v += floor(g * 50.0);
+    return half4(float4(clamp(v, 0.0, 255.0) / 255.0, 1.0));
+}
+"""
+
+    /**
+     * Random byte runs along the raster, gaps twice as long as the runs. Runs here are
+     * segments scaled to the frame, lit about half the time — the library's sequential
+     * counter cannot survive a GPU, but its look (random bands, then clean, then random)
+     * is a per-pixel coin flip on which segment is lit.
+     */
+    private const val BLURBOBB = """
+half4 main(float2 xy) {
+    float run = 16.0 * unitPx();
+    float seg = floor((xy.x + xy.y * size.x) / run);
+    float phase = hash(float2(seg, 7.0)) * 2.0;
+    if (phase <= 1.0) {
+        float3 noise = float3(hash(float2(seg, 1.0)), hash(float2(seg, 2.0)), hash(float2(seg, 3.0)));
+        return half4(float4(noise, 1.0));
+    }
+    return half4(float4(tap(xy), 1.0));
+}
+"""
+
+    /**
+     * The library's three stages in one pass: random rectangles displace the pixels (the
+     * coarse grid of cells below is the GPU's version of its hundred random rects, each
+     * shifted by its own hash vector with one of the three rectangle modes — add, subtract,
+     * or blank), a horizontal-or-vertical blur averages, and the chimera weight matrix
+     * cross-mixes the channels (0.25 / 0.5). Noise, darken and grain finish it. Worked
+     * upright because displacement has a direction; see [TURN].
+     */
+    private const val CHIMERA = """
+half4 main(float2 xy) {
+    float2 p = toUp(xy);
+    float u = unitPx();
+    float cell = u * 48.0;
+    float2 g = floor(p / cell);
+    float pick = hash(g);
+    float mode = hash(g + 3.0);
+    float3 c = tapUp(p);
+    float2 disp = (float2(hash(g + 1.0), hash(g + 2.0)) - 0.5) * cell * 0.8;
+    float2 q = clamp(p + disp, float2(0.0, 0.0), upSize() - float2(1.0, 1.0));
+    float3 d = tapUp(q);
+    if (pick < 0.55) {
+        // The library's three rectangle modes: add r(5,20), subtract r(0,20), or -255 blank.
+        if (mode >= 0.66) d += 0.02 + hash(g + 4.0) * 0.08;
+        else if (mode >= 0.33) d -= hash(g + 5.0) * 0.08;
+        else d -= 1.0;
+        c = d;
+    }
+    float dir = step(0.5, hash(g + 6.0));
+    float rad = u * 5.0;
+    float2 o = mix(float2(rad, 0.0), float2(0.0, rad), dir);
+    float3 bb = (tapUp(clamp(p + o, float2(0.0, 0.0), upSize() - float2(1.0, 1.0))) +
+                 tapUp(clamp(p - o, float2(0.0, 0.0), upSize() - float2(1.0, 1.0)))) * 0.5;
+    c = mix(c, bb, 0.35);
+    c = float3(c.r + c.g * 0.5 + c.b * 0.25,
+               c.r * 0.5 + c.g + c.b * 0.25,
+               c.r * 0.25 + c.g * 0.5 + c.b);
+    if (hash(p + 1.0) < 0.2) c += float3(hash(p + 2.0), hash(p + 3.0), hash(p + 4.0)) * 0.05;
+    c += hash(p + 5.0) * 0.15 - 0.25;
+    if (hash(p + 6.0) < 0.4) c += hash(p + 7.0) * 0.2;
+    return half4(float4(clamp(c, 0.0, 1.0), 1.0));
+}
+"""
+
+    /**
+     * The library's two phases: dominant-channel runs along the scanline (the block's
+     * strongest channel kept, the others zeroed — `size` in the source) with black skip
+     * gaps, then vertical smears that repaint the dominant channel of a pixel a few rows
+     * up down a twenty-line streak. Both worked upright; see [TURN].
+     */
+    private const val MANTICORE = """
+float3 dominant(float3 b) {
+    float mx = max(max(b.r, b.g), b.b);
+    if (mx == b.r) return float3(b.r, 0.0, 0.0);
+    if (mx == b.g) return float3(0.0, b.g, 0.0);
+    return float3(0.0, 0.0, b.b);
+}
+
+half4 main(float2 xy) {
+    float2 p = toUp(xy);
+    float u = unitPx();
+    float cell = max(2.0, upSize().x / 40.0);
+    float2 g = floor(p / float2(cell, cell * 4.0));
+    float run = hash(g);
+    float3 c = tapUp(p) * 255.0;
+    if (run < 0.6) {
+        c = dominant(c);
+    } else if (run > 0.9) {
+        c = float3(0.0);
+    }
+    float col = floor(p.x / (cell * 3.0));
+    if (hash(float2(col, 7.0)) > 0.85) {
+        float y = clamp(p.y - u * 4.0, 0.0, upSize().y - 1.0);
+        float3 streak = dominant(tapUp(float2(p.x, y)) * 255.0);
+        c = mix(c, streak, 0.8);
+    }
+    return half4(float4(clamp(c / 255.0, 0.0, 1.0), 1.0));
+}
+"""
+
+    /**
      * Preset: ten adjustments, and the plain photograph when they are all at zero.
      *
      * Ordered the way a darkroom would order them and not the way the data class lists them, because
@@ -1125,10 +1414,12 @@ half4 main(float2 xy) {
      * the plain photograph and overshooting by a single click landed on the one filter that
      * deliberately damages the file, and it was being switched on by accident (light-reports#27).
      *
-     * It is now at index 11 of twenty-one, which is as far from Preset as any entry can be: ten
-     * notches forwards and eleven back. Nothing else moved, and the wrap stayed — a physical dial
+     * It is now at index 11 of thirty-three, which is as far from Preset as any entry can be: eleven
+     * notches forwards and twenty-two back. Nothing else moved, and the wrap stayed — a physical dial
      * should never dead-end, and special-casing the step to refuse one neighbour would have made
-     * the wheel feel broken to fix an ordering problem.
+     * the wheel feel broken to fix an ordering problem. The datamosh.js modes that joined it in the
+     * list below cluster right after it for the same reason: they are all looks you would not shoot
+     * with, so they walk no closer to Preset either.
      */
     val all: List<Filter> = listOf(
         none,
@@ -1143,6 +1434,20 @@ half4 main(float2 xy) {
         Filter("gbcolor", "GB Color", GB_COLOR, lowRes = true),
         Filter("comic", "Comic", COMIC),
         datamosh,
+        // The datamosh.js mode library, ported to shaders. These are all looks you would
+        // not shoot with, so they cluster with Datamosh rather than walking any closer to
+        // Preset; see the note on [datamosh]'s placement.
+        Filter("vaporwave", "Vaporwave", VAPORWAVE),
+        Filter("fatcat", "Fatcat", FATCAT),
+        Filter("vana", "Vana", VANA),
+        Filter("walter", "Walter", WALTER),
+        Filter("gazette", "Gazette", GAZETTE),
+        Filter("castles", "Castles", CASTLES),
+        Filter("veneneux", "Veneneux", VENENEUX, turnAware = true),
+        Filter("void", "Void", VOID),
+        Filter("blurbobb", "Blurbobb", BLURBOBB),
+        Filter("chimera", "Chimera", CHIMERA, turnAware = true),
+        Filter("manticore", "Manticore", MANTICORE, turnAware = true),
         Filter("purikura", "Purikura", PURIKURA, animated = true, facesAware = true),
         Filter("thermal", "Thermal", THERMAL),
         Filter("xray", "X-Ray", X_RAY),
