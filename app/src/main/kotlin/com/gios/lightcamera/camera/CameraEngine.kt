@@ -157,6 +157,18 @@ class CameraEngine(private val context: Context) {
     private val _recording = MutableStateFlow(false)
     val recording: StateFlow<Boolean> = _recording.asStateFlow()
 
+    /**
+     * True from the moment `stop()` is asked until CameraX's `VideoRecordEvent.Finalize` lands.
+     *
+     * This is the state `recording` *cannot* capture: `Recording.stop()` returns before the file
+     * exists, and `awaitIdle`'s timeout can force `recording` down while the muxer is still
+     * writing. Every path that would rebind the camera — the watchdog, a mode switch, a lens or
+     * size change — has to stay shut while this is set, or it tears the use cases out from under
+     * a muxer that is mid-flush, and that is the cameraserver crash during save.
+     */
+    @Volatile
+    private var finalizing = false
+
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var preview: Preview? = null
@@ -355,7 +367,7 @@ class CameraEngine(private val context: Context) {
 
     fun setLens(facing: Int, flash: FlashMode) {
         if (_lensFacing.value == facing) return
-        if (_recording.value) return
+        if (_recording.value || finalizing) return
         _lensFacing.value = facing
         _faces.value = emptyList()
         _zoom.value = 1f
@@ -373,7 +385,7 @@ class CameraEngine(private val context: Context) {
         // `takePicture`, while the camera was still bound to `VideoCapture` and the `ImageCapture`
         // sitting in this class was attached to nothing. The next shutter press threw. Refusing out
         // loud lets the caller keep the two in step.
-        if (_recording.value) return false
+        if (_recording.value || finalizing) return false
         val lens = when (next) {
             CaptureMode.Selfie -> CameraSelector.LENS_FACING_FRONT
             // QR and Text are the back lens and cannot be talked out of it: the front camera on
@@ -397,7 +409,7 @@ class CameraEngine(private val context: Context) {
 
     fun setPhotoSize(size: PhotoSize, flash: FlashMode) {
         if (size == photoSize) return
-        if (_recording.value) return
+        if (_recording.value || finalizing) return
         photoSize = size
         rebind(flash)
     }
@@ -410,7 +422,7 @@ class CameraEngine(private val context: Context) {
      */
     fun setNegative(wanted: Boolean, flash: FlashMode) {
         if (wanted == negative) return
-        if (_recording.value) return
+        if (_recording.value || finalizing) return
         negative = wanted
         rebind(flash)
     }
@@ -1728,7 +1740,7 @@ class CameraEngine(private val context: Context) {
      */
     fun recoverIfDead(): Boolean {
         if (!_ready.value) return false
-        if (_recording.value) return false
+        if (_recording.value || finalizing) return false
         val last = lastResultAt
         if (last == 0L) return false
         if (SystemClock.elapsedRealtime() - last < staleLimitMs()) return false
@@ -1763,7 +1775,7 @@ class CameraEngine(private val context: Context) {
      */
     fun startRecording(withAudio: Boolean): Boolean {
         val video = videoCapture ?: return false
-        if (_recording.value) return false
+        if (_recording.value || finalizing) return false
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")
@@ -1781,6 +1793,7 @@ class CameraEngine(private val context: Context) {
                 when (event) {
                     is VideoRecordEvent.Start -> _recording.value = true
                     is VideoRecordEvent.Finalize -> {
+                        finalizing = false
                         _recording.value = false
                         activeRecording = null
                         if (event.hasError()) Log.e(TAG, "recording failed: ${event.error}")
@@ -1806,28 +1819,34 @@ class CameraEngine(private val context: Context) {
      * was, and a `stop()` arriving twice in that window went to a reference nobody held.
      */
     fun stopRecording() {
+        if (activeRecording == null) return
+        // The muxer is about to be told to finish; every rebind path has to stay shut until
+        // `Finalize` arrives, not until `Recording.stop()` returns.
+        finalizing = true
         runCatching { activeRecording?.stop() }
     }
 
     /**
      * Wait for the recorder to finish writing, up to [timeoutMs].
      *
-     * The timeout is not optional. `Finalize` is the only thing that lowers `recording`, and a
-     * muxer that dies without emitting it would otherwise leave the camera pinned in video mode
-     * for the rest of the process — a phone that will not go back to taking photographs is worse
-     * than a clip that came out short, so after the timeout the flag is forced down and the rebind
-     * happens anyway.
+     * The timeout is an escape hatch for the pathological case — a muxer that dies without ever
+     * emitting `Finalize` — but it must **not** open the rebind paths. Forcing `_recording` down
+     * is enough to unstick the UI; `finalizing` stays up so the watchdog and mode switches keep
+     * refusing to rebind the camera while CameraX is still writing the file. Rebinding mid-finalize
+     * is what takes down the camera service on this hardware.
      */
     suspend fun awaitIdle(timeoutMs: Long = FINALIZE_TIMEOUT_MS) {
-        if (!_recording.value) return
+        if (!_recording.value && !finalizing) return
         val settled = withTimeoutOrNull(timeoutMs) {
-            _recording.first { !it }
+            _recording.first { !it && !finalizing }
             true
         }
         if (settled == null) {
-            Log.w(TAG, "recorder never finalized in ${timeoutMs}ms; forcing idle")
+            Log.w(TAG, "recorder never finalized in ${timeoutMs}ms; forcing idle (finalize still guarded)")
             _recording.value = false
-            activeRecording = null
+            // activeRecording is left alone: the muxer may still be writing and will emit Finalize,
+            // which clears the handle and `finalizing`. Clearing it here would let a second
+            // stopRecording start a fresh recording before the old file exists.
         }
     }
 
@@ -1860,10 +1879,16 @@ class CameraEngine(private val context: Context) {
         /**
          * How long a stop is given to become a file.
          *
-         * A second of muxing is a very long clip on this hardware; two is the honest ceiling with
-         * room for a phone that is busy writing something else at the same time.
+         * This is an emergency escape hatch for a muxer that dies without emitting `Finalize`,
+         * **not** a budget for normal saves. On this hardware a real stop can take many seconds
+         * while the muxer flushes and rewrites the moov atom ("takes forever to process"), and a
+         * short budget fired mid-write — forcing `_recording` down while CameraX was still writing,
+         * which let the watchdog and mode switches rebind the camera mid-finalize and take down the
+         * camera service. Thirty seconds is generous enough that only a genuinely dead muxer trips
+         * it, and even then `finalizing` stays up so the rebind paths stay shut until `Finalize`
+         * actually arrives.
          */
-        const val FINALIZE_TIMEOUT_MS = 2_000L
+        const val FINALIZE_TIMEOUT_MS = 30_000L
 
         const val TAG = "CameraEngine"
 
