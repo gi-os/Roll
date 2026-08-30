@@ -219,7 +219,7 @@ fun RollScreen(
                 LightText(
                     "Location, to write where a photograph was taken. And photo location " +
                         "access, because Android strips coordinates out of anything it hands " +
-                        "an app — without it every photograph reads as unlocated, including " +
+                        "an app. Without it every photograph reads as unlocated, including " +
                         "ones this app tagged itself.",
                     LightTextVariant.Paragraph,
                     lighten = true,
@@ -321,7 +321,7 @@ fun RollScreen(
                                     // The one moment the count earns its place: it is about to
                                     // be the size of a deletion.
                                     LightText(
-                                        if (allTaken) "  — ${entry.count} picked" else "  — take all ${entry.count}",
+                                        if (allTaken) "  · ${entry.count} picked" else "  · take all ${entry.count}",
                                         LightTextVariant.Detail,
                                         lighten = true,
                                     )

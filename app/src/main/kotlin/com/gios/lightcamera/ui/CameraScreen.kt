@@ -255,7 +255,7 @@ fun CameraScreen(
         if (ColorMode.granted(context) || ColorMode.phoneIsColour(context)) return@LaunchedEffect
         // Nothing this app can do about it from in here, so say what will: the panel is a
         // colour panel and one adb line unlocks it.
-        vm.showNotice("Colour needs an adb grant — see settings")
+        vm.showNotice("Colour needs an adb grant. See settings")
     }
 
     /* ---- grain that moves ---- */
@@ -1278,7 +1278,7 @@ fun CameraScreen(
 
     LaunchedEffect(Unit) {
         if (CameraKeyAdvice.problem(context) != null) {
-            vm.showNotice("Camera key held — see settings")
+            vm.showNotice("Camera key held. See settings")
         }
     }
 }
@@ -1514,7 +1514,7 @@ private fun PuriMenu(
                             Spacer(Modifier.weight(1f))
                             LightText(
                                 text = if (strip != null) {
-                                    "Four shots, three seconds apart. The strip goes on the roll; the frames are kept behind it."
+                                    "Four shots, three seconds apart. The strip goes on the roll. The frames are kept behind it."
                                 } else {
                                     "Random is chosen fresh for each photograph."
                                 },
@@ -1599,7 +1599,7 @@ private fun MoshMenu(
                     MoshPicker(tiles = tiles, chosen = modeId, onPick = onMode)
                     Spacer(Modifier.weight(1f))
                     LightText(
-                        "The look is remembered, like Purikura's frame — it is what Datamosh means until you change it.",
+                        "The look is remembered, like Purikura's frame. It is what Datamosh means until you change it.",
                         LightTextVariant.Superfine,
                         lighten = true,
                     )

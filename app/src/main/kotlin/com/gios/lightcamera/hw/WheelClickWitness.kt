@@ -52,10 +52,10 @@ object WheelClickWitness {
 
     /** The readout, in words. */
     fun readout(): String = when (val ago = secondsAgo()) {
-        null -> "never — not once since Roll opened ${watchingForSeconds()}s ago. Something " +
+        null -> "never. Not once since Roll opened ${watchingForSeconds()}s ago. Something " +
             "upstream is taking it: LightControl's per-app list has to give Roll the whole " +
             "wheel, not just its turns."
-        0L -> "just now — the key is reaching Roll, so anything not happening is the binding"
-        else -> "${ago}s ago — the key is reaching Roll, so anything not happening is the binding"
+        0L -> "just now. The key is reaching Roll, so anything not happening is the binding"
+        else -> "${ago}s ago. The key is reaching Roll, so anything not happening is the binding"
     }
 }

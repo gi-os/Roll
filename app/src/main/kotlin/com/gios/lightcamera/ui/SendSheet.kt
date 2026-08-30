@@ -268,7 +268,7 @@ fun SendSheet(
                                     onClose()
                                 }
                                 Handoff.Outcome.Chooser -> {
-                                    onNotice("Nothing here can address a photo — pick an app")
+                                    onNotice("Nothing here can address a photo. Pick an app")
                                     onClose()
                                 }
                                 is Handoff.Outcome.Failed -> {

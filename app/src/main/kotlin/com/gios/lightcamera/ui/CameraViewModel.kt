@@ -222,7 +222,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         touchLadder()
         _channelLocked.value = !_channelLocked.value
         _picking.value = false
-        showNotice(if (_channelLocked.value) "Channel locked — ${_channel.value.label}" else "Channel unlocked")
+        showNotice(if (_channelLocked.value) "Channel locked: ${_channel.value.label}" else "Channel unlocked")
     }
 
     /**
@@ -433,10 +433,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             // say so would be the modal wheel's own click-turn-click complaint again, one layer
             // up. Locking anything else says the lens is the camera's again.
             prefs.setZoneFocus(_channel.value == Channel.Focus)
-            showNotice("${_channel.value.label} — turn to adjust")
+            showNotice("${_channel.value.label}, turn to adjust")
         } else {
             _picking.value = true
-            showNotice("Pick: ${_channel.value.label} — turn, then click")
+            showNotice("Pick ${_channel.value.label}, then turn and click")
         }
     }
 
@@ -458,7 +458,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             val step = if (notches > 0) 1 else -1
             val next = available[(at + step + available.size) % available.size]
             _channel.value = next
-            showNotice("Pick: ${next.label} — turn, then click")
+            showNotice("Pick ${next.label}, then turn and click")
             return
         }
         when (_channel.value) {
@@ -763,7 +763,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             depth < PANEL_MAX_DEPTH -> 4
             else -> {
                 runCatching { job.bitmap.recycle() }
-                recordFault("Buffer full — a shot was dropped")
+                recordFault("Buffer full. A shot was dropped")
                 showNotice("Buffer full")
                 return
             }
@@ -1482,12 +1482,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     // honest sentence beats eight identical ones; the next app launch starts the
                     // watchdog fresh.
                     if (recoveries >= 3) {
-                        showNotice("Camera keeps dying — close and reopen Roll")
-                        recordFault("Camera kept dying after restarts — reopen the app")
+                        showNotice("Camera keeps dying. Close and reopen Roll")
+                        recordFault("Camera kept dying after restarts. Reopen the app")
                         return@launch
                     }
                     showNotice("Camera restarted")
-                    if (recoveries == 1) recordFault("Preview went dark — camera restarted")
+                    if (recoveries == 1) recordFault("Preview went dark. Camera restarted")
                 }
             }
         }
@@ -2543,7 +2543,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         val loadedRoll = roll.value
         if (loadedRoll != null && loadedRoll.finished) {
-            showNotice("Roll finished — develop it")
+            showNotice("Roll finished. Develop it")
             return
         }
         shootingWith = filter.value
@@ -2699,7 +2699,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 val rescued = shootPanelFrame(click = false)
                                 val why = failure.message?.take(48)
                                 val said = when {
-                                    rescued -> "Sensor didn't answer — saved the viewfinder frame"
+                                    rescued -> "Sensor didn't answer. Saved the viewfinder frame"
                                     why.isNullOrBlank() -> "Shutter failed"
                                     else -> "Shutter: $why"
                                 }
@@ -2730,7 +2730,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     val why = attempt.exceptionOrNull()?.message?.take(48)
                     showNotice(
                         when {
-                            rescued -> "Sensor didn't answer — saved the viewfinder frame"
+                            rescued -> "Sensor didn't answer. Saved the viewfinder frame"
                             why.isNullOrBlank() -> "Shutter failed"
                             else -> "Shutter: $why"
                         },
@@ -2878,7 +2878,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         if (prefs.timings.value) showNotice("${took}ms shot · RAW")
 
         val jpegUri = pair.jpeg
-        if (pair.raw == null) showNotice("No negative — the JPEG saved")
+        if (pair.raw == null) showNotice("No negative. The JPEG saved")
         if (jpegUri == null) {
             // The negative alone is still a photograph, and the roll opens it.
             if (pair.raw != null && prefs.sounds.value) beeps.saved()
