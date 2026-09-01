@@ -82,13 +82,17 @@ fun NeedleGauge(
         modifier
             .width(depth)
             .height(length)
-            .pointerInput(count, enabled) {
+            .pointerInput(count, enabled, large) {
                 if (!enabled) return@pointerInput
                 detectDragGestures { change, _ ->
                     change.consume()
-                    val step = size.height.toFloat() / count
-                    val at = (change.position.y / step).toInt().coerceIn(0, count - 1)
-                    set(at)
+                    val plan = ladderLayout(
+                        height = size.height.toFloat(),
+                        width = size.width.toFloat(),
+                        labels = labels,
+                        large = large,
+                    )
+                    set(plan.rungAt(change.position.y, count))
                 }
             }
             .pointerInput(onTap, enabled) {
@@ -98,13 +102,22 @@ fun NeedleGauge(
     ) {
         Canvas(Modifier.width(depth).height(length)) {
             heightPx = size.height
-            val step = size.height / count
+            // One layout for all three readers of this ladder: the needle, the numbers and the
+            // finger. They used to compute their own and disagree -- the numbers were drawn on a
+            // baseline tuned for text about a rung tall, so once EV's labels grew to span three
+            // rungs each they sat low of the mark they name and the needle missed them.
+            val plan = ladderLayout(
+                height = size.height,
+                width = size.width,
+                labels = labels,
+                large = large,
+            )
             // **Needle first, labels second: the bar slides in *under* the text.** The pivot sits
             // off the left edge of the screen entirely — the gauge is flush with that edge — so
             // what appears is only the last stretch of a long arm sweeping on a hidden centre,
             // which is the sketch: a speedometer you see the tip of, not the works.
             val pivot = Offset(-PIVOT_REACH, size.height / 2f)
-            val target = Offset(LABEL_X + OVERLAP, step * sweep + step * 0.5f)
+            val target = Offset(LABEL_X + OVERLAP, plan.centre(sweep))
             val angle = Math.toDegrees(
                 atan2((target.y - pivot.y).toDouble(), (target.x - pivot.x).toDouble()),
             ).toFloat()
@@ -120,40 +133,69 @@ fun NeedleGauge(
                     strokeWidth = 2.2.dp.toPx(),
                 )
             }
-            // **Sized off the labels that actually draw, not the raw rung pitch.** EV lays a rung
-            // down for every third of a stop but prints only the whole stops, so sizing off the
-            // blank rungs shrank "-2" until it was dust; a ladder that labels every rung keeps the
-            // old size. The pitch is the average gap between consecutive *printed* rungs.
-            val labelled = labels.mapIndexedNotNull { i, l -> if (l.isNotEmpty()) i else null }
-            val pitch = if (labelled.size >= 2) {
-                step * (labelled.last() - labelled.first()) / (labelled.size - 1)
-            } else {
-                step
-            }
-            // The other limit is the ladder's own width: a monospace glyph advances about 0.62 of
-            // its size, so the longest label has to fit across the gauge. That is the whole
-            // ceiling now. A flat 34px cap used to sit under it and held EV's numbers at half the
-            // size the ladder had room for.
-            val chars = labels.maxOf { it.length }.coerceAtLeast(1)
-            val across = (size.width - LABEL_X * 2f) / (chars * 0.62f)
-            val rungFactor = if (large) 0.86f else 0.62f
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
-                textSize = minOf(pitch * rungFactor, across)
+                textSize = plan.textSize
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }
+            // Centred on the rung by the font's own metrics rather than by a fraction of the
+            // slot, which is the only way a number and the needle that points at it agree at
+            // every size.
+            val metrics = textPaint.fontMetrics
+            val lift = (metrics.ascent + metrics.descent) / 2f
             labels.forEachIndexed { i, label ->
                 if (label.isEmpty()) return@forEachIndexed
                 drawContext.canvas.nativeCanvas.drawText(
                     label,
                     LABEL_X,
-                    step * i + step * 0.72f,
+                    plan.centre(i.toFloat()) - lift,
                     textPaint,
                 )
             }
         }
     }
+}
+
+/**
+ * Where every rung sits, how tall its number is, and how much room the ends need.
+ *
+ * The ladder is not simply the height divided by the rungs. A label can be taller than its own
+ * slot -- EV prints one number every third rung, so its numbers are sized off that wider gap --
+ * and the first and last rungs only have half a slot of room before the strip's edge. Without an
+ * inset the end labels overflow, and since the strip is clipped so the ladder cannot paint over
+ * the roll, overflowing means cropped: "-4" lost its bottom half.
+ */
+private class Ladder(val inset: Float, val step: Float, val textSize: Float) {
+    /** The centre of rung [at], fractional rungs included -- the needle rides between them. */
+    fun centre(at: Float): Float = inset + step * at + step * 0.5f
+
+    fun rungAt(y: Float, count: Int): Int =
+        ((y - inset) / step).toInt().coerceIn(0, count - 1)
+}
+
+private fun ladderLayout(height: Float, width: Float, labels: List<String>, large: Boolean): Ladder {
+    val count = labels.size.coerceAtLeast(1)
+    val rawStep = height / count
+    // Sized off the labels that actually draw, not the raw rung pitch: EV lays a rung down for
+    // every third of a stop but prints only the whole stops, and sizing off the blank rungs shrank
+    // "-2" until it was dust.
+    val printed = labels.mapIndexedNotNull { i, l -> if (l.isNotEmpty()) i else null }
+    fun pitch(step: Float): Float =
+        if (printed.size >= 2) {
+            step * (printed.last() - printed.first()) / (printed.size - 1)
+        } else {
+            step
+        }
+    // A monospace glyph advances about 0.62 of its size, so the longest label has to fit across
+    // the strip as well.
+    val chars = labels.maxOf { it.length }.coerceAtLeast(1)
+    val across = (width - LABEL_X * 2f) / (chars * 0.62f)
+    val factor = if (large) 0.86f else 0.62f
+    val guess = minOf(pitch(rawStep) * factor, across)
+    val inset = (guess * 0.6f - rawStep * 0.5f).coerceAtLeast(0f)
+    val step = ((height - inset * 2f) / count).coerceAtLeast(1f)
+    return Ladder(inset, step, minOf(pitch(step) * factor, across))
 }
 
 private val GAUGE_WIDTH = 44.dp

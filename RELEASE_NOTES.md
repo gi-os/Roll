@@ -1,3 +1,15 @@
+## Roll v3.0 — the numbers and the needle agree
+
+**"-4" is whole again, and the needle points at the number it means.** Both were the same fault.
+The ladder drew its numbers on a baseline tuned for text about one rung tall, which was true until
+EV's numbers grew: EV prints one number every third rung, so it sizes them off that wider gap, and
+at that size the labels sat low of the mark they name and the end ones ran off the strip, where
+the clip that keeps the ladder out of the roll cut them.
+
+The needle, the numbers and your finger now share one layout. Rungs are centred by the font's own
+metrics instead of a fraction of a slot, and the ends get exactly as much room as the tallest label
+needs, so nothing overflows and nothing is cropped. At EV 0 the red line sits on the 0.
+
 ## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
 
 **Ten adjustments, in Settings, where you can find them.** Exposure, contrast, highlights,
