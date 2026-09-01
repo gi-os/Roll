@@ -1,48 +1,54 @@
 ## Roll v3.0
 
-Everything below has landed since v2.94, the last build on the official channel. It is mostly one
-story. The meter that sits beside the viewfinder grew up, and a handful of controls that had gone
-missing came back.
+These are the changes since v2.94, the last official build. Most of them are in the meter. The
+meter is the ladder of values with the red needle at the edge of the viewfinder.
 
-**The meter reads every dial.** Turn the wheel and a ladder of values stands along the edge of the
-frame, with a red needle sweeping on a pivot hidden off screen. Filters, exposure, shutter, ISO,
-zone focus, zoom. Each dial brings its own numbers. Until now only the filter ladder woke up and
-only the filter needle moved, for two separate reasons, both fixed. The ladder faded itself out
-after a few seconds and nothing but the filter dial brought it back. And the needle was reading
-values the meter never watched, so the picture on screen stayed a step behind the camera.
+### The meter
 
-**It sits on the picture, and it stays off your photographs.** The ladder centers on the
-viewfinder rather than on the glass, so the control band no longer pulls it half a band sideways.
-It leaves the moment you swipe to the roll. It used to paint over the photographs down there.
+The meter now works for every dial. Filters, exposure, shutter, ISO, zone focus and zoom each show
+their own numbers. Before this release, only the filter dial moved the needle. Two faults caused
+that. The meter hid itself after three seconds, and only the filter dial woke it again. The meter
+also did not watch the values it showed.
 
-**Numbers you can read at arm's length.** Exposure, zoom, focus, shutter and ISO get a deeper
-strip and larger figures, sized to the room between their own marks. The filter ladder keeps the
-small setting, because twenty-odd three-letter codes at that size would collide. Nothing is
-cropped at the ends any more, and the needle lands on the number it names rather than beside it.
+The meter centers on the viewfinder instead of the screen. The control band no longer pushes it to
+one side.
 
-**Zoom reads like a lens barrel.** 1.0 at the bottom, 8.0 at the top, and every framing in
-between. A notch moves the lens a fraction of a stop and the needle slides that same fraction of
-the gap, so 2.4x is a place you can stop. Spacing is logarithmic, the way the marks are laid out
-and the way zoom is felt. Pinch to zoom raises the same meter for the length of the gesture and
-then hands your dial back untouched.
+The meter leaves the screen when you go to the roll. It used to draw over the photographs there.
 
-**The ten picture adjustments have a home.** Exposure, contrast, highlights, shadows, vibrance,
-warmth, tint, sharpness, grain and vignette now live in Settings under LOOK, each with a minus, a
-plus and a line saying what it does. They were reachable only from the list icon on the band, and
-the wheel's channel button took that slot, so they had quietly become unreachable. All ten at zero
-still means the file is saved untouched.
+The numbers are larger. Exposure, zoom, focus, shutter and ISO get a deeper strip and bigger
+figures. The filter ladder keeps its small text, because it holds more than twenty codes. Every
+number now fits, and the needle points at the number it names.
 
-**Filters stop taking controls away.** An earlier build dropped exposure, focus and zoom from the
-wheel whenever a heavy look was on. That was wrong. A filter is a look laid over a real exposure,
-the DNG never wears it, and a Game Boy frame still has to be aimed, exposed and framed. The one
-exception is zone focus under a coarse filter. Dither 16, 1-Bit, Halftone and the Game Boys throw
-the detail away before it reaches the glass, and focusing by eye off a few hundred cells is
-guesswork wearing a control's clothes. Zone focus steps aside under those looks and comes back
-with the next fine one.
+### Zoom
 
-**The fault mark stops staring.** A count of camera faults used to hold the corner of the
-viewfinder until you tapped it. It shows for ten seconds after the most recent fault and then
-fades. The tally stands behind it, and a shake report still carries every name.
+The zoom ladder shows 1.0 at the bottom and 8.0 at the top. One notch of the wheel moves the lens
+by a fraction of a stop. The needle moves by the same fraction of the gap. You can stop at 2.4x.
+The marks follow a log scale, so 1.5 to 2 and 4 to 6 cover the same distance.
+
+Pinch to zoom shows the meter during the gesture. The wheel keeps the dial it had.
+
+### Picture adjustments
+
+Settings, then Look, then Picture holds ten adjustments. They are exposure, contrast, highlights,
+shadows, vibrance, warmth, tint, sharpness, grain and vignette. Each row has a minus button, a plus
+button and one line that says what it does. Before this release, only the list icon on the band
+opened them. The channel button had taken that icon, so there was no other way in. With all ten at
+zero, Roll writes the file without changes.
+
+### Filters and focus
+
+Filters no longer take the other dials away. An earlier build removed exposure, focus and zoom from
+the wheel under a heavy filter. The filter is a look over a real exposure. The DNG does not carry
+it, and you still have to aim, expose and frame the shot.
+
+Zone focus stops for a coarse filter. Dither 16, 1-Bit, Halftone, Game Boy and Game Boy Color
+remove the detail that zone focus needs. Roll turns zone focus off under those filters. It comes
+back with the next fine filter. The other dials stay.
+
+### Faults
+
+The `!n` mark shows for ten seconds after a fault. Then it fades. The list behind it stays, and a
+shake report still carries every name.
 
 ## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
 
