@@ -1793,6 +1793,22 @@ class CameraEngine(private val context: Context) {
                 when (event) {
                     is VideoRecordEvent.Start -> _recording.value = true
                     is VideoRecordEvent.Finalize -> {
+                        // **The clock must restart before the gate opens.** The muxer flush
+                        // stalls the repeating request — documented above as taking many
+                        // seconds on this hardware — so the moment Finalize lands,
+                        // `lastResultAt` is stamped from *before* the stop and already past
+                        // the stale limit. Clearing `finalizing` against that stale clock
+                        // handed the watchdog a guaranteed false death on its very next tick:
+                        // "Preview went dark. Camera restarted", after every recording whose
+                        // flush ran longer than the limit — which on this phone is every
+                        // recording. The false rebind also quarantined ZSL for the session
+                        // (see [recoverIfDead]), so each video quietly degraded the *photo*
+                        // mode after it. Stamped to now rather than zeroed: the preview gets
+                        // the full stale limit to deliver its first frame after the recorder
+                        // lets go, and a session that genuinely died in the flush is still
+                        // caught one limit later — zero would blind the watchdog to it
+                        // forever.
+                        lastResultAt = SystemClock.elapsedRealtime()
                         finalizing = false
                         _recording.value = false
                         activeRecording = null
