@@ -1,14 +1,48 @@
-## Roll v3.0 — the numbers and the needle agree
+## Roll v3.0
 
-**"-4" is whole again, and the needle points at the number it means.** Both were the same fault.
-The ladder drew its numbers on a baseline tuned for text about one rung tall, which was true until
-EV's numbers grew: EV prints one number every third rung, so it sizes them off that wider gap, and
-at that size the labels sat low of the mark they name and the end ones ran off the strip, where
-the clip that keeps the ladder out of the roll cut them.
+Everything below has landed since v2.94, the last build on the official channel. It is mostly one
+story. The meter that sits beside the viewfinder grew up, and a handful of controls that had gone
+missing came back.
 
-The needle, the numbers and your finger now share one layout. Rungs are centred by the font's own
-metrics instead of a fraction of a slot, and the ends get exactly as much room as the tallest label
-needs, so nothing overflows and nothing is cropped. At EV 0 the red line sits on the 0.
+**The meter reads every dial.** Turn the wheel and a ladder of values stands along the edge of the
+frame, with a red needle sweeping on a pivot hidden off screen. Filters, exposure, shutter, ISO,
+zone focus, zoom. Each dial brings its own numbers. Until now only the filter ladder woke up and
+only the filter needle moved, for two separate reasons, both fixed. The ladder faded itself out
+after a few seconds and nothing but the filter dial brought it back. And the needle was reading
+values the meter never watched, so the picture on screen stayed a step behind the camera.
+
+**It sits on the picture, and it stays off your photographs.** The ladder centers on the
+viewfinder rather than on the glass, so the control band no longer pulls it half a band sideways.
+It leaves the moment you swipe to the roll. It used to paint over the photographs down there.
+
+**Numbers you can read at arm's length.** Exposure, zoom, focus, shutter and ISO get a deeper
+strip and larger figures, sized to the room between their own marks. The filter ladder keeps the
+small setting, because twenty-odd three-letter codes at that size would collide. Nothing is
+cropped at the ends any more, and the needle lands on the number it names rather than beside it.
+
+**Zoom reads like a lens barrel.** 1.0 at the bottom, 8.0 at the top, and every framing in
+between. A notch moves the lens a fraction of a stop and the needle slides that same fraction of
+the gap, so 2.4x is a place you can stop. Spacing is logarithmic, the way the marks are laid out
+and the way zoom is felt. Pinch to zoom raises the same meter for the length of the gesture and
+then hands your dial back untouched.
+
+**The ten picture adjustments have a home.** Exposure, contrast, highlights, shadows, vibrance,
+warmth, tint, sharpness, grain and vignette now live in Settings under LOOK, each with a minus, a
+plus and a line saying what it does. They were reachable only from the list icon on the band, and
+the wheel's channel button took that slot, so they had quietly become unreachable. All ten at zero
+still means the file is saved untouched.
+
+**Filters stop taking controls away.** An earlier build dropped exposure, focus and zoom from the
+wheel whenever a heavy look was on. That was wrong. A filter is a look laid over a real exposure,
+the DNG never wears it, and a Game Boy frame still has to be aimed, exposed and framed. The one
+exception is zone focus under a coarse filter. Dither 16, 1-Bit, Halftone and the Game Boys throw
+the detail away before it reaches the glass, and focusing by eye off a few hundred cells is
+guesswork wearing a control's clothes. Zone focus steps aside under those looks and comes back
+with the next fine one.
+
+**The fault mark stops staring.** A count of camera faults used to hold the corner of the
+viewfinder until you tapped it. It shows for ten seconds after the most recent fault and then
+fades. The tally stands behind it, and a shake report still carries every name.
 
 ## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
 
