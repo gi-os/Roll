@@ -637,6 +637,29 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private val _faults = MutableStateFlow(0)
     val faults: StateFlow<Int> = _faults.asStateFlow()
 
+    /**
+     * Whether the chip is still worth the corner of the viewfinder.
+     *
+     * A mark that stays until it is read was right while faults were the thing being hunted, and
+     * wrong once they are rare: a permanent `!1` in the corner is a camera wearing a bandage. The
+     * chip now shows for ten seconds after the most recent fault and then fades. Nothing is
+     * forgotten -- the tally stands, the shake report still carries every name -- it just stops
+     * standing in the picture.
+     */
+    private val _faultsFresh = MutableStateFlow(false)
+    val faultsFresh: StateFlow<Boolean> = _faultsFresh.asStateFlow()
+
+    private var faultFadeJob: Job? = null
+
+    private fun freshenFaults() {
+        _faultsFresh.value = true
+        faultFadeJob?.cancel()
+        faultFadeJob = viewModelScope.launch {
+            delay(FAULT_CHIP_MS)
+            _faultsFresh.value = false
+        }
+    }
+
     private val _lastFault = MutableStateFlow("")
 
     /**
@@ -652,6 +675,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private fun recordFault(what: String) {
         _faults.value += 1
         _lastFault.value = what
+        freshenFaults()
         synchronized(faultTally) {
             faultTally[what] = (faultTally[what] ?: 0) + 1
             if (faultTally.size > 12) faultTally.remove(faultTally.keys.first())
@@ -681,6 +705,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             Trouble.record("the fault chip was read", full)
         }
         _faults.value = 0
+        faultFadeJob?.cancel()
+        _faultsFresh.value = false
     }
 
     private sealed class Darkwork
@@ -3540,6 +3566,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          * fade; this is only the quiet gap before it starts.
          */
         const val LADDER_IDLE_MS = 3_000L
+
+        /** How long the fault chip holds the corner after the most recent fault. */
+        const val FAULT_CHIP_MS = 10_000L
 
         /** Eight, which is the number in the setting's name and about a quarter of a second of them. */
         const val BURST_FRAMES = 8

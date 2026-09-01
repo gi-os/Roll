@@ -949,12 +949,23 @@ fun CameraScreen(
                         // middle of a burst deserves a mark that stays until it is read. Tap to
                         // replay the last fault and clear it. A crash from the previous run
                         // arrives here too, which is how a silent black screen introduces itself.
-                        if (faults > 0) {
+                        // Ten seconds, then it fades: see [CameraViewModel.faultsFresh]. Drawn
+                        // only while there is something of it left to draw, and untouchable once
+                        // it is gone -- an invisible tap target in the corner of a viewfinder is
+                        // worse than no chip at all.
+                        val faultsFresh by vm.faultsFresh.collectAsState()
+                        val faultAlpha by animateFloatAsState(
+                            targetValue = if (faults > 0 && faultsFresh) 1f else 0f,
+                            animationSpec = tween(durationMillis = if (faultsFresh) 120 else 700),
+                            label = "fault",
+                        )
+                        if (faults > 0 && faultAlpha > 0.01f) {
                             LightText(
                                 " !$faults",
                                 LightTextVariant.Detail,
                                 modifier = Modifier
-                                    .lightClickable { vm.readFaults() }
+                                    .graphicsLayer { alpha = faultAlpha }
+                                    .lightClickable(enabled = faultsFresh) { vm.readFaults() }
                                     .padding(start = 6.dp),
                             )
                         }
@@ -1073,7 +1084,26 @@ fun CameraScreen(
         val borrowed by vm.ladderChannel.collectAsState()
         // The ladder is up for the wheel's channel, or for one a gesture has borrowed it for.
         if ((channelWheel || borrowed != null) && !picking && active) {
-            vm.gaugeSpec()?.let { spec ->
+            // **Read here, or the needle never moves.** `collectAsState` subscribes the scope that
+            // *reads* the value, not the one that declares it: every one of these was collected at
+            // the top of the screen and read either nowhere at all (the wheel's tick) or inside
+            // some other child's lambda, so a change recomposed everything except this block.
+            // Filters were the single exception, and only by accident -- `filter` is a key on a
+            // LaunchedEffect in the outer body, which recomposes the whole screen with it. Hence
+            // "the red bar only works for filters": the spec was right, the frame was never drawn.
+            // Keying the remember on them is the read.
+            val spec = remember(
+                wheelTick,
+                ev,
+                zoom,
+                filter,
+                peaking,
+                borrowed,
+                channel,
+                evRange,
+                maxZoom,
+            ) { vm.gaugeSpec() }
+            spec?.let { spec ->
                 // Sideways, like every other word on this viewfinder: the ladder is drawn in the
                 // gauge's own portrait space and the whole thing turned 90°, so it stands upright
                 // on the screen's edge when the phone is in the shooting grip — the sketch's

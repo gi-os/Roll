@@ -1,3 +1,17 @@
+## Roll v2.97 — the needle really does move now, and the fault chip stops staring
+
+**The needle moves on every channel.** The real fault was one line up from where I kept looking:
+the gauge was reading the wheel, EV, zoom and focus from values collected at the top of the screen
+but never read inside the meter's own block, and Compose only redraws the part of a screen that
+actually reads a value. Filters worked by accident, because the filter is read elsewhere in the
+outer body and drags the whole screen along with it. The meter reads its own inputs now, so EV,
+zoom, focus, shutter and ISO all sweep the way filters always did.
+
+**The !n mark fades after ten seconds.** A mark that stayed until it was read made sense while
+faults were being hunted and reads as a bandage now that they're rare. It shows for ten seconds
+after the most recent fault, then fades out of the picture. Nothing is lost: the tally stands and
+a shake report still carries every name.
+
 ## Roll v2.96 — zoom reads like a lens barrel, and a pinch brings its meter up
 
 **The zoom ladder runs the way the barrel is marked.** 1.0 at the bottom, 8.0 at the top. It was
