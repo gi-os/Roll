@@ -694,8 +694,17 @@ fun CameraScreen(
                             onFilterStep = { vm.stepFilter(it) },
                             // The ratio is applied to the zoom the pinch started from, so the
                             // gesture is absolute rather than accumulating drift over a long one.
-                            onPinchStart = { engine.zoom.value },
-                            onPinch = { engine.setZoom(it) },
+                            onPinchStart = {
+                                // Two fingers on the glass raise the zoom ladder, whatever the
+                                // wheel is holding: the gesture changes the lens, so the meter
+                                // that reads the lens should be up while it happens.
+                                vm.showZoomLadder()
+                                engine.zoom.value
+                            },
+                            onPinch = {
+                                engine.setZoom(it)
+                                vm.touchLadder()
+                            },
                         ),
                 )
 
@@ -1061,7 +1070,9 @@ fun CameraScreen(
         // a red needle sweeping on a pivot hidden off-screen — only the tip enters the frame,
         // sliding in under the numbers. Read like a speedometer, dragged like a slider, tapped
         // to lock the dial. Filters ride it as three-letter codes.
-        if (channelWheel && !picking && active) {
+        val borrowed by vm.ladderChannel.collectAsState()
+        // The ladder is up for the wheel's channel, or for one a gesture has borrowed it for.
+        if ((channelWheel || borrowed != null) && !picking && active) {
             vm.gaugeSpec()?.let { spec ->
                 // Sideways, like every other word on this viewfinder: the ladder is drawn in the
                 // gauge's own portrait space and the whole thing turned 90°, so it stands upright
@@ -1078,8 +1089,9 @@ fun CameraScreen(
                 // viewfinder rather than to the glass: centred on the picture, which is half a
                 // band off from centred on the screen.
                 val glass = LocalConfiguration.current.screenWidthDp.dp - BAND
+                val shown = borrowed ?: channel
                 val gaugeLength =
-                    if (channel == Channel.Filter) {
+                    if (shown == Channel.Filter) {
                         // Not the whole edge: the ladder used to run the full width and spill over
                         // the black chrome at both ends — the report was "filters go over the black
                         // bar". Fifteen percent off each end puts the ladder's rungs between the

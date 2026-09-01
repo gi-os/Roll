@@ -1,3 +1,17 @@
+## Roll v2.96 — zoom reads like a lens barrel, and a pinch brings its meter up
+
+**The zoom ladder runs the way the barrel is marked.** 1.0 at the bottom, 8.0 at the top. It was
+upside down.
+
+**One notch, one mark.** The wheel used to zoom by an eight percent multiplier, which is right for
+a pinch and wrong for a dial with a ladder next to it: eight notches moved the needle less than the
+gap between two printed numbers, so the wheel read as dead. On the zoom channel the wheel now walks
+the marks, one per notch. Pinch stays continuous for framing.
+
+**Pinch raises the zoom meter.** Two fingers on the glass bring the zoom ladder up for the length
+of the gesture, whatever the wheel is holding, then it retreats and the wheel keeps the channel it
+had. The gesture borrows the meter instead of reassigning your dial.
+
 ## Roll v2.95 — the meter shows up for every dial, sits on the picture, stays out of the roll
 
 **The needle works on every channel now, not just filters.** The ladder fades itself out after a

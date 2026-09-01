@@ -290,7 +290,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         val onSet: (Int) -> Unit,
     )
 
-    fun gaugeSpec(): GaugeSpec? = when (_channel.value) {
+    fun gaugeSpec(): GaugeSpec? = when (_ladderChannel.value ?: _channel.value) {
         Channel.Shutter -> GaugeSpec(
             labels = Exposure.SHUTTER_STOPS.map { if (it >= 1L) it.toString() else "1" },
             index = engine.shutterIndexNow(),
@@ -308,10 +308,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             null
         }
         Channel.Zoom -> {
-            val stops = zoomGaugeStops()
+            // **Long end up.** Held sideways the ladder runs bottom to top, and zoom belongs the
+            // way a lens barrel is marked: 1.0 down at the wide end, 8.0 up at the long one. The
+            // list is reversed for drawing and every index crosses back through [zoomStops].
+            val stops = zoomStops()
             GaugeSpec(
                 labels = stops.map { if (it < 9.95f) "%.1fx".format(it) else "%.0fx".format(it) },
-                index = stops.indices.minByOrNull { kotlin.math.abs(stops[it] - engine.zoom.value) } ?: 0,
+                index = zoomRung(),
             ) { engine.setZoom(stops[it.coerceIn(0, stops.lastIndex)]) }
         }
         Channel.Exposure -> {
@@ -374,9 +377,34 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         return code.take(3)
     }
 
-    private fun zoomGaugeStops(): List<Float> {
+    /** The zoom ladder as drawn: long end first, because the ladder's first rung is its top one. */
+    private fun zoomStops(): List<Float> {
         val max = engine.maxZoom.value
         return listOf(1f, 1.5f, 2f, 3f, 4f, 6f, 8f).filter { it <= max }.ifEmpty { listOf(1f) }
+            .reversed()
+    }
+
+    /** Which rung of [zoomStops] the lens is nearest right now. */
+    private fun zoomRung(): Int {
+        val stops = zoomStops()
+        return stops.indices.minByOrNull { kotlin.math.abs(stops[it] - engine.zoom.value) } ?: 0
+    }
+
+    /**
+     * One notch, one rung.
+     *
+     * The engine's own zoom step is a 1.08 multiplier — right for a pinch, wrong for a dial with a
+     * ladder beside it, because eight notches moved the needle less than the gap between two
+     * printed numbers and the wheel read as dead. On the ladder the wheel walks the marks; the
+     * pinch stays continuous for framing.
+     */
+    private fun stepZoomRung(notches: Int) {
+        val stops = zoomStops()
+        if (stops.size < 2) return
+        // Up the ladder is toward the long end, and the list is drawn top-first, so a forward
+        // notch is a step *down* the indexes.
+        val next = (zoomRung() - if (notches > 0) 1 else -1).coerceIn(0, stops.lastIndex)
+        engine.setZoom(stops[next])
     }
 
     /**
@@ -449,6 +477,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // the filter path, so on EV, shutter, ISO, focus and zoom the needle moved behind an alpha
         // of zero: the value changed, the meter never came back, and the field read it as "the red
         // bar only works for filters".
+        // The wheel reclaims the ladder from a pinch the moment it turns.
+        _ladderChannel.value = null
         touchLadder()
         if (_picking.value) {
             val available = channelsAvailable()
@@ -479,7 +509,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 showNotice(engine.focusLabel.value)
             }
             Channel.Zoom -> {
-                engine.stepZoom(notches)
+                stepZoomRung(notches)
                 showNotice(engine.zoomLabel())
             }
         }
@@ -1814,6 +1844,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     private var ladderHideJob: Job? = null
 
+    /**
+     * A channel the ladder is showing that the wheel is not holding.
+     *
+     * Pinch-to-zoom is the case: two fingers change the zoom whatever the wheel is on, and the
+     * meter that reads zoom should come up to say so. Borrowing the ladder rather than moving the
+     * wheel keeps the gesture from quietly re-assigning a control the hand did not touch — the
+     * dial is still on what it was when the ladder retreats.
+     */
+    private val _ladderChannel = MutableStateFlow<Channel?>(null)
+    val ladderChannel: StateFlow<Channel?> = _ladderChannel.asStateFlow()
+
     /** Called on any dial touch: wake the ladder and restart the countdown to its retreat. */
     fun touchLadder() {
         _ladderVisible.value = true
@@ -1821,7 +1862,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         ladderHideJob = viewModelScope.launch {
             delay(LADDER_IDLE_MS)
             _ladderVisible.value = false
+            // The borrowed channel goes back with the ladder, not before: clearing it while the
+            // gauge is still on screen would swap the numbers under a reader mid-fade.
+            _ladderChannel.value = null
         }
+    }
+
+    /** Pinch-to-zoom: bring the zoom ladder up for the length of the gesture. */
+    fun showZoomLadder() {
+        _ladderChannel.value = Channel.Zoom
+        touchLadder()
     }
 
     // The ladder greets once, then retreats on its own: three seconds after launch with no dial
