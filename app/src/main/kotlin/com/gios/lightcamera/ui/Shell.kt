@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.gios.lightcamera.NEWS_RELEASE
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.ui.theme.LightText
 import com.gios.lightcamera.ui.theme.LightTextVariant
@@ -147,8 +148,13 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
     // Keyed on the flag as well as permission: after the picker closes, closing marks the
     // choice as made (so it does not re-open); after a reset clears the flag, it opens again.
     val filtersPicked by vm.prefs.filtersPicked.collectAsState()
-    LaunchedEffect(cameraGranted, filtersPicked) {
-        if (cameraGranted && !filtersPicked) filterPickerOpen = true
+    // **The news page goes first.** Both of these want the screen on a fresh install, and two
+    // takeovers stacked on each other is one nobody reads. The picker waits for the news to be
+    // dismissed, so the order is always news, then filters, then the viewfinder.
+    val newsSeen by vm.prefs.newsSeen.collectAsState()
+    val newsOpen = cameraGranted && newsSeen < NEWS_RELEASE
+    LaunchedEffect(cameraGranted, filtersPicked, newsOpen) {
+        if (cameraGranted && !newsOpen && !filtersPicked) filterPickerOpen = true
     }
 
     /**
@@ -233,6 +239,12 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                 onClose = { settingsOpen = false },
                 onOpenFilterPicker = { filterPickerOpen = true },
             )
+        }
+
+        // Above everything, and only ever on the first launch of a release: what changed while
+        // the official channel was on an older build. See [com.gios.lightcamera.Prefs.newsSeen].
+        if (newsOpen) {
+            WhatsNewScreen(onClose = { vm.prefs.markNewsSeen(NEWS_RELEASE) })
         }
 
         // Above settings, so the picker can be opened from Look and drawn over it.

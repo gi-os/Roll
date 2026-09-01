@@ -1,54 +1,82 @@
 ## Roll v3.0
 
-These are the changes since v2.94, the last official build. Most of them are in the meter. The
-meter is the ladder of values with the red needle at the edge of the viewfinder.
+This release collects everything since v2.60, the last build most people took. Thirty-nine
+versions went to the nightly channel in between. The camera you open is a different camera.
+
+On the first launch, Roll shows a page that lists what is new. Read it once. It does not come back.
+
+### One press, more than one file
+
+A photograph can be more than one file. Roll writes a DNG, a PNG and a JPEG from the same press.
+The DNG is the negative and never carries a filter. The PNG carries the filter without a second
+compression. The roll shows the set as a single photograph, and a tag in the corner switches
+between the files. Send or delete one file, or the whole set. Turn the formats on in Settings,
+Frame, Files.
+
+### The wheel holds any control
+
+Click the wheel to pick a control. Turn to choose it, click to lock it in, then turn to adjust.
+Filters, exposure, shutter, ISO, zone focus and zoom all ride the same wheel. Tap the icon in the
+band to lock the wheel on one control. The wheel stays on that one until you tap the icon again.
 
 ### The meter
 
-The meter now works for every dial. Filters, exposure, shutter, ISO, zone focus and zoom each show
-their own numbers. Before this release, only the filter dial moved the needle. Two faults caused
-that. The meter hid itself after three seconds, and only the filter dial woke it again. The meter
-also did not watch the values it showed.
+A ladder of values stands at the edge of the viewfinder. A red needle sweeps on a pivot off the
+screen. Only the tip of the needle enters the frame. The ladder shows what the wheel
+holds and where the setting sits. Drag it with a finger to jump to a value. Tap it to lock the
+dial. It arrives when you turn the wheel and leaves a few seconds later.
 
-The meter centers on the viewfinder instead of the screen. The control band no longer pushes it to
-one side.
+Zoom reads like a lens barrel: 1.0 at the bottom, 8.0 at the top, and every framing between them.
+One notch of the wheel moves the lens by a fraction of a stop. The needle moves by the same
+fraction of the gap. Pinch to zoom raises the same meter for the length of the gesture.
 
-The meter leaves the screen when you go to the roll. It used to draw over the photographs there.
+### Manual exposure
 
-The numbers are larger. Exposure, zoom, focus, shutter and ISO get a deeper strip and bigger
-figures. The filter ladder keeps its small text, because it holds more than twenty codes. Every
-number now fits, and the needle points at the number it names.
+Four modes: auto, shutter priority, ISO priority and manual. The wheel carries the half of the
+exposure that the mode leaves to you. The shutter and ISO ladders show the stops. Settings,
+Camera, Exposure.
 
-### Zoom
+### Zone focus
 
-The zoom ladder shows 1.0 at the bottom and 8.0 at the top. One notch of the wheel moves the lens
-by a fraction of a stop. The needle moves by the same fraction of the gap. You can stop at 2.4x.
-The marks follow a log scale, so 1.5 to 2 and 4 to 6 cover the same distance.
+Set the distance and shoot without waiting for autofocus, the way a street camera works. Peaking
+marks the edges that are sharp. The readout says what is in focus, in feet or in meters. A coarse filter removes the detail this
+needs. Roll turns zone focus off under one, and offers it again with the next fine filter.
 
-Pinch to zoom shows the meter during the gesture. The wheel keeps the dial it had.
+### The press is the photograph
 
-### Picture adjustments
+The shutter no longer waits. Roll takes the frame at your finger and develops it behind you, one
+at a time. The bar beside the count shows the queue as it drains. Hold the shutter down for a
+burst. Three fast shots used to lag the viewfinder and then crash the camera. The queue now lives on disk
+instead of in memory. The number of shots in a row is your decision.
 
-Settings, then Look, then Picture holds ten adjustments. They are exposure, contrast, highlights,
-shadows, vibrance, warmth, tint, sharpness, grain and vignette. Each row has a minus button, a plus
-button and one line that says what it does. Before this release, only the list icon on the band
-opened them. The channel button had taken that icon, so there was no other way in. With all ten at
-zero, Roll writes the file without changes.
+### A map of the roll
 
-### Filters and focus
+The roll has a map scope beside Camera and Starred. Photographs sit where you took them. Location
+tagging starts on and turns off in Settings, Camera. Select a day in the roll to send or delete a
+group at once.
 
-Filters no longer take the other dials away. An earlier build removed exposure, focus and zoom from
-the wheel under a heavy filter. The filter is a look over a real exposure. The DNG does not carry
-it, and you still have to aim, expose and frame the shot.
+### Ten picture adjustments
 
-Zone focus stops for a coarse filter. Dither 16, 1-Bit, Halftone, Game Boy and Game Boy Color
-remove the detail that zone focus needs. Roll turns zone focus off under those filters. It comes
-back with the next fine filter. The other dials stay.
+Exposure, contrast, highlights, shadows, vibrance, warmth, tint, sharpness, grain and vignette,
+in Settings, Look, Picture. Each row has a minus button, a plus button and one line that says what
+it does. With all ten at zero, Roll writes the file without changes.
 
-### Faults
+### Every filter, on a real photograph
 
-The `!n` mark shows for ten seconds after a fault. Then it fades. The list behind it stays, and a
-shake report still carries every name.
+Settings, Look, View Filters shows the whole catalog on a photograph, rendered live on the phone.
+Tap one to take it off the wheel or to put it back. The wheel and the grid follow the same list.
+Filters no longer take the other dials away.
+
+### It tells you when something goes wrong
+
+A small mark in the corner counts camera faults. It shows for ten seconds after a fault, then it
+fades. Tap it to read what happened. Shake the phone twice to send a report with a screenshot. A
+crash from the last run reports itself on the next launch.
+
+### Under the hood
+
+Zero shutter lag is off by default, because it can wedge this sensor. A watchdog restarts the camera if the sensor
+stops answering. It waits while a photograph is in flight instead of interrupting it. The camera no longer restarts when you go to the roll and come back.
 
 ## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
 

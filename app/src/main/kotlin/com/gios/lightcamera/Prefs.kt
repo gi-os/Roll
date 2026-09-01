@@ -254,6 +254,14 @@ enum class SelfTimer(val seconds: Int, val label: String) {
  * a coroutine to find out what it is supposed to be doing. Synchronous reads at startup,
  * flows for the UI, and writes that are fire-and-forget.
  */
+/**
+ * The release the news page describes, as major times ten plus minor.
+ *
+ * Raise it when a release earns a page of its own, and every phone sees that page once. Left
+ * alone, nobody sees anything. Top level rather than in the companion, which is private.
+ */
+const val NEWS_RELEASE = 30
+
 class Prefs(context: Context) {
 
     private val prefs = context.getSharedPreferences(PrefsFile.NAME, Context.MODE_PRIVATE)
@@ -374,6 +382,22 @@ class Prefs(context: Context) {
     fun markFiltersPicked() {
         if (_filtersPicked.value) return
         set(_filtersPicked, true) { putBoolean(FILTERS_PICKED, true) }
+    }
+
+    /**
+     * The last release whose news page this phone has seen, as major times ten plus minor.
+     *
+     * A number rather than a flag, so a later release can show its own page by raising
+     * [NEWS_SHOWN_FOR] and nothing else. Zero means a phone that has never seen one, which is both
+     * a fresh install and everybody updating from before this existed. Both get the 3.0 page, and
+     * a fresh install gets it before the filter picker rather than on top of it.
+     */
+    private val _newsSeen = MutableStateFlow(prefs.getInt(NEWS_SEEN, 0))
+    val newsSeen: StateFlow<Int> = _newsSeen.asStateFlow()
+
+    fun markNewsSeen(release: Int) {
+        if (_newsSeen.value >= release) return
+        set(_newsSeen, release) { putInt(NEWS_SEEN, release) }
     }
 
     private fun readLines(key: String): List<String> =
@@ -1043,6 +1067,7 @@ class Prefs(context: Context) {
         const val FILTER_ORDER = "filterOrder"
         const val FILTERS_OFF = "filtersOff"
         const val FILTERS_PICKED = "filtersPicked"
+        const val NEWS_SEEN = "newsSeen"
         const val HISTOGRAM = "histogram"
         const val CLIPPING = "clipping"
         const val BURST = "burst"
