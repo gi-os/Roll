@@ -1,82 +1,56 @@
-## Roll v3.0
+## Roll 3.0 is here
 
-This release collects everything since v2.60, the last build most people took. Thirty-nine
-versions went to the nightly channel in between. The camera you open is a different camera.
+It's been a while since 2.60 — 39 nightly builds, to be exact — but we think the wait was worth it. Here's what changed.
 
-On the first launch, Roll shows a page that lists what is new. Read it once. It does not come back.
+### The wheel is the whole game now
 
-### One press, more than one file
+Click the wheel and a list of controls spins up: filters, exposure, shutter, ISO, focus, zoom. Turn to pick one, click again, and the wheel is yours to adjust. Want to keep it locked on a single control? Tap its icon in the band and it's locked — a pocket bump won't move it after that.
 
-A photograph can be more than one file. Roll writes a DNG, a PNG and a JPEG from the same press.
-The DNG is the negative and never carries a filter. The PNG carries the filter without a second
-compression. The roll shows the set as a single photograph, and a tag in the corner switches
-between the files. Send or delete one file, or the whole set. Turn the formats on in Settings,
-Frame, Files.
+### A proper meter
 
-### The wheel holds any control
+Turn the wheel and a ladder of numbers slides down the edge of the frame. A red needle points at your setting — actually just the tip of one, swinging in from off-screen. Drag the ladder to jump around, tap it to lock the dial, and it tucks itself away after a few seconds.
 
-Click the wheel to pick a control. Turn to choose it, click to lock it in, then turn to adjust.
-Filters, exposure, shutter, ISO, zone focus and zoom all ride the same wheel. Tap the icon in the
-band to lock the wheel on one control. The wheel stays on that one until you tap the icon again.
+Zoom reads like a lens barrel now: 1.0 at the bottom, 8.0 at the top, and every framing in between. Pinch to zoom raises the same ladder while your fingers are down.
 
-### The meter
+### One press, three files
 
-A ladder of values stands at the edge of the viewfinder. A red needle sweeps on a pivot off the
-screen. Only the tip of the needle enters the frame. The ladder shows what the wheel
-holds and where the setting sits. Drag it with a finger to jump to a value. Tap it to lock the
-dial. It arrives when you turn the wheel and leaves a few seconds later.
+This one's for anyone who shoots raw but loves a good filter: a single press can now save a DNG, a PNG, and a JPEG of the exact same moment. The DNG is your negative — no filter ever touches it. The PNG carries the filter without a second compression. The roll keeps all three together as one photograph with a little tag in the corner; tap it to flip between them, then send one file or the whole set. Find it under Settings > Frame > Files.
 
-Zoom reads like a lens barrel: 1.0 at the bottom, 8.0 at the top, and every framing between them.
-One notch of the wheel moves the lens by a fraction of a stop. The needle moves by the same
-fraction of the gap. Pinch to zoom raises the same meter for the length of the gesture.
+### The shutter never waits
 
-### Manual exposure
+Press it and you have the photo. Period. Roll develops it in the background, one at a time, while you're already framing the next shot. See that small bar next to the counter? That's the queue draining. Hold the shutter down and it just keeps shooting.
 
-Four modes: auto, shutter priority, ISO priority and manual. The wheel carries the half of the
-exposure that the mode leaves to you. The shutter and ISO ladders show the stops. Settings,
-Camera, Exposure.
+Remember when three quick shots used to freeze the viewfinder and kill the camera? Not anymore. The queue lives on disk now — take as many as you want.
+
+### Exposure by hand
+
+Four modes: auto, shutter priority, ISO priority, and manual. The wheel takes over whichever half of the exposure you hand to it, with the stops sitting right beside the ladder. Settings > Camera > Exposure.
 
 ### Zone focus
 
-Set the distance and shoot without waiting for autofocus, the way a street camera works. Peaking
-marks the edges that are sharp. The readout says what is in focus, in feet or in meters. A coarse filter removes the detail this
-needs. Roll turns zone focus off under one, and offers it again with the next fine filter.
+For the street photographers among us: set a distance and shoot. No waiting for autofocus to catch up — it's exactly why Ricoh built snap focus into the GR. Peaking marks the edges that are sharp, and the readout tells you what's in focus in feet or meters.
 
-### The press is the photograph
+One caveat: the coarse filters switch it off. Dither 16, 1-Bit, Halftone, and the two Game Boys throw away the detail you'd be judging.
 
-The shutter no longer waits. Roll takes the frame at your finger and develops it behind you, one
-at a time. The bar beside the count shows the queue as it drains. Hold the shutter down for a
-burst. Three fast shots used to lag the viewfinder and then crash the camera. The queue now lives on disk
-instead of in memory. The number of shots in a row is your decision.
+### Your photos, on a map
 
-### A map of the roll
+The roll now has a Map tab sitting right beside Camera and Starred, with every shot pinned where you took it — as a thumbnail of the photo itself, not a dot. Turn the wheel to zoom, drag to move around, and tap a stack to lay out everything you shot in that spot along the bottom. Location tagging is on by default — Settings > Camera if you'd rather it wasn't. Select a whole day to send it or delete it in one go. Perfect for clearing out an entire trip.
 
-The roll has a map scope beside Camera and Starred. Photographs sit where you took them. Location
-tagging starts on and turns off in Settings, Camera. Select a day in the roll to send or delete a
-group at once.
+### Ten adjustments
 
-### Ten picture adjustments
+We built a proper editing panel: exposure, contrast, highlights, shadows, vibrance, warmth, tint, sharpness, grain, vignette. Each one is a minus, a plus, and a line of plain-English text explaining what it does.
 
-Exposure, contrast, highlights, shadows, vibrance, warmth, tint, sharpness, grain and vignette,
-in Settings, Look, Picture. Each row has a minus button, a plus button and one line that says what
-it does. With all ten at zero, Roll writes the file without changes.
+If you remember one thing, make it vibrance — it lifts color and somehow leaves skin alone, which is black magic as far as we're concerned. And if you leave all ten at zero, Roll saves the file exactly as the camera made it. No surprises. Settings > Look > Picture.
 
-### Every filter, on a real photograph
+### Filters, on a real photograph
 
-Settings, Look, View Filters shows the whole catalog on a photograph, rendered live on the phone.
-Tap one to take it off the wheel or to put it back. The wheel and the grid follow the same list.
-Filters no longer take the other dials away.
+Settings > Look > View Filters shows the whole catalog on a real photo, rendered live on your phone, one filter per page. Tap to take one off the wheel or put it back. And the big one: filters no longer take your other controls away.
 
-### It tells you when something goes wrong
+### When something breaks, it says so
 
-A small mark in the corner counts camera faults. It shows for ten seconds after a fault, then it
-fades. Tap it to read what happened. Shake the phone twice to send a report with a screenshot. A
-crash from the last run reports itself on the next launch.
+A small mark in the corner counts camera faults and fades after ten seconds. Tap it to read what happened. If the app crashes, shake your phone twice and it'll send a report with a screenshot. And if a crash happened last time, it reports itself the moment you open the app. We're not just saying "sorry" — we want to actually fix it.
 
-### Under the hood
-
-Zero shutter lag is off by default, because it can wedge this sensor. A watchdog restarts the camera if the sensor
-stops answering. It waits while a photograph is in flight instead of interrupting it. The camera no longer restarts when you go to the roll and come back.
+Thanks for sticking with us through all those nightlies. Go shoot something.
 
 ## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
 

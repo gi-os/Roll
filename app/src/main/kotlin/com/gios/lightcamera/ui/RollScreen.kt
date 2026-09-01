@@ -236,6 +236,7 @@ fun RollScreen(
             scope == RollScope.Map -> MapScreen(
                 located = located,
                 tiles = vm.tiles,
+                thumbs = vm.thumbs,
                 onOpen = onOpen,
             )
 

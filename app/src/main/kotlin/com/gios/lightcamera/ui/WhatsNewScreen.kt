@@ -58,73 +58,89 @@ fun WhatsNewScreen(onClose: () -> Unit) {
                 .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
         ) {
             LightText(
-                "Everything that landed since 2.60. Read it once, then it is gone.",
+                "It has been a while since 2.60. Thirty-nine nightly builds, to be exact. " +
+                    "Here is what changed.",
                 LightTextVariant.Detail,
                 lighten = true,
             )
 
             NewsBlock(
-                "One press, more than one file",
-                "Roll can write a DNG, a PNG and a JPEG from one press. The DNG is the negative " +
-                    "and never carries a filter. The roll shows the set as a single photograph, " +
-                    "and a corner tag switches between the files. Turn the formats on in " +
-                    "Settings, Frame, Files.",
+                "The wheel is the whole game now",
+                "Click the wheel and a list of controls spins up: filters, exposure, shutter, " +
+                    "ISO, focus, zoom. Turn to pick one, click again, and the wheel is yours to " +
+                    "adjust. Want it locked on a single control? Tap its icon in the band. A " +
+                    "pocket bump will not move it after that.",
             )
             NewsBlock(
-                "The wheel holds any control",
-                "Click the wheel to pick a control. Turn to choose it, click to lock it in, then " +
-                    "turn to adjust. Filters, exposure, shutter, ISO, zone focus and zoom all " +
-                    "ride the same wheel. Tap the icon in the band to lock the wheel on one.",
+                "A proper meter",
+                "Turn the wheel and a ladder of numbers slides down the edge of the frame. A red " +
+                    "needle points at your setting, or really just the tip of one, swinging in " +
+                    "from off screen. Drag the ladder to jump around, tap it to lock the dial, " +
+                    "and it tucks itself away after a few seconds. Zoom reads like a lens barrel " +
+                    "now: 1.0 at the bottom, 8.0 at the top.",
             )
             NewsBlock(
-                "The meter",
-                "A ladder of values stands at the edge of the viewfinder with a red needle on " +
-                    "it. It shows what the wheel holds and where the setting sits. Drag it to " +
-                    "jump. Tap it to lock the dial. It arrives when you turn the wheel and " +
-                    "leaves a few seconds later.",
+                "One press, three files",
+                "For anyone who shoots raw but loves a good filter: one press can save a DNG, a " +
+                    "PNG and a JPEG of the same moment. The DNG is your negative and no filter " +
+                    "ever touches it. The roll keeps all three together as one photograph with a " +
+                    "little tag in the corner. Tap it to flip between them, then send one file " +
+                    "or the whole set. Settings, Frame, Files.",
             )
             NewsBlock(
-                "Manual exposure",
-                "Auto, shutter priority, ISO priority and manual. The wheel carries the half of " +
-                    "the exposure that the mode leaves to you. Settings, Camera, Exposure.",
+                "The shutter never waits",
+                "Press it and you have the photo. Roll develops it in the background, one at a " +
+                    "time, while you are already framing the next shot. That small bar next to " +
+                    "the counter is the queue draining. Hold the shutter down and it keeps " +
+                    "shooting. The queue lives on disk now, so take as many as you want.",
+            )
+            NewsBlock(
+                "Exposure by hand",
+                "Four modes: auto, shutter priority, ISO priority and manual. The wheel takes " +
+                    "over whichever half of the exposure you hand to it, with the stops sitting " +
+                    "right beside the ladder. Settings, Camera, Exposure.",
             )
             NewsBlock(
                 "Zone focus",
-                "Set the distance and shoot without waiting for autofocus, the way a street " +
-                    "camera works. Peaking marks the edges that are sharp. The readout says what " +
-                    "is in focus, in feet or meters.",
+                "For the street photographers among us: set a distance and shoot, with no " +
+                    "waiting for autofocus to catch up. Peaking marks the edges that are sharp, " +
+                    "and the readout tells you what is in focus in feet or meters. One caveat. " +
+                    "The coarse filters switch it off, because Dither 16, 1-Bit, Halftone and " +
+                    "the two Game Boys throw away the detail you would be judging.",
             )
             NewsBlock(
-                "The press is the photograph",
-                "The shutter no longer waits for the last shot to finish. Roll takes the frame " +
-                    "at your finger and develops it behind you, one at a time. The bar beside " +
-                    "the count shows the queue draining. Hold the shutter down for a burst.",
+                "Your photos, on a map",
+                "The roll has a Map tab beside Camera and Starred, with every shot pinned where " +
+                    "you took it, as a thumbnail of the photo itself. Turn the wheel to zoom, " +
+                    "drag to move around, and tap a stack to lay out everything you shot in that " +
+                    "spot along the bottom. Location tagging is on by default. Settings, Camera, " +
+                    "if you would rather it was not.",
             )
             NewsBlock(
-                "A map of the roll",
-                "The roll has a map scope beside Camera and Starred. Photographs sit where you " +
-                    "took them. Location tagging starts on and turns off in Settings, Camera.",
+                "Ten adjustments",
+                "A proper editing panel: exposure, contrast, highlights, shadows, vibrance, " +
+                    "warmth, tint, sharpness, grain, vignette. Each one is a minus, a plus and a " +
+                    "line saying what it does. If you remember one, make it vibrance. It lifts " +
+                    "color and somehow leaves skin alone. Leave all ten at zero and Roll saves " +
+                    "the file exactly as the camera made it. Settings, Look, Picture.",
             )
             NewsBlock(
-                "Ten picture adjustments",
-                "Exposure, contrast, highlights, shadows, vibrance, warmth, tint, sharpness, " +
-                    "grain and vignette, in Settings, Look, Picture. With all ten at zero, Roll " +
-                    "writes the file without changes.",
+                "Filters, on a real photograph",
+                "Settings, Look, View Filters shows the whole catalog on a real photo, rendered " +
+                    "live on your phone, one filter per page. Tap to take one off the wheel or " +
+                    "put it back. And the big one: filters no longer take your other controls " +
+                    "away.",
             )
             NewsBlock(
-                "Every filter, on a real photograph",
-                "Settings, Look, View Filters shows the whole catalog, rendered live. Tap one to " +
-                    "take it off the wheel or put it back. The wheel and the grid follow.",
-            )
-            NewsBlock(
-                "It tells you when something goes wrong",
+                "When something breaks, it says so",
                 "A small mark in the corner counts camera faults and fades after ten seconds. " +
-                    "Tap it to read them. Shake the phone twice to send a report with a " +
-                    "screenshot. A crash from the last run reports itself on the next launch.",
+                    "Tap it to read what happened. Shake your phone twice and it sends a report " +
+                    "with a screenshot. If a crash happened last time, it reports itself the " +
+                    "moment you open the app. We would rather fix it than apologize for it.",
             )
 
             LightText(
-                "The full notes are on the release page.",
+                "Thanks for sticking with us through all those nightlies. Go shoot something.",
                 LightTextVariant.Detail,
                 lighten = true,
                 modifier = Modifier.padding(top = 20.dp),

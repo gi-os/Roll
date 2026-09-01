@@ -29,12 +29,20 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.IntSize
+import com.gios.light.common.hw.WheelTurns
 import com.gios.lightcamera.map.Cluster
 import com.gios.lightcamera.map.Geo
 import com.gios.lightcamera.map.Point
 import com.gios.lightcamera.map.Tile
 import com.gios.lightcamera.map.Tiles
 import com.gios.lightcamera.media.Photo
+import com.gios.lightcamera.media.Thumbs
 import com.gios.lightcamera.ui.theme.LightText
 import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.LightThemeTokens
@@ -60,6 +68,7 @@ import kotlin.math.roundToInt
 fun MapScreen(
     located: List<Pair<Photo, Point>>,
     tiles: Tiles,
+    thumbs: Thumbs,
     onOpen: (Photo) -> Unit,
 ) {
     val colours = LightThemeTokens.colors
@@ -125,12 +134,42 @@ fun MapScreen(
     }
     val byId = remember(located) { located.associate { it.first.id to it.first } }
 
+    // **A mark is the photograph, not a dot.** A dot says a photograph exists somewhere. The point
+    // of a map of your own pictures is recognising the place from the picture, which needs the
+    // picture. One thumbnail per mark, the newest of the group, at the size the mark is drawn.
+    val marks = remember { mutableStateMapOf<Long, ImageBitmap>() }
+    LaunchedEffect(clusters) {
+        val wantedIds = clusters.mapNotNull { it.ids.firstOrNull() }.toSet()
+        marks.keys.retainAll(wantedIds)
+        wantedIds.forEach { id ->
+            if (marks.containsKey(id)) return@forEach
+            val photo = byId[id] ?: return@forEach
+            thumbs.thumbnail(photo.uri, photo.id, MARK_PX)?.let { marks[id] = it.asImageBitmap() }
+        }
+    }
+
+    // Which mark the finger landed on, and so which photographs to lay out along the bottom. A
+    // mark holding twelve pictures used to zoom in and hope they separated, which they do not when
+    // twelve were taken standing in one spot.
+    var opened by remember { mutableStateOf<Cluster?>(null) }
+    LaunchedEffect(clusters) { opened = null }
+
+    // The wheel zooms, because the wheel is what this phone has instead of a second finger, and
+    // because a pinch on a 3.9 inch panel covers most of the map you are trying to look at.
+    WheelTurns(active = true, armed = true) { notches ->
+        opened = null
+        zoom = (zoom + if (notches > 0) 1 else -1).coerceIn(Geo.MIN_ZOOM, Geo.MAX_ZOOM)
+    }
+
     Box(
         Modifier
             .fillMaxSize()
             .background(colours.background)
             .onSizeChanged { viewport = Size(it.width.toFloat(), it.height.toFloat()) }
-            .pointerInput(here, zoom) {
+            // **Keyed on nothing.** These used to key on the centre and the zoom, both of which
+            // the gesture itself writes, so the first pan restarted the detector and the drag died
+            // under the finger. The delegated state reads current values inside the lambda anyway.
+            .pointerInput(Unit) {
                 detectTransformGestures { _, pan, gestureZoom, _ ->
                     // Pan in pixels, converted back to a coordinate, so dragging moves the map by
                     // exactly the distance the finger moved at every latitude.
@@ -145,21 +184,22 @@ fun MapScreen(
                     if (gestureZoom < 0.87f) zoom = (zoom - 1).coerceAtLeast(Geo.MIN_ZOOM)
                 }
             }
-            .pointerInput(clusters, here, zoom) {
+            .pointerInput(clusters) {
                 detectTapGestures { tap ->
+                    val at0 = centre ?: here
                     val hit = clusters.minByOrNull { cluster ->
-                        val at = Geo.screenOf(cluster.point, here, zoom, width, height)
+                        val at = Geo.screenOf(cluster.point, at0, zoom, width, height)
                         abs(at.x - tap.x) + abs(at.y - tap.y)
                     } ?: return@detectTapGestures
-                    val at = Geo.screenOf(hit.point, here, zoom, width, height)
-                    if (abs(at.x - tap.x) > TOUCH_SLOP || abs(at.y - tap.y) > TOUCH_SLOP) {
+                    val at = Geo.screenOf(hit.point, at0, zoom, width, height)
+                    if (abs(at.x - tap.x) > MARK_TOUCH || abs(at.y - tap.y) > MARK_TOUCH) {
+                        opened = null
                         return@detectTapGestures
                     }
-                    // A mark holding several photographs zooms in rather than guessing which one
-                    // was meant; a mark holding one opens it.
-                    if (hit.size > 1 && zoom < Geo.MAX_ZOOM) {
-                        centre = hit.point
-                        zoom += 1
+                    // One photograph opens. Several lay themselves out along the bottom of the
+                    // map, which is the question the tap was asking: what did I take here.
+                    if (hit.size > 1) {
+                        opened = hit
                     } else {
                         byId[hit.ids.first()]?.let(onOpen)
                     }
@@ -169,14 +209,41 @@ fun MapScreen(
         Canvas(Modifier.fillMaxSize()) {
             wanted.forEach { tile ->
                 val bitmap = loaded[tile] ?: return@forEach
-                val offset = Geo.offsetOf(tile, here, width, height)
+                val offset = Geo.offsetOf(tile, centre ?: here, width, height)
                 drawImage(
                     image = bitmap,
                     dstOffset = IntOffset(offset.x.roundToInt(), offset.y.roundToInt()),
                 )
             }
+            val eye = centre ?: here
             clusters.forEach { cluster ->
-                drawMark(cluster, here, zoom, width, height, colours.content, colours.background)
+                drawMark(
+                    cluster = cluster,
+                    centre = eye,
+                    zoom = zoom,
+                    width = width,
+                    height = height,
+                    ink = colours.content,
+                    paper = colours.background,
+                    thumb = cluster.ids.firstOrNull()?.let { marks[it] },
+                    open = cluster.point == opened?.point,
+                )
+            }
+        }
+
+        opened?.let { cluster ->
+            val shown = remember(cluster, byId) { cluster.ids.mapNotNull { byId[it] } }
+            LazyRow(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+                    .background(colours.scrim)
+                    .padding(vertical = 6.dp),
+            ) {
+                items(shown, key = { it.id }) { photo ->
+                    MapThumb(photo = photo, thumbs = thumbs, onOpen = onOpen)
+                }
             }
         }
 
@@ -208,35 +275,117 @@ private fun DrawScope.drawMark(
     height: Int,
     ink: Color,
     paper: Color,
+    thumb: ImageBitmap?,
+    open: Boolean,
 ) {
     val at = Geo.screenOf(cluster.point, centre, zoom, width, height)
-    if (at.x < -MARK_RADIUS || at.y < -MARK_RADIUS) return
-    if (at.x > width + MARK_RADIUS || at.y > height + MARK_RADIUS) return
+    val half = MARK_SIDE / 2f
+    if (at.x < -MARK_SIDE || at.y < -MARK_SIDE) return
+    if (at.x > width + MARK_SIDE || at.y > height + MARK_SIDE) return
     val position = Offset(at.x.toFloat(), at.y.toFloat())
-    // Paper under ink: a black dot on a dark map tile is invisible, and the halo is what makes a
-    // mark readable over anything underneath it.
-    drawCircle(color = paper, radius = MARK_RADIUS + 2f, center = position)
-    drawCircle(color = ink, radius = MARK_RADIUS, center = position)
+    val corner = Offset(position.x - half, position.y - half)
+
+    // Paper under the picture: a frame is what separates one photograph from the map behind it and
+    // from the next photograph half over it. The open mark gets an ink frame instead, which is the
+    // only state this screen has to show.
+    val edge = if (open) ink else paper
+    drawRect(
+        color = edge,
+        topLeft = Offset(corner.x - MARK_EDGE, corner.y - MARK_EDGE),
+        size = Size(MARK_SIDE + MARK_EDGE * 2f, MARK_SIDE + MARK_EDGE * 2f),
+    )
+    if (thumb == null) {
+        // Before the thumbnail arrives, and for anything that fails to decode.
+        drawRect(color = ink, topLeft = corner, size = Size(MARK_SIDE, MARK_SIDE))
+    } else {
+        drawImage(
+            image = thumb,
+            srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+            srcSize = IntSize(thumb.width, thumb.height),
+            dstOffset = androidx.compose.ui.unit.IntOffset(
+                corner.x.roundToInt(),
+                corner.y.roundToInt(),
+            ),
+            dstSize = IntSize(MARK_SIDE.roundToInt(), MARK_SIDE.roundToInt()),
+        )
+    }
+
     if (cluster.size > 1) {
-        drawCircle(color = paper, radius = MARK_RADIUS - 3f, center = position)
+        // The count rides the corner rather than the middle, because the middle is the photograph.
+        val badge = Offset(position.x + half, position.y - half)
+        drawCircle(color = paper, radius = BADGE_RADIUS + 1.5f, center = badge)
+        drawCircle(color = ink, radius = BADGE_RADIUS, center = badge)
         drawContext.canvas.nativeCanvas.apply {
             val paint = android.graphics.Paint().apply {
-                color = ink.toArgb()
-                textSize = MARK_RADIUS * 1.2f
+                color = paper.toArgb()
+                textSize = BADGE_RADIUS * 1.25f
                 textAlign = android.graphics.Paint.Align.CENTER
                 isAntiAlias = true
             }
             drawText(
                 if (cluster.size > 99) "99+" else cluster.size.toString(),
-                position.x,
-                position.y + MARK_RADIUS * 0.42f,
+                badge.x,
+                badge.y + BADGE_RADIUS * 0.45f,
                 paint,
             )
         }
     }
 }
 
-private const val MARK_RADIUS = 11f
+/**
+ * One photograph from a tapped mark, in the strip along the bottom.
+ *
+ * Loaded here rather than up front: a mark can hold fifty pictures and only the ones a thumb
+ * scrolls past are worth decoding.
+ */
+@Composable
+private fun MapThumb(photo: Photo, thumbs: Thumbs, onOpen: (Photo) -> Unit) {
+    var image by remember(photo.id) {
+        mutableStateOf(thumbs.cached(photo.id)?.asImageBitmap())
+    }
+    LaunchedEffect(photo.id) {
+        if (image == null) {
+            image = thumbs.thumbnail(photo.uri, photo.id, STRIP_PX)?.asImageBitmap()
+        }
+    }
+    val colours = LightThemeTokens.colors
+    Box(
+        Modifier
+            .padding(horizontal = 3.dp)
+            .height(STRIP_SIDE)
+            .aspectRatio(1f)
+            .background(colours.rule)
+            .pointerInput(photo.id) { detectTapGestures { onOpen(photo) } },
+    ) {
+        image?.let {
+            Canvas(Modifier.fillMaxSize()) {
+                drawImage(
+                    image = it,
+                    srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                    srcSize = IntSize(it.width, it.height),
+                    dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                    dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+                )
+            }
+        }
+    }
+}
+
+/** The side of a mark, in pixels on the canvas. Big enough to recognise the place in it. */
+private const val MARK_SIDE = 48f
+
+/** The frame around a mark. */
+private const val MARK_EDGE = 2f
+
+/** The count on a stack of photographs, in the corner of the top one. */
+private const val BADGE_RADIUS = 9f
+
+/** What to ask MediaStore for. Twice the mark, so it stays sharp on a dense panel. */
+private const val MARK_PX = 96
+
+private val STRIP_SIDE = 64.dp
+
+private const val STRIP_PX = 192
 
 /** How far a tap may miss a mark and still count. A fingertip on this panel. */
-private const val TOUCH_SLOP = 34
+private const val MARK_TOUCH = 40
