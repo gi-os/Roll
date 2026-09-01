@@ -287,6 +287,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     class GaugeSpec(
         val labels: List<String>,
         val index: Int,
+        /**
+         * Where the needle actually points, in rungs.
+         *
+         * A whole number for the dials whose values *are* the marks -- shutter, ISO, filters --
+         * and a fraction for the ones that pass between them. Zoom is the reason: 2.4x is a real
+         * setting and a needle that can only stand on 2 or 3 is lying about the lens.
+         */
+        val position: Float = index.toFloat(),
         val onSet: (Int) -> Unit,
     )
 
@@ -315,6 +323,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             GaugeSpec(
                 labels = stops.map { if (it < 9.95f) "%.1fx".format(it) else "%.0fx".format(it) },
                 index = zoomRung(),
+                position = zoomPosition(),
             ) { engine.setZoom(stops[it.coerceIn(0, stops.lastIndex)]) }
         }
         Channel.Exposure -> {
@@ -391,20 +400,27 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * One notch, one rung.
+     * Where the lens sits on the ladder, marks included and everything in between.
      *
-     * The engine's own zoom step is a 1.08 multiplier — right for a pinch, wrong for a dial with a
-     * ladder beside it, because eight notches moved the needle less than the gap between two
-     * printed numbers and the wheel read as dead. On the ladder the wheel walks the marks; the
-     * pinch stays continuous for framing.
+     * Interpolated in log space, because that is how the marks are spaced and how zoom is felt:
+     * 1.5 to 2 and 4 to 6 are the same distance to a hand and the same gap on the ladder. The
+     * needle rides it continuously, so racking the wheel reads as one smooth sweep past the
+     * numbers rather than a pointer jumping between them.
      */
-    private fun stepZoomRung(notches: Int) {
+    private fun zoomPosition(): Float {
         val stops = zoomStops()
-        if (stops.size < 2) return
-        // Up the ladder is toward the long end, and the list is drawn top-first, so a forward
-        // notch is a step *down* the indexes.
-        val next = (zoomRung() - if (notches > 0) 1 else -1).coerceIn(0, stops.lastIndex)
-        engine.setZoom(stops[next])
+        if (stops.size < 2) return 0f
+        val z = engine.zoom.value.coerceIn(stops.last(), stops.first())
+        for (i in 0 until stops.lastIndex) {
+            val hi = stops[i]
+            val lo = stops[i + 1]
+            if (z <= hi && z >= lo) {
+                val span = kotlin.math.ln(lo) - kotlin.math.ln(hi)
+                if (span == 0f) return i.toFloat()
+                return i + ((kotlin.math.ln(z) - kotlin.math.ln(hi)) / span)
+            }
+        }
+        return zoomRung().toFloat()
     }
 
     /**
@@ -509,7 +525,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 showNotice(engine.focusLabel.value)
             }
             Channel.Zoom -> {
-                stepZoomRung(notches)
+                // Between the marks, not mark to mark: the ladder's numbers are landmarks on a
+                // continuous lens, and 2.4x is a framing somebody wanted. The needle carries the
+                // fraction, so a notch that moves the lens an eighth of a stop shows as an eighth
+                // of a gap.
+                engine.stepZoom(notches)
                 showNotice(engine.zoomLabel())
             }
         }

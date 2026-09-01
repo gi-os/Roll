@@ -1162,6 +1162,7 @@ fun CameraScreen(
                         NeedleGauge(
                             labels = spec.labels,
                             index = spec.index,
+                            position = spec.position,
                             onSet = { i ->
                                 vm.touchLadder()
                                 spec.onSet(i)

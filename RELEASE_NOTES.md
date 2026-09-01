@@ -1,3 +1,15 @@
+## Roll v2.98 — zoom between the marks
+
+**The wheel zooms continuously again, and the needle shows where you are.** The printed numbers
+are landmarks on a lens that has every framing in between: 2.4x is a real setting, and a needle
+that could only stand on 2 or 3 was lying about it. Each notch moves the lens a fraction of a
+stop and the needle slides that same fraction of the gap, so racking the wheel reads as one sweep
+past the numbers instead of a pointer jumping between them.
+
+Spacing is logarithmic, the way the marks are laid out and the way zoom is felt: 1.5 to 2 and 4 to
+6 are the same distance to a hand and the same distance on the ladder. Pinch and the ladder drag
+are unchanged, and both show up on the needle the same way.
+
 ## Roll v2.97 — the needle really does move now, and the fault chip stops staring
 
 **The needle moves on every channel.** The real fault was one line up from where I kept looking:

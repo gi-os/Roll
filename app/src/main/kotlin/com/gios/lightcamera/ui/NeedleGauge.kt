@@ -43,6 +43,8 @@ fun NeedleGauge(
     labels: List<String>,
     index: Int,
     onSet: (Int) -> Unit,
+    /** Where the needle points, in rungs -- fractional for the dials that pass between marks. */
+    position: Float = index.toFloat(),
     /** A tap that never became a drag. The caller decides what a tap means; here it is a latch. */
     onTap: (() -> Unit)? = null,
     /** The ladder's long axis. Filters hand the whole viewfinder edge in; everything else the default. */
@@ -61,7 +63,7 @@ fun NeedleGauge(
     // hundred-and-twenty: at 120ms the needle was still arriving when the next notch landed, so a
     // fast spin read as a pointer limping after the wheel.
     val sweep by animateFloatAsState(
-        targetValue = index.toFloat(),
+        targetValue = position,
         animationSpec = tween(durationMillis = 60),
         label = "needle",
     )
