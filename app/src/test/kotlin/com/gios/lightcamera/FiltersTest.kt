@@ -225,20 +225,6 @@ class FiltersTest {
         assertEquals(Filters.none.id, Filters.byId(null).id)
     }
 
-    @Test
-    fun `film and mono are the only filters that keep the other channels open`() {
-        // The wheel stays on a heavy filter: under a low-res or distorting look, EV, zone focus and
-        // zoom would be adjusting a photograph nobody can see. Film and Mono are looks over a scene
-        // the camera still reads, so they (and the plain Preset) leave the other channels alone.
-        Filters.all.forEach { filter ->
-            assertEquals(
-                "keepsOtherChannels(${filter.id}) disagrees with the pinned list",
-                filter.id in setOf("none", "film", "mono"),
-                Filters.keepsOtherChannels(filter),
-            )
-        }
-    }
-
     /**
      * The filters with a left and a right, named.
      *

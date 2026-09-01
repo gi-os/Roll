@@ -180,18 +180,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             exposure = engine.exposureMode.value,
             filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
         )
-        // **A heavy filter keeps the wheel on itself.** Film and Mono are looks over a scene the
-        // camera still reads; everything else — low-res, distorting, datamosh — replaces the scene,
-        // and EV/zone/zoom under it would be adjusting a photograph nobody can see. Those channels
-        // leave the dial until a plain look is back. [Filters.keepsOtherChannels] is the single
-        // list of which filters count as plain.
-        return if (Filters.keepsOtherChannels(filter.value)) {
-            base
-        } else {
-            base.filterNot {
-                it == Channel.Exposure || it == Channel.Focus || it == Channel.Zoom
-            }
-        }
+        // **A filter takes nothing off the dial.** A previous build dropped EV, focus and zoom
+        // under the heavy looks, reasoning that they adjust a scene the filter has replaced. They
+        // do not: the look is laid over a real exposure, the DNG never wears it at all, and a Game
+        // Boy frame still has to be aimed, focused and exposed. On the phone it read as controls
+        // that had stopped working, which is what it was.
+        return base
     }
 
     /**
@@ -451,6 +445,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // state no collected StateFlow observes — otherwise their needles sit still while the
         // value moves. The counter is the wheel's own heartbeat for the meter.
         _wheelTick.value = _wheelTick.value + 1
+        // **And wake the ladder, whatever the channel.** The fade-out was only ever cancelled by
+        // the filter path, so on EV, shutter, ISO, focus and zoom the needle moved behind an alpha
+        // of zero: the value changed, the meter never came back, and the field read it as "the red
+        // bar only works for filters".
+        touchLadder()
         if (_picking.value) {
             val available = channelsAvailable()
             if (available.isEmpty()) return

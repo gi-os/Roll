@@ -1061,7 +1061,7 @@ fun CameraScreen(
         // a red needle sweeping on a pivot hidden off-screen — only the tip enters the frame,
         // sliding in under the numbers. Read like a speedometer, dragged like a slider, tapped
         // to lock the dial. Filters ride it as three-letter codes.
-        if (channelWheel && !picking) {
+        if (channelWheel && !picking && active) {
             vm.gaugeSpec()?.let { spec ->
                 // Sideways, like every other word on this viewfinder: the ladder is drawn in the
                 // gauge's own portrait space and the whole thing turned 90°, so it stands upright
@@ -1074,13 +1074,17 @@ fun CameraScreen(
                 // line. Filters get the whole edge -- the ladder is the dial's full track laid
                 // out, and a fingertip can land anywhere on it; every other channel stays the
                 // small meter, fixed in place.
+                // The viewfinder is the screen minus the band, and the ladder belongs to the
+                // viewfinder rather than to the glass: centred on the picture, which is half a
+                // band off from centred on the screen.
+                val glass = LocalConfiguration.current.screenWidthDp.dp - BAND
                 val gaugeLength =
                     if (channel == Channel.Filter) {
                         // Not the whole edge: the ladder used to run the full width and spill over
                         // the black chrome at both ends — the report was "filters go over the black
                         // bar". Fifteen percent off each end puts the ladder's rungs between the
                         // bars, on the viewfinder, where a fingertip can still land on any of them.
-                        LocalConfiguration.current.screenWidthDp.dp * 0.7f
+                        glass * 0.7f
                     } else {
                         128.dp
                     }
@@ -1096,10 +1100,16 @@ fun CameraScreen(
                 )
                 Box(
                     Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 2.dp)
+                        .align(Alignment.TopStart)
+                        .padding(start = BAND + (glass - gaugeLength) / 2, top = 2.dp)
                         .requiredSize(width = gaugeLength, height = 44.dp)
-                        .graphicsLayer { alpha = ladderAlpha },
+                        // Clipped: the ladder's own box is longer than the strip it draws into and
+                        // only the rotation folds it back inside. Unclipped, that overhang paints
+                        // past the page and turns up over the roll.
+                        .graphicsLayer {
+                            alpha = ladderAlpha
+                            clip = true
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
@@ -2016,6 +2026,9 @@ private fun turnDial(
     action: DialAction,
     notches: Int,
 ) {
+    // Same reason as [CameraViewModel.channelTurn]: a turn that changes a value has to bring back
+    // the meter that reads it, whichever of the two turn paths the wheel came down.
+    vm.touchLadder()
     when (action) {
         // One filter per turn regardless of how many notches arrived: the track is a list of names
         // and skipping two of them because the wheel was flicked is not what the gesture meant.

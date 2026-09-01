@@ -118,9 +118,15 @@ fun NeedleGauge(
             } else {
                 step
             }
+            // The other limit is the ladder's own width: a monospace glyph advances about 0.62 of
+            // its size, so the longest label has to fit across the gauge. That is the whole
+            // ceiling now. A flat 34px cap used to sit under it and held EV's numbers at half the
+            // size the ladder had room for.
+            val chars = labels.maxOf { it.length }.coerceAtLeast(1)
+            val across = (size.width - LABEL_X * 2f) / (chars * 0.62f)
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
-                textSize = minOf(pitch * 0.62f, MAX_TEXT_PX)
+                textSize = minOf(pitch * 0.62f, across)
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }
@@ -148,9 +154,6 @@ private const val LABEL_X = 8f
 
 /** How far the needle's tip rides in under the text. Under: the labels draw over it. */
 private const val OVERLAP = 14f
-
-/** A rung with no text is still a rung — EV marks only the whole stops; the needle lands between. */
-private const val MAX_TEXT_PX = 34f
 
 /** The one colour in the app that is not the theme's: a meter needle is red or it is not one. */
 private val NEEDLE_RED = Color(0xFFCC2A1E)

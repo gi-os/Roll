@@ -1,3 +1,26 @@
+## Roll v2.95 — the meter shows up for every dial, sits on the picture, stays out of the roll
+
+**The needle works on every channel now, not just filters.** The ladder fades itself out after a
+few seconds, and only the filter dial was waking it back up — so on EV, shutter, ISO, focus and
+zoom the needle was moving behind an invisible layer. Every turn of the wheel brings the meter
+back now, whatever it's holding.
+
+**Centred on the viewfinder, not on the screen.** The ladder sat half a control band off centre
+because it was measuring the whole glass instead of the picture. It now centres on the image, with
+the band's width taken out of the sum.
+
+**Gone from the roll.** The ladder is longer than the strip it draws into, and only the rotation
+folded it back inside — unclipped, it painted past the page and turned up over your photographs.
+It's clipped now, and it leaves entirely when the viewfinder isn't the page you're on.
+
+**Filters stop taking controls away.** The last build dropped EV, zone focus and zoom from the
+wheel under the heavier looks. That was wrong: a filter is a look laid over a real exposure, the
+DNG never wears it at all, and a Game Boy frame still has to be aimed, focused and exposed. Every
+channel stays on the dial under every filter.
+
+**EV's numbers are readable.** They were held to half the size the ladder had room for by an old
+fixed ceiling. The only limit now is the ladder's own width.
+
 ## Roll v2.94 — choose your filters, all of them, on the beach
 
 **Filter picker in Look settings.** Look → View Filters now opens the full filter list — every look,
