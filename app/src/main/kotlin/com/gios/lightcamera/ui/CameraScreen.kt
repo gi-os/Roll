@@ -1120,8 +1120,13 @@ fun CameraScreen(
                 // band off from centred on the screen.
                 val glass = LocalConfiguration.current.screenWidthDp.dp - BAND
                 val shown = borrowed ?: channel
+                // Value ladders are read at arm's length and have room to be read: they get a
+                // deeper strip and larger numbers. The filter ladder keeps the small setting --
+                // twenty-odd three-letter codes at that size would collide.
+                val filterLadder = shown == Channel.Filter
+                val depth = if (filterLadder) 44.dp else 60.dp
                 val gaugeLength =
-                    if (shown == Channel.Filter) {
+                    if (filterLadder) {
                         // Not the whole edge: the ladder used to run the full width and spill over
                         // the black chrome at both ends — the report was "filters go over the black
                         // bar". Fifteen percent off each end puts the ladder's rungs between the
@@ -1144,7 +1149,7 @@ fun CameraScreen(
                     Modifier
                         .align(Alignment.TopStart)
                         .padding(start = BAND + (glass - gaugeLength) / 2, top = 2.dp)
-                        .requiredSize(width = gaugeLength, height = 44.dp)
+                        .requiredSize(width = gaugeLength, height = depth)
                         // Clipped: the ladder's own box is longer than the strip it draws into and
                         // only the rotation folds it back inside. Unclipped, that overhang paints
                         // past the page and turns up over the roll.
@@ -1156,7 +1161,7 @@ fun CameraScreen(
                 ) {
                     Box(
                         Modifier
-                            .requiredSize(width = 44.dp, height = gaugeLength)
+                            .requiredSize(width = depth, height = gaugeLength)
                             .graphicsLayer { rotationZ = 90f },
                     ) {
                         NeedleGauge(
@@ -1172,6 +1177,8 @@ fun CameraScreen(
                                 vm.toggleDialLock()
                             },
                             length = gaugeLength,
+                            depth = depth,
+                            large = !filterLadder,
                             // Gate on the boolean, not the animated alpha: the float flips this key
                             // at 0.5 mid-fade and restarts the gesture detectors every frame of the
                             // animation, which swallows the very tap or drag that summoned the ladder.

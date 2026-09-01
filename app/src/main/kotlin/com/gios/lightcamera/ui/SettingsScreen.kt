@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.LightKeys
 import com.gios.light.common.hw.WheelScroll
+import com.gios.lightcamera.filter.Adjust
 import com.gios.lightcamera.BandSlot
 import com.gios.lightcamera.Chrome
 import com.gios.lightcamera.Colour
@@ -453,6 +454,23 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context, onOpe
             vm.prefs.setStampStyle(all[(all.indexOf(stampStyle) + 1) % all.size])
         }
     }
+
+    Section("Picture") {
+        Note(
+            "Ten adjustments to what a plain photograph looks like. They are the Preset look, and they are baked into the file, so what you set here is what is saved. All zero means the picture is untouched, byte for byte, and the whole processing step is skipped.\n\nVibrance is the one worth knowing: it lifts colour but leaves skin alone, which saturation does not. Grain only goes up, because there is no negative grain. These are also on the viewfinder, under the list icon in the band, whenever the wheel is not set to channels.",
+        )
+    }
+    val grade by vm.prefs.grade.collectAsState()
+    Adjust.entries.forEach { adjust ->
+        Stepper(
+            label = adjust.label,
+            hint = adjust.hint,
+            value = adjust.display(grade[adjust]),
+            onDown = { vm.prefs.stepGrade(adjust, -1) },
+            onUp = { vm.prefs.stepGrade(adjust, 1) },
+        )
+    }
+    Action("RESET PICTURE", lighten = grade.isNeutral) { vm.prefs.clearGrade() }
 
     Section("Filters") {
         Note(
@@ -1017,6 +1035,49 @@ private fun Setting(
         LightText(label, LightTextVariant.Copy, lighten = !enabled)
         Spacer(Modifier.weight(1f))
         LightText(value, LightTextVariant.Copy, lighten = true)
+    }
+}
+
+/**
+ * A row that is nudged rather than cycled.
+ *
+ * The settings idiom here is a tap that walks to the next value, which is right for three-way
+ * switches and wrong for a range of eleven: reaching -2 from +3 should not be five taps and a lap
+ * of the whole scale. So this one has its two ends, with the value between them and the hint
+ * underneath -- "vibrance" and "saturation" are the same word to most people, and the difference
+ * is the entire reason vibrance is the one here.
+ */
+@Composable
+private fun Stepper(
+    label: String,
+    hint: String,
+    value: String,
+    onDown: () -> Unit,
+    onUp: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            LightText(label, LightTextVariant.Copy)
+            LightText(hint, LightTextVariant.Detail, lighten = true)
+        }
+        LightText(
+            "-",
+            LightTextVariant.Button,
+            modifier = Modifier
+                .lightClickable { onDown() }
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        )
+        LightText(value, LightTextVariant.Copy, lighten = true)
+        LightText(
+            "+",
+            LightTextVariant.Button,
+            modifier = Modifier
+                .lightClickable { onUp() }
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        )
     }
 }
 

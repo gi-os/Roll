@@ -1,3 +1,21 @@
+## Roll v2.99 — the picture settings have a home, and the ladder gets its numbers back
+
+**Ten adjustments, in Settings, where you can find them.** Exposure, contrast, highlights,
+shadows, vibrance, warmth, tint, sharpness, grain and vignette now live in Settings under LOOK,
+each with a minus and a plus and a line saying what it does. They were only ever reachable from
+the list icon on the viewfinder band, and the wheel's channel button took that slot over, so
+they had quietly become unreachable. Every value at zero still means the file is untouched.
+
+**Bigger numbers on the value ladders.** EV, zoom, focus, shutter and ISO get a deeper strip and
+numbers set as large as the rungs allow. Filters keep the small setting, since twenty-odd
+three-letter codes at that size would run into each other.
+
+**Zone focus steps aside for the coarse filters.** Focusing by zone is a judgement made by eye off
+the preview, and Dither 16, 1-Bit, Halftone and the Game Boys have thrown the detail away before
+it reaches the glass. Under those looks the focus channel leaves the dial and zone focus switches
+itself off, in both directions: turning a coarse filter on drops it, and asking for it under one
+is declined. Every other channel stays exactly where it was.
+
 ## Roll v2.98 — zoom between the marks
 
 **The wheel zooms continuously again, and the needle shows where you are.** The printed numbers

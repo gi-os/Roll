@@ -180,12 +180,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             exposure = engine.exposureMode.value,
             filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
         )
-        // **A filter takes nothing off the dial.** A previous build dropped EV, focus and zoom
-        // under the heavy looks, reasoning that they adjust a scene the filter has replaced. They
-        // do not: the look is laid over a real exposure, the DNG never wears it at all, and a Game
-        // Boy frame still has to be aimed, focused and exposed. On the phone it read as controls
-        // that had stopped working, which is what it was.
-        return base
+        // **A filter takes nothing off the dial except focus, and only the coarse ones.** An
+        // earlier build dropped EV, focus and zoom under every heavy look, reasoning that they
+        // adjust a scene the filter has replaced. Mostly wrong: the look is laid over a real
+        // exposure, the DNG never wears it at all, and a Game Boy frame still has to be aimed,
+        // exposed and zoomed. Zone focus is the exception, because it is judged *by eye off the
+        // preview* -- peaking marks and a depth readout over a few hundred cells are a control
+        // pretending to be one.
+        return if (filter.value.lowRes) base.filterNot { it == Channel.Focus } else base
     }
 
     /**
@@ -1460,7 +1462,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             // set after construction, and a user changing the filter in the grid mid-request
             // must not leak into somebody else's photograph either.
             prefs.filterId.collect { id ->
-                if (!filterLocked) _filter.value = resolveFilter(id, prefs.grade.value)
+                if (!filterLocked) {
+                    _filter.value = resolveFilter(id, prefs.grade.value)
+                    // Turning a coarse filter on while focusing by zone takes the lens back: the
+                    // collector above refuses the reverse order, and this is the same rule met
+                    // from the other side.
+                    if (_filter.value.lowRes && prefs.zoneFocus.value) {
+                        prefs.setZoneFocus(false)
+                        showNotice("Zone focus is off under a coarse filter")
+                    }
+                    settleChannel()
+                }
             }
         }
         // Turning an adjustment has to change the viewfinder in the same frame, and on the first
@@ -1506,6 +1518,15 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             prefs.zoneFocus.collect {
+                if (it && filter.value.lowRes) {
+                    // Zone focus is read off the picture -- the peaking marks and the depth
+                    // readout are both judgements about detail -- and a coarse filter has thrown
+                    // the detail away by the time it reaches the glass. Focusing by eye on a
+                    // 160-cell grid is guesswork dressed as a control.
+                    prefs.setZoneFocus(false)
+                    showNotice("Zone focus needs a finer filter")
+                    return@collect
+                }
                 engine.setZoneFocus(it)
                 channelForZone(it)
             }

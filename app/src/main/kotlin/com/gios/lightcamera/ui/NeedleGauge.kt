@@ -49,6 +49,16 @@ fun NeedleGauge(
     onTap: (() -> Unit)? = null,
     /** The ladder's long axis. Filters hand the whole viewfinder edge in; everything else the default. */
     length: Dp = GAUGE_HEIGHT,
+    /** Across the ladder: how much depth the numbers have to be drawn in. */
+    depth: Dp = GAUGE_WIDTH,
+    /**
+     * Numbers set as large as the rungs allow.
+     *
+     * A value ladder has a handful of rungs and every one of them is a number you read at arm's
+     * length in daylight. The filter ladder is the opposite -- twenty-odd rungs of three-letter
+     * codes, where the same size would collide -- so it keeps the smaller setting.
+     */
+    large: Boolean = false,
     /** False while the ladder is faded out, so a hidden gauge does not eat touches. */
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
@@ -70,7 +80,7 @@ fun NeedleGauge(
 
     Box(
         modifier
-            .width(GAUGE_WIDTH)
+            .width(depth)
             .height(length)
             .pointerInput(count, enabled) {
                 if (!enabled) return@pointerInput
@@ -86,7 +96,7 @@ fun NeedleGauge(
                 detectTapGestures { onTap?.invoke() }
             },
     ) {
-        Canvas(Modifier.width(GAUGE_WIDTH).height(length)) {
+        Canvas(Modifier.width(depth).height(length)) {
             heightPx = size.height
             val step = size.height / count
             // **Needle first, labels second: the bar slides in *under* the text.** The pivot sits
@@ -126,9 +136,10 @@ fun NeedleGauge(
             // size the ladder had room for.
             val chars = labels.maxOf { it.length }.coerceAtLeast(1)
             val across = (size.width - LABEL_X * 2f) / (chars * 0.62f)
+            val rungFactor = if (large) 0.86f else 0.62f
             val textPaint = android.graphics.Paint().apply {
                 color = colours.content.toArgb()
-                textSize = minOf(pitch * 0.62f, across)
+                textSize = minOf(pitch * rungFactor, across)
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }
