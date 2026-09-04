@@ -26,6 +26,13 @@ class ShutterRelease(
     private val onHalfPress: () -> Unit,
     private val onFullPress: () -> Unit,
     private val onRelease: () -> Unit,
+    /**
+     * The bottom detent let go, whether or not the finger is still resting at the half press.
+     * This is the edge a hold-to-burst clock must stop on: [onRelease] waits for *both* keys,
+     * and a thumb that eases back to the half detent after a shot — the natural thing to do
+     * with a two-stage button — would otherwise keep the burst running while it aims.
+     */
+    private val onFullRelease: () -> Unit = {},
     private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
 
@@ -67,6 +74,12 @@ class ShutterRelease(
         if (cameraDown) return
         cameraDown = true
         if (fired) return
+        // **Switch bounce.** The bottom detent is a mechanical contact and can report
+        // DOWN-UP-DOWN inside a few milliseconds of one press. When FOCUS is already held the
+        // `fired` flag above covers it; when CAMERA won the race and FOCUS has not landed yet,
+        // the UP in the middle has already settled the press, so the second DOWN would fire
+        // the shutter again. No finger presses twice in this window, so it is not a press.
+        if (firedAt != NEVER && nowMs() - firedAt < BOUNCE_MS) return
         fired = true
         firedAt = nowMs()
         onFullPress()
@@ -78,7 +91,9 @@ class ShutterRelease(
     }
 
     private fun cameraUp() {
+        if (!cameraDown) return
         cameraDown = false
+        onFullRelease()
         settle()
     }
 
@@ -100,6 +115,9 @@ class ShutterRelease(
     private companion object {
         /** How long after the shutter a FOCUS key still counts as the same press. */
         const val SAME_PRESS_MS = 500L
+
+        /** A second CAMERA DOWN this soon after the shutter is contact chatter, not a press. */
+        const val BOUNCE_MS = 150L
 
         const val NEVER = Long.MIN_VALUE
     }

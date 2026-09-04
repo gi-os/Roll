@@ -3630,8 +3630,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         /** The fill loop's pace while the camera is down. Checking, not capturing. */
         const val PRE_ROLL_IDLE_MS = 500L
 
-        /** How long a press must be held before it means "keep firing". */
-        const val HOLD_BURST_AFTER_MS = 450L
+        /**
+         * How long a press must be held before it means "keep firing".
+         *
+         * 450ms shipped first and read as a double exposure: pressing a two-detent button
+         * through to the bottom and letting it back up is a deliberate movement, and on the
+         * phone it routinely lasts half a second — so one press made two photographs. A hold
+         * that *means* a burst is longer than that; 900ms is past any single press measured
+         * and still well short of feeling like the camera ignored the finger.
+         */
+        const val HOLD_BURST_AFTER_MS = 900L
 
         /** The burst cadence: ~3/s, comfortably inside the pipeline's pace. */
         const val HOLD_BURST_EVERY_MS = 300L

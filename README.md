@@ -154,7 +154,7 @@ You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `3.1.0`. CI adds the run number
+**Current version:** `versionName` in `app/build.gradle.kts` is `3.2.0`. CI adds the run number
 as the patch, so the release from the current `main` is `v3.1.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 

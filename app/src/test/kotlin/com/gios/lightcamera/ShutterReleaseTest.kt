@@ -21,6 +21,7 @@ class ShutterReleaseTest {
         onHalfPress = { log += "half" },
         onFullPress = { log += "full" },
         onRelease = { log += "release" },
+        onFullRelease = { log += "up" },
         nowMs = { now },
     )
 
@@ -40,7 +41,7 @@ class ShutterReleaseTest {
         r.onKey(LightKey.Camera, down = true)
         r.onKey(LightKey.Camera, down = false)
         r.onKey(LightKey.Focus, down = false)
-        assertEquals(listOf("half", "full", "release"), log)
+        assertEquals(listOf("half", "full", "up", "release"), log)
     }
 
     @Test
@@ -70,7 +71,7 @@ class ShutterReleaseTest {
         r.onKey(LightKey.Focus, down = false)
         assertEquals(listOf("half", "full"), log)
         r.onKey(LightKey.Camera, down = false)
-        assertEquals(listOf("half", "full", "release"), log)
+        assertEquals(listOf("half", "full", "up", "release"), log)
     }
 
     @Test
@@ -78,10 +79,10 @@ class ShutterReleaseTest {
         val r = release()
         r.onKey(LightKey.Camera, down = true)
         r.onKey(LightKey.Camera, down = false)
-        assertEquals(listOf("full", "release"), log)
+        assertEquals(listOf("full", "up", "release"), log)
         now += 100
         r.onKey(LightKey.Focus, down = true)
-        assertEquals(listOf("full", "release"), log)
+        assertEquals(listOf("full", "up", "release"), log)
     }
 
     @Test
@@ -107,6 +108,46 @@ class ShutterReleaseTest {
         r.onKey(LightKey.Focus, down = true)
         r.onKey(LightKey.Camera, down = true)
         assertEquals(listOf("half", "full"), log)
+    }
+
+    @Test
+    fun `the bottom detent letting go is reported before the whole button is up`() {
+        // Resting at the half press after a shot keeps the focus lock; the caller's burst
+        // clock needs this earlier edge to know the shutter itself has been let go.
+        val r = release()
+        r.onKey(LightKey.Focus, down = true)
+        r.onKey(LightKey.Camera, down = true)
+        r.onKey(LightKey.Camera, down = false)
+        assertEquals(listOf("half", "full", "up"), log)
+        r.onKey(LightKey.Focus, down = false)
+        assertEquals(listOf("half", "full", "up", "release"), log)
+    }
+
+    @Test
+    fun `contact chatter on the shutter key is one photograph`() {
+        // CAMERA won the race, bounced DOWN-UP-DOWN before FOCUS landed. The UP in the
+        // middle settles the press, so without a guard the second DOWN fires again.
+        val r = release()
+        r.onKey(LightKey.Camera, down = true)
+        now += 5
+        r.onKey(LightKey.Camera, down = false)
+        now += 5
+        r.onKey(LightKey.Camera, down = true)
+        r.onKey(LightKey.Focus, down = true)
+        r.onKey(LightKey.Camera, down = false)
+        r.onKey(LightKey.Focus, down = false)
+        assertEquals(1, log.count { it == "full" })
+    }
+
+    @Test
+    fun `two quick deliberate presses are two photographs`() {
+        val r = release()
+        r.onKey(LightKey.Camera, down = true)
+        r.onKey(LightKey.Camera, down = false)
+        now += 300
+        r.onKey(LightKey.Camera, down = true)
+        r.onKey(LightKey.Camera, down = false)
+        assertEquals(2, log.count { it == "full" })
     }
 
     @Test

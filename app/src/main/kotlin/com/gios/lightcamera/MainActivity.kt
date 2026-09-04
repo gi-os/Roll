@@ -161,6 +161,10 @@ class MainActivity : ComponentActivity() {
                             // Held is a burst; ShutterRelease cannot time it (the key never
                             // repeats), so the view model runs the clock and the release stops it.
                             onFullPress = { vm.shutterHeld() },
+                            // The burst stops the moment the bottom detent lets go, not when
+                            // the whole button does — resting at the half press after a shot
+                            // keeps the focus lock, and must not keep the shutter firing.
+                            onFullRelease = { vm.shutterLifted() },
                             onRelease = {
                                 vm.shutterLifted()
                                 vm.engine.releaseFocus()
