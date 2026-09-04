@@ -30,6 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -168,6 +172,22 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
 
     val pager = rememberPagerState(initialPage = PAGE_CAMERA, pageCount = { 2 })
 
+    // **The roll can be shut while the phone is.** The app is `showWhenLocked`, so without this
+    // a locked phone is a locked phone with an open photo library one swipe below its camera.
+    // When the setting is on and the keyguard is up, the pager refuses to move and a swipe
+    // toward the roll asks the phone to unlock instead — its own screen, its own passcode — and
+    // the roll opens on success. A lock that engages *while* the roll or a photograph is up
+    // (screen off, then on) closes both and returns to the viewfinder.
+    val rollLockedPref by vm.prefs.rollLocked.collectAsState()
+    val phoneLocked by rememberPhoneLocked()
+    val rollShut = rollLockedPref && phoneLocked
+    LaunchedEffect(rollShut) {
+        if (rollShut) {
+            viewing = null
+            if (pager.currentPage != PAGE_CAMERA) pager.scrollToPage(PAGE_CAMERA)
+        }
+    }
+
     // Back to the viewfinder when the camera key brings the app forward — and back *out* of whatever was
     // over it, since a photograph or the settings covering the picture is the same problem as being on the
     // wrong page. Collecting a shared flow rather than keying an effect on state: this must fire on the
@@ -192,11 +212,20 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
             VerticalPager(
                 state = pager,
                 pageSize = PageSize.Fill,
+                userScrollEnabled = !rollShut,
                 // Keep both pages composed: the camera takes a few hundred milliseconds to
                 // rebind, and a viewfinder that has to warm up every time you glance at the
                 // roll is a viewfinder you stop trusting to be ready.
                 beyondViewportPageCount = 1,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (rollShut) Modifier.unlockOnSwipeToRoll {
+                            requestUnlock(context) {
+                                scope.launch { pager.animateScrollToPage(PAGE_ROLL) }
+                            }
+                        } else Modifier,
+                    ),
             ) { page ->
                 when (page) {
                     PAGE_ROLL -> RollScreen(
@@ -350,3 +379,31 @@ private fun Refusal(title: String, detail: String, onRetry: () -> Unit) {
         )
     }
 }
+
+/**
+ * Watches for the swipe that would have opened the roll, without taking it.
+ *
+ * Observed in the initial pass and never consumed, so tap-to-focus and everything else on the
+ * viewfinder still see every event. The roll sits *above* the camera page, so the gesture that
+ * reaches for it is a drag downward; anything shorter than [SWIPE_TO_ROLL_PX] design pixels,
+ * or mostly sideways, is not it.
+ */
+private fun Modifier.unlockOnSwipeToRoll(onSwipe: () -> Unit): Modifier = pointerInput(onSwipe) {
+    val threshold = SWIPE_TO_ROLL_DP.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val start = down.position
+        var last = start
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            last = change.position
+            if (!change.pressed) break
+        }
+        val dx = last.x - start.x
+        val dy = last.y - start.y
+        if (dy > threshold && dy > kotlin.math.abs(dx) * 2) onSwipe()
+    }
+}
+
+private const val SWIPE_TO_ROLL_DP = 48

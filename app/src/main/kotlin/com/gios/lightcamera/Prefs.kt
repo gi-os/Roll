@@ -724,6 +724,20 @@ class Prefs(context: Context) {
     fun setBurst(value: Boolean) = set(_burst, value) { putBoolean(BURST, value) }
 
     /**
+     * Whether the roll stays shut while the phone is locked.
+     *
+     * The app is `showWhenLocked` so the camera key works from the lock screen, and the roll is
+     * one swipe from the viewfinder — which means, by default, anyone holding a locked phone can
+     * browse every photograph on it. With this on, that swipe asks for the phone's own unlock
+     * first and the roll opens once it is given. Off by default: the stock camera has no such
+     * gate, and a camera that hides its pictures surprises the person who owns them.
+     */
+    private val _rollLocked = MutableStateFlow(prefs.getBoolean(ROLL_LOCKED, false))
+    val rollLocked: StateFlow<Boolean> = _rollLocked.asStateFlow()
+
+    fun setRollLocked(value: Boolean) = set(_rollLocked, value) { putBoolean(ROLL_LOCKED, value) }
+
+    /**
      * How far behind the press the shutter is allowed to reach, in milliseconds. Zero is off.
      *
      * **The frame you wanted is usually slightly before the one you got.** You see the expression,
@@ -1071,6 +1085,7 @@ class Prefs(context: Context) {
         const val HISTOGRAM = "histogram"
         const val CLIPPING = "clipping"
         const val BURST = "burst"
+        const val ROLL_LOCKED = "roll_locked"
         const val FORMATS = "captureFormats"
         const val PRE_ROLL = "preRollMs"
         const val TAG_LOCATION = "tagLocation"

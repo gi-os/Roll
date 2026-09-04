@@ -1,3 +1,21 @@
+## Roll v3.3 — the roll can lock with the phone
+
+**New setting, off by default: Settings → Privacy → Roll locked with the phone.**
+
+Roll runs from the lock screen so the camera key always works. The roll is one swipe below the
+viewfinder. Put those together and a locked phone shows its whole photo library to anyone who
+swipes down. The stock camera does the same, so it was never a bug, but it is a choice, and it is
+now yours.
+
+With the setting on and the phone locked, the swipe does not move. Instead it asks the phone to
+unlock — the phone's own screen and passcode, nothing drawn by the app — and the roll opens as soon
+as it does. If the phone locks while a photograph or the roll is up, both close and the viewfinder
+comes back. Taking pictures, video, QR and text from the lock screen work exactly as before.
+
+The lock state is re-read on every resume and on the screen-off and unlock broadcasts, because
+`isKeyguardLocked` is a question and not a stream, and the app is resumed *behind* the keyguard
+when the screen comes back on.
+
 ## Roll v3.2 — one press, one photograph
 
 **Press the shutter, get two pictures. Not a bounce and not a bug in the sensor path: the

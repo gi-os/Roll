@@ -380,6 +380,20 @@ private fun CameraTab(vm: CameraViewModel) {
         if (next && !Locations.canTag(context)) askTag.launch(Locations.wanted())
     }
 
+    Section("Privacy") {
+        Note(
+            "The camera works from the lock screen, and the roll is one swipe below it. So by " +
+                "default a locked phone is a locked phone with its photographs showing. With " +
+                "this on, the swipe to the roll asks for the phone's own unlock first, and the " +
+                "roll opens when it is given. Nothing else changes. Taking pictures from the " +
+                "lock screen still works.",
+        )
+    }
+    val rollLocked by vm.prefs.rollLocked.collectAsState()
+    Setting("Roll locked with the phone", if (rollLocked) "On" else "Off") {
+        vm.prefs.setRollLocked(!rollLocked)
+    }
+
     Section("Files") {
         Note(
             "One press can write more than one file, and they stay one photograph on the roll. " +
