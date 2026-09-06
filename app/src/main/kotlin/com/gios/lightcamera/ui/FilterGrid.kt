@@ -40,12 +40,13 @@ import com.gios.lightcamera.ui.theme.LightText
 import com.gios.lightcamera.ui.theme.LightTextVariant
 import com.gios.lightcamera.ui.theme.LightThemeTokens
 import com.gios.lightcamera.ui.theme.lightClickable
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
+import java.util.concurrent.Executors
 
 /**
  * Every filter, live, at once — Photo Booth's grid.
@@ -90,15 +91,21 @@ fun FilterGrid(
     var frames by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
     LaunchedEffect(previewView, grade, moshModeId, dial, turn) {
-        val renderer = withContext(Dispatchers.Default) {
-            ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
-        }
+        // A HardwareRenderer is not safe to use from a thread other than the one that built it, and
+        // Dispatchers.Default is a pool — so the renderer is built and used on one dedicated thread.
+        // The capture path makes the same allowance in ShaderRuntime.pooled; the grid did not, and a
+        // renderer handed a different thread each frame can come back blank or unfiltered.
+        val renderThread = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        var renderer: ShaderRuntime.Offscreen? = null
         try {
+            renderer = withContext(renderThread) {
+                ShaderRuntime.Offscreen(CELL_PX_W, CELL_PX_H)
+            }
             while (coroutineContext.isActive) {
                 val source = previewView.grabFrame(CELL_PX_W, CELL_PX_H)
                 if (source != null) {
                     val seed = Random.nextFloat() * 1000f
-                    val rendered = withContext(Dispatchers.Default) {
+                    val rendered = withContext(renderThread) {
                         dial.associate { entry ->
                             // Resolved here too, or the Preset cell would be the one tile in the
                             // grid showing you something other than what picking it would give you —
@@ -120,7 +127,8 @@ fun FilterGrid(
                 delay(FRAME_MS)
             }
         } finally {
-            withContext(Dispatchers.Default) { renderer?.close() }
+            withContext(renderThread) { renderer?.close() }
+            renderThread.close()
         }
     }
 

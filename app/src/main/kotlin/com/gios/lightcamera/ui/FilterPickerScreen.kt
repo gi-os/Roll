@@ -94,12 +94,12 @@ fun FilterPickerScreen(
             BitmapFactory.decodeResource(context.resources, R.drawable.sample_filter_photo)
         } ?: return@LaunchedEffect
 
-        val renderer = withContext(Dispatchers.Default) {
-            ShaderRuntime.Offscreen(source.width, source.height)
-        }
-        try {
-            val seed = 1234f
-            val rendered = withContext(Dispatchers.Default) {
+        val seed = 1234f
+        val rendered = withContext(Dispatchers.Default) {
+            // Built and rendered on one thread: a HardwareRenderer must not move threads, or the
+            // previews come back blank or unfiltered.
+            val renderer = ShaderRuntime.Offscreen(source.width, source.height)
+            try {
                 rows.associate { entry ->
                     val filter = Filters.forMosh(
                         Filters.forGrade(entry, grade),
@@ -112,11 +112,11 @@ fun FilterPickerScreen(
                     }
                     entry.id to bitmap.asImageBitmap()
                 }
+            } finally {
+                renderer?.close()
             }
-            previews = rendered
-        } finally {
-            withContext(Dispatchers.Default) { renderer?.close() }
         }
+        previews = rendered
     }
 
     Column(

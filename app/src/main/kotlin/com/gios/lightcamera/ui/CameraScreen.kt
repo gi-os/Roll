@@ -1619,24 +1619,23 @@ private fun MoshMenu(
     var tiles by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
 
     LaunchedEffect(previewView, turn) {
-        val renderer = withContext(Dispatchers.Default) {
-            ShaderRuntime.Offscreen(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
-        }
-        try {
-            // One frame, eleven shaders. Same grab the grid uses: small, unfiltered, cheap.
-            val source = previewView.grabFrame(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
-            if (source != null) {
-                val seed = Random.nextFloat() * 1000f
-                tiles = withContext(Dispatchers.Default) {
+        // One frame, eleven shaders. Same grab the grid uses: small, unfiltered, cheap.
+        val source = previewView.grabFrame(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
+        if (source != null) {
+            val seed = Random.nextFloat() * 1000f
+            tiles = withContext(Dispatchers.Default) {
+                // Built and rendered on one thread: a HardwareRenderer must not move threads.
+                val renderer = ShaderRuntime.Offscreen(MOSH_SAMPLE_W, MOSH_SAMPLE_H)
+                try {
                     Filters.moshModes.associate { mode ->
                         val filter = Filters.forMosh(Filters.datamosh, mode)
                         val bitmap = renderer?.render(source, filter, seed, turn = turn / 90) ?: source
                         mode.id to bitmap.asImageBitmap()
                     }
+                } finally {
+                    renderer?.close()
                 }
             }
-        } finally {
-            withContext(Dispatchers.Default) { renderer?.close() }
         }
     }
 

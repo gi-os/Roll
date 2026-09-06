@@ -1,3 +1,15 @@
+## Roll v3.4 — the filter thumbnails render again
+
+The Photo Booth grid, the "View filters" picker, and the Datamosh menu all draw their previews by
+running each filter's shader on a small frame through an offscreen GPU surface. That surface is a
+`HardwareRenderer`, which is not safe to hand from one thread to another — and the preview paths
+were doing exactly that: building it on one background thread and drawing on whichever thread the
+dispatcher handed out next, every frame.
+
+The capture path already pins its renderer to a single thread for this reason; the preview paths did
+not, and on some frames the thumbnails came back blank or unfiltered. Each preview now builds and
+draws on one dedicated thread, so the grid shows the look you are about to pick.
+
 ## Roll v3.3 — the roll can lock with the phone
 
 **New setting, off by default: Settings → Privacy → Roll locked with the phone.**
