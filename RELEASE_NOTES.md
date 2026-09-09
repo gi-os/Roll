@@ -1,89 +1,31 @@
-## Roll v3.4 — the filter thumbnails render again
+## Roll v3.5 — a dark preview now says what it knew
 
-The Photo Booth grid, the "View filters" picker, and the Datamosh menu all draw their previews by
-running each filter's shader on a small frame through an offscreen GPU surface. That surface is a
-`HardwareRenderer`, which is not safe to hand from one thread to another — and the preview paths
-were doing exactly that: building it on one background thread and drawing on whichever thread the
-dispatcher handed out next, every frame.
+**Three reports say the preview went dark and the camera restarted, and none of them says anything
+a fix could start from.** [light-reports#233], [#293] and [#309], against v3.1, v3.3 and v3.4 — one
+of them from somebody who is not the author. The watchdog is working exactly as designed in all
+three: it notices the capture stamps have stopped, rebinds, tells the user, and files a fault so a
+camera that heals itself is still a camera whose disease gets reported.
 
-The capture path already pins its renderer to a single thread for this reason; the preview paths did
-not, and on some frames the thumbnails came back blank or unfiltered. Each preview now builds and
-draws on one dedicated thread, so the grid shows the look you are about to pick.
+The trouble is what the fault carries. One sentence, and the sentence is already known.
 
-## Roll v3.3 — the roll can lock with the phone
+**Everything that would narrow it down was in hand and thrown away one line later.** How long the
+stamps had been still, what counted as too long at that moment, whether the zero-shutter-lag ring
+was still in play, which flash mode the session was holding, whether the exposure was manual — the
+watchdog reads all of it to make its decision and then keeps none of it. The report now carries the
+lot, along with the mode, the filter, zone focus, and how many captures were in flight.
 
-**New setting, off by default: Settings → Privacy → Roll locked with the phone.**
+This matters because the last explanation is spent. The finalize race — the muxer flush stalling the
+repeating request so every recording ended in a false death verdict — was the cause of the earlier
+dark previews and it is fixed. Whatever is behind #233, #293 and #309 is something else, and there
+is nothing in "Preview went dark. Camera restarted." to find it with.
 
-Roll runs from the lock screen so the camera key always works. The roll is one swipe below the
-viewfinder. Put those together and a locked phone shows its whole photo library to anyone who
-swipes down. The stock camera does the same, so it was never a bug, but it is a choice, and it is
-now yours.
+**The title is fixed too.** A fault is headed "Could not <what>", and this one passed a sentence
+where a verb phrase belongs, so three issues arrived titled *"Could not Preview went dark. Camera
+restarted"*. It now reads "Could not keep the preview alive", and the three-strikes fault beside it
+"Could not keep the camera alive — three restarts inside a minute".
 
-With the setting on and the phone locked, the swipe does not move. Instead it asks the phone to
-unlock — the phone's own screen and passcode, nothing drawn by the app — and the roll opens as soon
-as it does. If the phone locks while a photograph or the roll is up, both close and the viewfinder
-comes back. Taking pictures, video, QR and text from the lock screen work exactly as before.
+Nothing about when the watchdog fires has changed. This release only makes the next one of these
+worth reading.
 
-The lock state is re-read on every resume and on the screen-off and unlock broadcasts, because
-`isKeyguardLocked` is a question and not a stream, and the app is resumed *behind* the keyguard
-when the screen comes back on.
-
-## Roll v3.2 — one press, one photograph
-
-**Press the shutter, get two pictures. Not a bounce and not a bug in the sensor path: the
-hold-to-burst clock from v2.9x was set too short for the button it was timing.**
-
-The camera key has two detents. Pressing it through to the bottom and letting it back up is a
-deliberate movement, and on this phone it routinely lasts half a second. The burst clock started
-firing at 450ms of hold, so an ordinary press made one photograph at the press and a second at
-the 450ms mark, then lifted before the third. Every press, exactly two. The threshold is now
-900ms — past any single press measured, and still well short of the camera feeling like it
-ignored a real hold.
-
-Two things around it were wrong as well and are fixed in the same pass:
-
-- **The burst stopped on the wrong edge.** It waited for the whole button to come up. Easing back
-  to the half detent after a shot — the natural thing to do with a two-stage release, and what
-  keeps the focus lock — left the bottom key up but the clock running, so the camera kept firing
-  while you aimed. `ShutterRelease` now reports the bottom detent letting go as its own event,
-  and the burst stops there.
-- **Contact chatter could fire twice.** When CAMERA wins the race against FOCUS and bounces
-  DOWN-UP-DOWN inside a few milliseconds, the UP in the middle had already settled the press, so
-  the second DOWN counted as a new one. A second CAMERA DOWN inside 150ms of the shutter is now
-  read as chatter. Two deliberate presses 300ms apart are still two photographs; there is a test
-  for both.
-
-Hold-to-burst still works: hold the key down and it fires about three a second until you let go.
-
-## Roll v3.1 — stopping a recording no longer restarts the camera
-
-**Every video ended the same way: viewfinder dark, then "Camera restarted." The recording itself
-was fine. The watchdog was reading a clock that nobody had restarted.**
-
-The chain, in order. Stopping a recording asks the muxer to flush, and on this hardware that
-flush takes seconds — it stalls the repeating request the whole time, so the preview stops
-delivering frames and the frame-stamp clock stops with it. That part is known and handled: the
-`finalizing` guard holds the watchdog off for exactly as long as the muxer is writing, because
-rebinding mid-finalize takes down the camera service.
-
-What was missed is the handoff at the end. When `Finalize` lands and the guard drops, the last
-frame stamp is still from *before* the stop — five, ten, twenty seconds old, already far past the
-4-second stale limit. The watchdog's next tick, at most a second and a half later, compared now
-against then, declared the camera dead, and rebound it. A false verdict, delivered after every
-recording whose flush outran the limit — which on this phone is every recording. Hence the report:
-"froze after recording video every time."
-
-It cost more than the restart. The watchdog's first dark-preview response is to quarantine
-zero-shutter-lag for the session — the right move against a genuinely dying session, and pure
-collateral here. Every video quietly degraded the photo mode you went back to.
-
-One line fixes it: the stamp clock restarts the moment the recorder lets go, before the guard
-drops. The preview gets the full stale limit to deliver its first frame after the muxer's stall —
-and a session that genuinely died during the flush is still caught, one limit later. Restarted to
-now rather than zeroed, deliberately: a zeroed clock never fires, and a camera that died in the
-flush would have kept a blind watchdog and a dark viewfinder forever.
-
-Fixes [light-reports#214] — froze after recording video every time.
-Fixes [light-reports#213] — Preview went dark. Camera restarted (v3.0.148).
-Also explains #207, #192, and the v2.9x "fault chip" family, all closed as duplicates — this code
-predates v3.0, which is why the same report arrived from both v2.94 and v3.0.
+Addresses [light-reports#233], [#293] and [#309] — instrumentation, not a fix. They stay open until
+a report on this build says what the numbers are.

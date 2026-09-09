@@ -694,7 +694,40 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val faultTally = LinkedHashMap<String, Int>()
 
-    private fun recordFault(what: String) {
+    /**
+     * Everything known about a dark preview at the moment the watchdog acted.
+     *
+     * The three reports on file (light-reports#233, #293, #309, against v3.1, v3.3 and v3.4) carry
+     * the sentence and nothing else, and the sentence is not enough: the finalize race that
+     * explained the earlier ones of these is fixed, so whatever is left is something new and needs
+     * the numbers. All of these were already in hand and discarded — the stale gap, the limit it
+     * was measured against, the state of the zero-shutter-lag ring, the mode and filter the
+     * session was configured for.
+     */
+    private fun deathDetail(recoveries: Int): String {
+        val death = engine.lastDeath
+        return buildString {
+            append("restart ").append(recoveries).append(" of this minute\n")
+            if (death == null) {
+                append("the engine kept no record of the death — it healed between the poll and this\n")
+            } else {
+                append("capture stamps still for ").append(death.silentForMs)
+                    .append("ms against a limit of ").append(death.limitMs).append("ms\n")
+                append("zero-shutter-lag: wanted=").append(death.zslWanted)
+                    .append(" allowed=").append(death.zslWasAllowed)
+                    .append(" (the first dark preview of a session takes its seat)\n")
+                append("flash ").append(death.flash)
+                    .append(", manual exposure ").append(death.manualAe).append('\n')
+            }
+            append("mode ").append(prefs.mode.value.name)
+            append(", filter ").append(_filter.value.id)
+            append(", zone focus ").append(prefs.zoneFocus.value).append('\n')
+            append("captures in flight ").append(_inFlight.value)
+                .append(", shooting ").append(_shooting.value)
+        }
+    }
+
+    private fun recordFault(what: String, detail: String? = null) {
         _faults.value += 1
         _lastFault.value = what
         freshenFaults()
@@ -706,7 +739,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // Trouble dedupes per message per hour and keeps the first failure of a cascade, and its
         // collector in the activity raises the standard light-common "SEND ERROR?" chip — the
         // shake-to-report pipeline, offered by the app instead of waiting to be shaken about.
-        Trouble.record(what)
+        Trouble.record(what, detail)
     }
 
     fun readFaults() {
@@ -1579,11 +1612,20 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     // watchdog fresh.
                     if (recoveries >= 3) {
                         showNotice("Camera keeps dying. Close and reopen Roll")
-                        recordFault("Camera kept dying after restarts. Reopen the app")
+                        recordFault(
+                            "keep the camera alive — three restarts inside a minute",
+                            deathDetail(recoveries),
+                        )
                         return@launch
                     }
                     showNotice("Camera restarted")
-                    if (recoveries == 1) recordFault("Preview went dark. Camera restarted")
+                    // **Named as something the app could not do.** The report template heads a
+                    // fault with "Could not <what>", so "Preview went dark. Camera restarted"
+                    // arrived as the title "Could not Preview went dark. Camera restarted" — on
+                    // three issues, light-reports#233, #293 and #309.
+                    if (recoveries == 1) {
+                        recordFault("keep the preview alive", deathDetail(recoveries))
+                    }
                 }
             }
         }

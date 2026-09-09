@@ -1732,6 +1732,31 @@ class CameraEngine(private val context: Context) {
     }
 
     /**
+     * The state the watchdog found at the last dark preview, for the report to carry.
+     *
+     * Written by [recoverIfDead] and read by whoever files the fault. Kept rather than passed back
+     * so the return value stays the plain "did it act" the caller polls.
+     */
+    data class PreviewDeath(
+        /** How long the capture stamps had been still. */
+        val silentForMs: Long,
+        /** What counted as too long at that moment — it moves with a manual shutter. */
+        val limitMs: Long,
+        /** Whether the zero-shutter-lag ring was still in play, before this death took its seat. */
+        val zslWasAllowed: Boolean,
+        /** Whether the setting asks for the ring at all. */
+        val zslWanted: Boolean,
+        /** The flash mode the session was holding. */
+        val flash: String,
+        /** Manual exposure, which is what lengthens [limitMs]. */
+        val manualAe: Boolean,
+    )
+
+    @Volatile
+    var lastDeath: PreviewDeath? = null
+        private set
+
+    /**
      * Rebind if the preview has flatlined. Returns true when it acted.
      *
      * The caller polls this; the engine deliberately owns no clock of its own. A recovery is a
@@ -1743,7 +1768,24 @@ class CameraEngine(private val context: Context) {
         if (_recording.value || finalizing) return false
         val last = lastResultAt
         if (last == 0L) return false
-        if (SystemClock.elapsedRealtime() - last < staleLimitMs()) return false
+        val silentFor = SystemClock.elapsedRealtime() - last
+        if (silentFor < staleLimitMs()) return false
+        // **What the watchdog knew, kept for the report.** Three dark-preview reports are on file
+        // against v3.1, v3.3 and v3.4 (light-reports#233, #293, #309) and not one of them says
+        // anything a fix could start from: the app knows the preview stopped and says so, and
+        // every fact that would narrow it down — how long the stamps had been stale, what the
+        // limit was at the time, whether the ring was still in play, which flash mode the session
+        // was holding — was known here and thrown away one line later. The finalize race that
+        // caused the earlier ones of these is fixed; whatever is left is something else, and it
+        // cannot be found from the sentence alone.
+        lastDeath = PreviewDeath(
+            silentForMs = silentFor,
+            limitMs = staleLimitMs(),
+            zslWasAllowed = zslAllowed,
+            zslWanted = zslWanted,
+            flash = lastFlash.name,
+            manualAe = _exposureMode.value.manualAe,
+        )
         // **The first dark preview costs ZSL its seat.** Every dark-preview report on file —
         // v2.77 with flat off, v2.80 with flat on — has one thing in common: a session that had
         // been holding the zero-shutter-lag ring for a while. Rebinding into the *same*

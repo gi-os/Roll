@@ -154,8 +154,8 @@ You need JDK 17. `minSdk` is 33 because every filter is an
 [AGSL](https://developer.android.com/develop/ui/views/graphics/agsl) fragment shader, and AGSL is
 API 33.
 
-**Current version:** `versionName` in `app/build.gradle.kts` is `3.4.0`. CI adds the run number
-as the patch, so the release from the current `main` is `v3.4.x`. See
+**Current version:** `versionName` in `app/build.gradle.kts` is `3.5.0`. CI adds the run number
+as the patch, so the release from the current `main` is `v3.5.x`. See
 [Version history](#version-history) for the full run from `v1.0.1`.
 
 ## Controls
@@ -604,6 +604,7 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
+| `v3.5.x` | this commit | **A dark preview now says what it knew.** The watchdog reads the stale gap, the limit it is measured against, the state of the zero-shutter-lag ring, the flash mode and the exposure mode to decide a preview has died — and kept none of it, so three reports carry one sentence and nothing to work from. All of it now rides along, with the mode, filter, zone focus and captures in flight. The fault is also named as a verb phrase, so it stops arriving titled "Could not Preview went dark. Camera restarted". Instrumentation, not a fix. [light-reports#233], [light-reports#293], [light-reports#309] |
 | `v3.1.x` | this commit | **Stopping a recording no longer restarts the camera.** The muxer flush stalls the repeating request for seconds, and when `Finalize` cleared the rebind guard the watchdog was left comparing against a frame stamp from before the stop — a guaranteed false death verdict on its next tick, so every video ended in a dark viewfinder and "Camera restarted", and the false rebind also quarantined ZSL for the session, degrading photo mode after each video. The stamp clock now restarts the moment the recorder lets go. [light-reports#214], [light-reports#213] |
 | `v2.74.x` | (see log) | **A mode change starts clean.** A filter chosen in Pro was carried into Video, QR, Text and back again — and the modes with no filter track hide the dial without clearing it, so the filter went invisible rather than off and the only way to find it was to return to Pro and walk the dial to None by hand. Picking a mode now resets the filter to None. Flipping the lens does not: Photo and Selfie are one mode wearing two lenses, and turning the camera around mid-shoot is not a new decision about the photograph. The grade is untouched either way — it is persisted on purpose. [light-reports#123], [light-reports#128]. The report sheet's note field also no longer hides under the keyboard as you type [light-reports#134] |
 | `v2.73.x` | 319bec1 | **ZSL abandonment rebinds and retries, and the preview gets a watchdog.** Burst capture could abandon a zero-shutter-lag request and leave the camera bound to nothing usable; the engine now rebinds and retries rather than dropping the frame, and a watchdog restarts a preview that has stopped delivering. The burst lag causes are removed. |
