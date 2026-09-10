@@ -98,7 +98,7 @@ dependencies {
     // the note field above the keyboard. Verified against the package registry's
     // maven-metadata rather than the repo's tags, because a tag over there has been a lie
     // before (v1.5.0 resolved to nothing).
-    implementation("com.gios:light-common:1.8.0")
+    implementation("com.gios:light-common:1.9.1")
     // Installs the baseline profile that light-common ships in its AAR. Below API 31 nothing
     // reads a profile on its own, so without this the profile is inert and the AOT warm-up it
     // buys never happens.
