@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -166,8 +167,57 @@ class CameraEngine(private val context: Context) {
      * size change — has to stay shut while this is set, or it tears the use cases out from under
      * a muxer that is mid-flush, and that is the cameraserver crash during save.
      */
+    private val _finalizing = MutableStateFlow(false)
+
+    /**
+     * The file is still being written: `stop()` has been asked for and `Finalize` has not landed.
+     *
+     * Published because it is the other half of the freeze, the half the user sees. The muxer's
+     * flush stalls the repeating request, so for the several seconds it takes on this hardware
+     * the viewfinder holds one frame — and the interface, which knew only `recording`, went on
+     * drawing a red dot and a counting clock over it. A camera that appears to still be filming
+     * a picture that has stopped moving is a camera that has crashed, and that is what it was
+     * reported as.
+     */
+    val saving: StateFlow<Boolean> = _finalizing.asStateFlow()
+
+    /**
+     * The plain read every guard in this class uses. Observable because [awaitIdle] has to wake
+     * on it: it used to wait on `_recording` alone and re-test `finalizing` inside that
+     * predicate, and a `StateFlow` only re-evaluates a predicate when it *emits* — so a
+     * finalize that cleared on its own, with `_recording` already false, woke nothing and the
+     * wait ran to its full timeout.
+     */
+    private val finalizing: Boolean get() = _finalizing.value
+
+    /**
+     * When [stopRecording] raised the flag, so a finalize that never lands has an end.
+     *
+     * `finalizing` shuts every rebind path in this class, and `VideoRecordEvent.Finalize` was
+     * the only thing that ever lowered it. A recorder that dies without emitting one — which is
+     * what happens when the camera is torn down under a muxer mid-flush — therefore left the
+     * watchdog, the mode switch, the lens flip and [resume] all refusing to rebind for the rest
+     * of the process: a black viewfinder with no path back to a camera, which is this bug.
+     */
     @Volatile
-    private var finalizing = false
+    private var finalizingSince = 0L
+
+    /**
+     * A bind the muxer made us decline, owed the moment it lets go.
+     *
+     * Leaving the viewfinder and coming back is [release] then [resume], and both of them have
+     * to stand off while a recording is being written. Standing off and then doing nothing is
+     * the other half of the same black screen, so the last one asked for is remembered and paid
+     * from the `Finalize` handler.
+     */
+    private enum class Owed { Rebind, Release }
+
+    @Volatile
+    private var owed: Owed? = null
+
+    /** Set by [shutdown]; nothing posted from here may bind a camera after it. */
+    @Volatile
+    private var stopped = false
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -343,7 +393,14 @@ class CameraEngine(private val context: Context) {
      */
     fun release() {
         lastResultAt = 0L
-        if (_recording.value) return
+        // **Not while anything is being written.** Unbinding pulls the use cases out from under
+        // the recorder, and on this hardware that takes the camera service with it. `finalizing`
+        // is checked as well as `recording` because the flush outlives the stop by seconds here.
+        if (_recording.value || finalizing) {
+            owed = Owed.Release
+            return
+        }
+        owed = null
         runCatching { orientation.disable() }
         runCatching { provider?.unbindAll() }
         // The analyser holds a reference to the view model through its callback and would otherwise
@@ -357,6 +414,20 @@ class CameraEngine(private val context: Context) {
         val view = previewView ?: return
         if (owner == null) return
         orientation.enable()
+        // **This was the freeze.** Every other rebind path in this class refuses while a
+        // recording is live or being written; this one — the one the *pager* drives — did not,
+        // and it is reached by the most natural gesture there is: stop filming, flick up to the
+        // roll to see the clip, flick back. [release] correctly declines to unbind during the
+        // flush, so the camera is still bound when you return, and this called `rebind` straight
+        // into it: `unbindAll` mid-flush, cameraserver down, a black preview, and no `Finalize`
+        // ever emitted — which left `finalizing` raised for the life of the process and the
+        // watchdog refusing to rebind the thing it was watching die. Owe the bind instead.
+        if (_recording.value || finalizing) {
+            lastFlash = flash
+            owed = Owed.Rebind
+            return
+        }
+        owed = null
         if (provider == null) {
             // Never bound in the first place — go the long way round.
             owner?.let { bind(it, view, flash) }
@@ -1750,6 +1821,11 @@ class CameraEngine(private val context: Context) {
         val flash: String,
         /** Manual exposure, which is what lengthens [limitMs]. */
         val manualAe: Boolean,
+        /**
+         * How long a finalize had been outstanding, when that is what the recovery was for.
+         * Null for an ordinary dark preview, which is the common case.
+         */
+        val finalizeStuckForMs: Long? = null,
     )
 
     @Volatile
@@ -1764,6 +1840,27 @@ class CameraEngine(private val context: Context) {
      * burst of failed reprocess requests has left catatonic.
      */
     fun recoverIfDead(): Boolean {
+        // **A finalize with no end is not a reason to stand down.** `finalizing` muzzles this
+        // deliberately — rebinding under a writing muxer is what takes the camera service down —
+        // but the flag had no deadline and only `Finalize` ever cleared it. A recorder killed
+        // mid-flush emits nothing, so the watchdog spent the rest of the process declining to
+        // look at a preview that was already black. Past the timeout the muxer is gone and the
+        // only thing the flag is still protecting is the bug.
+        if (_finalizing.value &&
+            SystemClock.elapsedRealtime() - finalizingSince > FINALIZE_TIMEOUT_MS
+        ) {
+            lastDeath = PreviewDeath(
+                silentForMs = if (lastResultAt == 0L) 0L else SystemClock.elapsedRealtime() - lastResultAt,
+                limitMs = staleLimitMs(),
+                zslWasAllowed = zslAllowed,
+                zslWanted = zslWanted,
+                flash = lastFlash.name,
+                manualAe = _exposureMode.value.manualAe,
+                finalizeStuckForMs = SystemClock.elapsedRealtime() - finalizingSince,
+            )
+            abandonFinalize("no Finalize in ${FINALIZE_TIMEOUT_MS}ms")
+            return true
+        }
         if (!_ready.value) return false
         if (_recording.value || finalizing) return false
         val last = lastResultAt
@@ -1817,7 +1914,12 @@ class CameraEngine(private val context: Context) {
      */
     fun startRecording(withAudio: Boolean): Boolean {
         val video = videoCapture ?: return false
-        if (_recording.value || finalizing) return false
+        // **The handle, not the flag.** `_recording` does not go true until CameraX's `Start`
+        // event lands, which is a hop through the main executor after `start()` returns. A second
+        // press inside that window found both flags down and asked the recorder for a second
+        // recording: `start()` throws, the failure path below pulled `_recording` down under the
+        // recording that *was* running, and the button could then neither start nor stop.
+        if (activeRecording != null || _recording.value || finalizing) return false
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")
@@ -1851,16 +1953,20 @@ class CameraEngine(private val context: Context) {
                         // caught one limit later — zero would blind the watchdog to it
                         // forever.
                         lastResultAt = SystemClock.elapsedRealtime()
-                        finalizing = false
+                        _finalizing.value = false
                         _recording.value = false
                         activeRecording = null
                         if (event.hasError()) Log.e(TAG, "recording failed: ${event.error}")
+                        payOwedBind()
                     }
                 }
             }
             true
         }.onFailure {
             Log.e(TAG, "couldn't start recording", it)
+            // Nothing started, so nothing is holding the recorder — the guard above means this
+            // cannot be standing on a live recording's state.
+            activeRecording = null
             _recording.value = false
         }.getOrDefault(false)
     }
@@ -1877,11 +1983,70 @@ class CameraEngine(private val context: Context) {
      * was, and a `stop()` arriving twice in that window went to a reference nobody held.
      */
     fun stopRecording() {
-        if (activeRecording == null) return
+        val recording = activeRecording ?: return
         // The muxer is about to be told to finish; every rebind path has to stay shut until
         // `Finalize` arrives, not until `Recording.stop()` returns.
-        finalizing = true
-        runCatching { activeRecording?.stop() }
+        finalizingSince = SystemClock.elapsedRealtime()
+        _finalizing.value = true
+        // **A stop that threw will never produce a `Finalize`,** and `finalizing` is what keeps
+        // the camera guarded. Raising it for a recorder that was never successfully asked to
+        // finish is how the guard outlives the thing it guards.
+        if (runCatching { recording.stop() }.isFailure) {
+            abandonFinalize("Recording.stop() threw")
+        }
+    }
+
+    /**
+     * Let go of a finalize that is never going to land, and put the camera back.
+     *
+     * The flag exists to protect a muxer that is writing. Past the deadline there is no muxer
+     * left to protect — only an app that has locked its own camera shut and cannot reopen it.
+     * So the flag comes down, the orphaned handle is dropped (or nothing could ever record
+     * again), and the viewfinder is rebound rather than left black.
+     */
+    private fun abandonFinalize(why: String) {
+        if (!_finalizing.value) return
+        Log.w(TAG, "finalize abandoned ($why); reopening the camera")
+        _finalizing.value = false
+        _recording.value = false
+        activeRecording = null
+        // No heartbeat yet on a bind that has not happened; zero is what the watchdog reads as
+        // "no data", so it gives the new session the full stale limit to produce a frame.
+        lastResultAt = 0L
+        // Whatever the pager asked for while the flag was up is still what it wants — including
+        // a release, if the viewfinder is not the thing on screen. Rebinding the camera behind
+        // the roll would be a sensor left running for nobody.
+        val wanted = owed
+        owed = null
+        // **Only if nobody beat us to it.** This is posted, and the callers that reach here
+        // through [awaitIdle] go on to rebind for their own reasons the moment it returns — two
+        // `unbindAll`/`bind` pairs back to back on this HAL is the thing everything else in this
+        // class is written to avoid. [bindEpoch] already exists for exactly this question.
+        val epoch = _bindEpoch.value
+        ContextCompat.getMainExecutor(context).execute {
+            when {
+                stopped -> Unit
+                wanted == Owed.Release -> release()
+                _bindEpoch.value != epoch -> Unit
+                owner != null && provider != null && previewView != null -> rebind(lastFlash)
+            }
+        }
+    }
+
+    /** Settle whatever [release] or [resume] had to decline while the recorder held the camera. */
+    private fun payOwedBind() {
+        if (stopped) return
+        when (owed) {
+            Owed.Rebind -> {
+                owed = null
+                rebind(lastFlash)
+            }
+            Owed.Release -> {
+                owed = null
+                release()
+            }
+            null -> Unit
+        }
     }
 
     /**
@@ -1895,16 +2060,22 @@ class CameraEngine(private val context: Context) {
      */
     suspend fun awaitIdle(timeoutMs: Long = FINALIZE_TIMEOUT_MS) {
         if (!_recording.value && !finalizing) return
+        // **Both flags, combined.** This waited on `_recording` and re-tested `finalizing`
+        // inside the predicate, but a `StateFlow` only re-runs a predicate when it emits — so
+        // the case this exists for, `_recording` already down with `finalizing` still up, could
+        // never wake it. Every such call sat out the whole timeout and then reported a
+        // recorder that had in fact finished.
         val settled = withTimeoutOrNull(timeoutMs) {
-            _recording.first { !it && !finalizing }
+            combine(_recording, _finalizing) { rec, fin -> !rec && !fin }.first { it }
             true
         }
         if (settled == null) {
-            Log.w(TAG, "recorder never finalized in ${timeoutMs}ms; forcing idle (finalize still guarded)")
-            _recording.value = false
-            // activeRecording is left alone: the muxer may still be writing and will emit Finalize,
-            // which clears the handle and `finalizing`. Clearing it here would let a second
-            // stopRecording start a fresh recording before the old file exists.
+            Log.w(TAG, "recorder never finalized in ${timeoutMs}ms")
+            // Forcing `_recording` down while leaving `finalizing` up was the old answer, and it
+            // unstuck the interface by permanently locking the camera: nothing but a `Finalize`
+            // lowered that flag, so a recorder that died without one left every rebind path in
+            // this class refusing for the rest of the process — the frozen black viewfinder.
+            abandonFinalize("awaitIdle waited ${timeoutMs}ms")
         }
     }
 
@@ -1921,7 +2092,14 @@ class CameraEngine(private val context: Context) {
     }
 
     fun shutdown() {
+        // Set first: [stopRecording] can abandon a finalize, which posts a bind, and the
+        // provider is about to go. A camera rebound after the activity has gone is a sensor
+        // running for nobody.
+        stopped = true
         stopRecording()
+        // Nothing here can wait for the flush — this is the activity going away — but the owed
+        // bind must not fire into a torn-down provider if a `Finalize` lands on the way out.
+        owed = null
         runCatching { orientation.disable() }
         runCatching { provider?.unbindAll() }
         captureExecutor.shutdown()

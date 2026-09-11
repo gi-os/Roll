@@ -47,6 +47,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -173,6 +174,7 @@ fun CameraScreen(
     val torch by engine.torch.collectAsState()
     val countdown by vm.countdown.collectAsState()
     val recording by engine.recording.collectAsState()
+    val saving by engine.saving.collectAsState()
     val recordSeconds by vm.recordSeconds.collectAsState()
     val scanned by vm.scan.collectAsState()
     val page by vm.page.collectAsState()
@@ -907,7 +909,20 @@ fun CameraScreen(
                         modifier = Modifier.padding(start = 10.dp, top = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (recording) {
+                        // **Saving is a state of its own, and it has to be shown.** The muxer's
+                        // flush stalls the preview for seconds on this phone, so the frame
+                        // stops moving. With only `recording` to go on, the badge went on
+                        // blinking a red dot and counting, over a picture that had frozen —
+                        // which reads as a camera that has died, and was reported as one. A
+                        // still dot and the word says what is actually happening: the file is
+                        // being written, and the viewfinder comes back when it is.
+                        if (saving) {
+                            RecordDot(filled = false)
+                            LightText(
+                                " SAVING ${"%d:%02d".format(recordSeconds / 60, recordSeconds % 60)}",
+                                LightTextVariant.Detail,
+                            )
+                        } else if (recording) {
                             RecordDot()
                             LightText(
                                 " ${"%d:%02d".format(recordSeconds / 60, recordSeconds % 60)}",
@@ -2402,10 +2417,20 @@ private fun Chevron(pointingUp: Boolean) {
 
 /** Recording. A filled disc, because that is what a record light is. */
 @Composable
-private fun RecordDot() {
+private fun RecordDot(filled: Boolean = true) {
     val colours = LightThemeTokens.colors
     Canvas(Modifier.size(9.dp)) {
-        drawCircle(color = colours.content, radius = size.minDimension / 2f)
+        // Hollow while the file is being written. Same mark, emptied — the house way of carrying
+        // state without reaching for a colour the panel does not have.
+        if (filled) {
+            drawCircle(color = colours.content, radius = size.minDimension / 2f)
+        } else {
+            drawCircle(
+                color = colours.content,
+                radius = size.minDimension / 2f - 0.75f.dp.toPx(),
+                style = Stroke(width = 1.5f.dp.toPx()),
+            )
+        }
     }
 }
 

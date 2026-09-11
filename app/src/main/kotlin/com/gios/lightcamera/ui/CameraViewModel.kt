@@ -710,6 +710,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             append("restart ").append(recoveries).append(" of this minute\n")
             if (death == null) {
                 append("the engine kept no record of the death — it healed between the poll and this\n")
+            } else if (death.finalizeStuckForMs != null) {
+                append("the recorder never finalized: ").append(death.finalizeStuckForMs)
+                    .append("ms after stop, with no Finalize event\n")
+                append("capture stamps still for ").append(death.silentForMs).append("ms\n")
+                append("flash ").append(death.flash)
+                    .append(", manual exposure ").append(death.manualAe).append('\n')
             } else {
                 append("capture stamps still for ").append(death.silentForMs)
                     .append("ms against a limit of ").append(death.limitMs).append("ms\n")
@@ -1695,10 +1701,16 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     return@collect
                 }
                 val startedAt = System.currentTimeMillis()
-                while (engine.recording.value) {
+                // Stops at the press, not at the finalize. `recording` stays true through the
+                // whole muxer flush, so a clock bound to it kept counting for seconds after the
+                // button said stop, over a viewfinder the flush had already frozen.
+                while (engine.recording.value && !engine.saving.value) {
                     _recordSeconds.value = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
                     delay(500)
                 }
+                // The clip's real length, held while the file is written so the badge has
+                // something true to sit beside "SAVING" instead of snapping to 0:00.
+                engine.recording.first { !it }
                 _recordSeconds.value = 0
                 // recording only goes false once the muxer's Finalize lands, so this is the moment
                 // the clip is a real, queryable row. Refresh once here, deferred out of the
@@ -2219,12 +2231,33 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun toggleRecording() {
         if (engine.recording.value) {
+            // Already asked. A second press during the flush is someone pressing the button
+            // again because nothing appeared to happen — which is the honest reading of a frozen
+            // frame — and it must not be mistaken for a request to start.
+            if (engine.saving.value) {
+                showNotice("Still saving")
+                return
+            }
             engine.stopRecording()
+            return
+        }
+        // **`recording` is not true yet at the moment a recording begins.** CameraX raises it
+        // from the `Start` event, a hop through the main executor later, so two quick presses
+        // both read false and both tried to start. The engine refuses the second on its handle
+        // now; this keeps the refusal from arriving as "Couldn't start recording" on a camera
+        // that is in fact about to record.
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRecordPressAt < RECORD_BOUNCE_MS) return
+        lastRecordPressAt = now
+        if (engine.saving.value) {
+            showNotice("Still saving the last clip")
             return
         }
         val started = engine.startRecording(withAudio = audioGranted)
         if (!started) showNotice("Couldn't start recording")
     }
+
+    private var lastRecordPressAt = 0L
 
     /* ---------------- QR ---------------- */
 
@@ -3641,6 +3674,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        /**
+         * Two presses this close together are one press. The record button is the hardware
+         * shutter, and the window between `start()` and CameraX's `Start` event is long enough
+         * to take a second one.
+         */
+        const val RECORD_BOUNCE_MS = 600L
+
         /**
          * How long the gauge ladder stays up after the last dial touch.
          *
