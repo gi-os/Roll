@@ -93,6 +93,7 @@ import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
 import com.gios.lightcamera.ocr.TextBoxes
 import com.gios.lightcamera.qr.Codes
+import com.gios.lightcamera.qr.WebTools
 import com.gios.lightcamera.ui.theme.LightHaptics
 import com.gios.lightcamera.ui.theme.LightIcons
 import com.gios.lightcamera.ui.theme.LightText
@@ -2625,10 +2626,21 @@ private fun ScanSheet(
     modifier: Modifier = Modifier,
 ) {
     val colours = LightThemeTokens.colors
+    val context = LocalContext.current
     val kind = remember(raw) { Codes.kindOf(raw) }
     val title = remember(raw) { Codes.title(raw) }
     val target = remember(raw) { Codes.openable(raw) }
     val wifi = remember(raw) { Codes.wifi(raw) }
+    // Asked once per code rather than held in the view model: it is wanted only to word one row,
+    // and a sheet is composed the moment a code is read, which is late enough to be current.
+    val webTools = remember(raw) { WebTools.installed(context) }
+    // A Web Tools code has nothing to open and a row anyway — the verb is "add", not "open".
+    val handOver = target != null || kind == Codes.Kind.Tool
+    val openLabel = when {
+        kind == Codes.Kind.Tool -> "Add to Web Tools"
+        kind == Codes.Kind.Link && webTools -> "Open in Web Tools"
+        else -> "Open"
+    }
 
     Box(
         modifier = modifier
@@ -2683,13 +2695,13 @@ private fun ScanSheet(
                         }
                     }
                     Spacer(Modifier.height(4.dp))
-                    if (target != null) {
-                        ScanAction(label = "Open", onTap = onOpen)
+                    if (handOver) {
+                        ScanAction(label = openLabel, onTap = onOpen)
                     }
                     if (wifi != null && wifi.password.isNotEmpty()) {
                         ScanAction(label = "Copy password", onTap = onCopyPassword)
                     } else {
-                        ScanAction(label = "Copy", lighten = target != null, onTap = onCopy)
+                        ScanAction(label = "Copy", lighten = handOver, onTap = onCopy)
                     }
                     ScanAction(label = "Scan again", lighten = true, onTap = onClose)
                 }

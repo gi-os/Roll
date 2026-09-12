@@ -14,7 +14,7 @@ package com.gios.lightcamera.qr
  */
 object Codes {
 
-    enum class Kind { Link, Wifi, Contact, Phone, Email, Sms, Place, Text }
+    enum class Kind { Link, Wifi, Contact, Phone, Email, Sms, Place, Tool, Text }
 
     /** The word at the top of the sheet. */
     fun heading(kind: Kind): String = when (kind) {
@@ -25,6 +25,7 @@ object Codes {
         Kind.Email -> "EMAIL"
         Kind.Sms -> "MESSAGE"
         Kind.Place -> "PLACE"
+        Kind.Tool -> "WEB TOOL"
         Kind.Text -> "TEXT"
     }
 
@@ -32,6 +33,7 @@ object Codes {
         val t = raw.trim()
         val lower = t.lowercase()
         return when {
+            isWebTool(t) -> Kind.Tool
             lower.startsWith("wifi:") -> Kind.Wifi
             lower.startsWith("begin:vcard") || lower.startsWith("mecard:") -> Kind.Contact
             lower.startsWith("tel:") -> Kind.Phone
@@ -60,6 +62,7 @@ object Codes {
             Kind.Email -> t.substringAfter(':').substringBefore('?')
             Kind.Sms -> t.substringAfter(':').substringBefore(':').substringBefore('?')
             Kind.Place -> t.removePrefix("geo:").substringBefore('?')
+            Kind.Tool -> toolTitle(t)
             Kind.Text -> t.lineSequence().firstOrNull()?.take(80).orEmpty()
         }.ifBlank { t.take(80) }
     }
@@ -178,6 +181,102 @@ object Codes {
             }
         }
         return null
+    }
+
+    /**
+     * Whether the payload is a Web Tools code rather than something this phone can open itself.
+     *
+     * The companion page at gi-os.github.io/WebTools writes a shelf tool as JSON —
+     * `{"wt":1,"n":"Tickets","u":"https://…","o":["ticketmaster.com"],"f":"Tickets"}` — and a code
+     * too big for one image as `{"wt":1,"k":"part",…}`. Neither is a link, a network or a card, so
+     * until now both arrived as TEXT with a COPY on them and nothing else: a code whose whole
+     * purpose is to be installed, and no way to install it.
+     *
+     * **This recognises the envelope and does not parse the payload, deliberately.** Whether the
+     * JSON is well formed, which origins the wall ends up with and whether a login unpacks are Web
+     * Tools' questions, and it already owns the parser and the words for every way they fail. Roll
+     * only has to know enough to offer the right verb; a payload that turns out to be broken gets
+     * Web Tools' own reason rather than a second opinion formed here. Staying a string scan is
+     * also what keeps this file free of `org.json`, whose Android stub returns nothing under a JVM
+     * test and would have made the one untestable thing in it the one thing worth testing.
+     */
+    fun isWebTool(raw: String): Boolean {
+        val t = raw.trim()
+        if (!t.startsWith("{")) return false
+        return jsonValue(t, "wt")?.toIntOrNull() != null
+    }
+
+    /** The name of the tool, the host it opens, or which part of a split code this one is. */
+    private fun toolTitle(raw: String): String {
+        if (jsonValue(raw, "k") == "part") {
+            val i = jsonValue(raw, "i")?.toIntOrNull()
+            val n = jsonValue(raw, "n")?.toIntOrNull()
+            return if (i != null && n != null) "Part $i of $n" else "Part of a code"
+        }
+        val site = jsonValue(raw, "u")?.let { host(it) }
+        val name = jsonValue(raw, "n").orEmpty().trim()
+        // `n` is a name in one shape of this payload and a count of parts in the other. A bare
+        // number is therefore not trusted as a title while there is a host to fall back on.
+        val named = name.isNotEmpty() && !(site != null && name.all { it.isDigit() })
+        return if (named) name else site ?: "Web tool"
+    }
+
+    /**
+     * The value of one key, as text, or null when the key is not there.
+     *
+     * A scanner rather than a parser, and that is the right size for the job: these payloads are
+     * flat objects a generator wrote, nothing here decides anything a mistake would be expensive
+     * about, and the alternative is a JSON dependency in the one file that has none. A key whose
+     * name appears somewhere it is not a key costs a wrong word in a title.
+     */
+    private fun jsonValue(raw: String, key: String): String? {
+        val needle = "\"" + key + "\""
+        var from = 0
+        while (true) {
+            val at = raw.indexOf(needle, from)
+            if (at < 0) return null
+            var i = at + needle.length
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            // A match that is not followed by a colon was a value, not a key. Keep looking.
+            if (i >= raw.length || raw[i] != ':') { from = at + 1; continue }
+            i++
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            if (i >= raw.length) return null
+            if (raw[i] == '"') return readString(raw, i)
+            var end = i
+            while (end < raw.length && raw[end] != ',' && raw[end] != '}' && !raw[end].isWhitespace()) end++
+            return raw.substring(i, end).ifEmpty { null }
+        }
+    }
+
+    /** The JSON string starting at [quote], unquoted, with its escapes resolved. */
+    private fun readString(raw: String, quote: Int): String {
+        val out = StringBuilder()
+        var i = quote + 1
+        while (i < raw.length) {
+            val c = raw[i]
+            if (c == '"') return out.toString()
+            if (c != '\\' || i + 1 >= raw.length) {
+                out.append(c)
+                i++
+                continue
+            }
+            when (val e = raw[i + 1]) {
+                'n' -> out.append('\n')
+                't' -> out.append('\t')
+                'r' -> out.append('\r')
+                'b' -> out.append('\b')
+                'f' -> out.append('\u000C')
+                'u' -> {
+                    val hex = raw.substring(i + 2, minOf(i + 6, raw.length))
+                    out.append(hex.toIntOrNull(16)?.toChar() ?: ' ')
+                    i += 4
+                }
+                else -> out.append(e)
+            }
+            i += 2
+        }
+        return out.toString()
     }
 
     /**

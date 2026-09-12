@@ -170,4 +170,81 @@ class CodesTest {
         gate.reset()
         assertTrue(gate.accept("a", 200))
     }
+
+    /* ---------------- a Web Tools code ---------------- */
+
+    private val toolCode =
+        """{"wt":1,"n":"Tickets","u":"https://www.ticketmaster.com/","o":["ticketmaster.com"],"keep":true,"f":"Tickets"}"""
+
+    @Test
+    fun `a web tools code is its own kind, not text`() {
+        assertEquals(Codes.Kind.Tool, Codes.kindOf(toolCode))
+        assertTrue(Codes.isWebTool(toolCode))
+        assertEquals("WEB TOOL", Codes.heading(Codes.Kind.Tool))
+    }
+
+    /** The sheet leads with the name the companion page gave it. */
+    @Test
+    fun `a web tools code is titled by its name`() {
+        assertEquals("Tickets", Codes.title(toolCode))
+    }
+
+    /** No name in the code: the host it opens says as much as anything would. */
+    @Test
+    fun `a nameless web tools code falls back to the host`() {
+        assertEquals("axs.com", Codes.title("""{"wt":1,"u":"https://axs.com/events?x=1"}"""))
+        assertEquals("Web tool", Codes.title("""{"wt":1}"""))
+    }
+
+    /**
+     * A code too big for one image arrives in frames, and a frame that says only "part 2 of 4" is
+     * the one case where the number *is* the whole message.
+     */
+    @Test
+    fun `a part frame says which part it is`() {
+        val part = """{"wt":1,"k":"part","id":"x7","i":2,"n":4,"p":"eJxLy"}"""
+        assertEquals(Codes.Kind.Tool, Codes.kindOf(part))
+        assertEquals("Part 2 of 4", Codes.title(part))
+    }
+
+    /**
+     * `n` is the tool's name in one shape of this payload and the number of parts in the other, so
+     * a bare number loses to the host rather than becoming the title of a tool called "4".
+     */
+    @Test
+    fun `a number is not taken as a name`() {
+        assertEquals("x.example.com", Codes.title("""{"wt":1,"n":4,"u":"https://x.example.com/"}"""))
+        assertEquals("4 Tickets", Codes.title("""{"wt":1,"n":"4 Tickets","u":"https://x.example.com/"}"""))
+    }
+
+    /**
+     * The envelope is the whole test. Anything that is not a `wt` object stays what it was, which
+     * is what stops an ordinary JSON payload on a poster from offering to install itself.
+     */
+    @Test
+    fun `other json is still text`() {
+        assertEquals(Codes.Kind.Text, Codes.kindOf("""{"id":7,"name":"Ada"}"""))
+        assertFalse(Codes.isWebTool("""{"wt":"yes"}"""))
+        assertFalse(Codes.isWebTool("""["wt",1]"""))
+        assertFalse(Codes.isWebTool("https://example.com/?wt=1"))
+    }
+
+    /** A code Web Tools will refuse is still recognised here — it gets Web Tools' reason, not ours. */
+    @Test
+    fun `a broken web tools code is still a web tools code`() {
+        assertEquals(Codes.Kind.Tool, Codes.kindOf("""{"wt":1,"u":"not a url"""))
+    }
+
+    /** There is nothing to launch: the sheet's verb is "add", and that is decided by the kind. */
+    @Test
+    fun `a web tools code opens nothing by itself`() {
+        assertNull(Codes.openable(toolCode))
+    }
+
+    /** Escapes inside a name are resolved rather than shown. */
+    @Test
+    fun `a quoted name reads back whole`() {
+        assertEquals("Ada\"s \\ tickets", Codes.title("""{"wt":1,"n":"Ada\"s \\ tickets"}"""))
+        assertEquals("café", Codes.title("""{"wt":1,"n":"café"}"""))
+    }
 }

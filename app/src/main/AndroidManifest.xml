@@ -69,6 +69,12 @@
     -->
     <queries>
         <package android:name="com.gios.lightchat" />
+        <!--
+            Web Tools is the browser on this phone, and the only app that knows what a
+            `{"wt":1,…}` code is. Named so a scanned link and a scanned shelf tool can be sent to
+            it by package rather than by a chooser, and so the sheet can say where the row goes.
+        -->
+        <package android:name="com.gios.webtools" />
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="image/*" />

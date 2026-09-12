@@ -46,6 +46,7 @@ import com.gios.lightcamera.ocr.TextScan
 import com.gios.lightcamera.qr.CodeHandoff
 import com.gios.lightcamera.qr.Codes
 import com.gios.lightcamera.qr.ScanGate
+import com.gios.lightcamera.qr.WebTools
 import androidx.camera.core.ImageCapture
 import com.gios.lightcamera.media.CaptureFormat
 import com.gios.lightcamera.media.CaptureGroup
@@ -2297,12 +2298,31 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             showNotice("Point at a code")
             return
         }
+        val app = getApplication<Application>()
+        // A Web Tools code is not openable and never will be — it is a shelf tool, and the phone
+        // has one app that knows what to do with it. Handed over whole; see [WebTools.add].
+        if (Codes.kindOf(raw) == Codes.Kind.Tool) {
+            if (WebTools.add(app, raw)) {
+                dismissScan()
+            } else {
+                showNotice("Web Tools is not installed")
+            }
+            return
+        }
         val target = Codes.openable(raw)
         if (target == null) {
             copyScan()
             return
         }
-        if (CodeHandoff.open(getApplication<Application>(), target)) {
+        // A web address goes to Web Tools by name when it is there, and by the general intent when
+        // it is not. The order matters on this phone rather than being a preference: with no
+        // browser installed the general intent resolves to nothing at all, and with two browsers
+        // it puts a chooser in front of someone standing at a poster.
+        if (Codes.kindOf(raw) == Codes.Kind.Link && WebTools.open(app, target)) {
+            dismissScan()
+            return
+        }
+        if (CodeHandoff.open(app, target)) {
             dismissScan()
         } else {
             showNotice("Nothing here opens that")

@@ -1,3 +1,23 @@
+## Roll v3.7 — a scanned code goes to Web Tools
+
+**Open, on a scanned link, now names Web Tools.** The Light Phone III ships with no browser at all,
+so `ACTION_VIEW` on an `https` address resolved to nothing and the row did nothing — and on the day
+a second app answers for web addresses, an unnamed intent puts a list of apps in front of someone
+standing at a poster. Web Tools is asked for by name, and the general intent is still what runs on a
+phone that does not have it.
+
+**A Web Tools code is its own kind of code now.** The companion page at gi-os.github.io/WebTools
+writes a shelf tool as a line of JSON. Point the camera at one and until now you got TEXT, the raw
+payload, and a COPY — a code whose only purpose is to be installed, and no way to install it. The
+sheet reads WEB TOOL, leads with the tool's name or the site it opens, and the row says ADD TO WEB
+TOOLS. A code too big for one image says which part of it you just read.
+
+**Roll reads the envelope and does not open the letter.** The payload goes across whole. Whether the
+JSON holds together, which sites the wall ends up covering and whether a login unpacks are Web Tools'
+questions, and it already has the parser and the words for every way they fail — so a bad code gets
+its answer rather than a second opinion formed in the camera. It also means the two apps cannot drift
+apart as the companion page changes.
+
 ## Roll v3.6 — video no longer locks the camera shut
 
 **Record a clip and the camera freezes on one frame, then stays black.** Reported plainly: "recording

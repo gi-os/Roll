@@ -383,6 +383,19 @@ picture you were about to take. So a scan holds. Roll sets the host large, puts 
 under it, and leaves the decision to you. That is also the only defence anyone has against a
 sticker pasted over the QR code on a parking meter.
 
+**A web address goes to Web Tools.** The Light Phone III ships with no browser, so an `https` code
+had nowhere to go until Web Tools was installed and OPEN was a row that did nothing. Roll asks for
+`com.gios.webtools` by name — which also means no chooser on a 3.92" panel the day a second app
+answers for web addresses — and falls back to the general intent on a phone without it.
+
+**A Web Tools code is offered to Web Tools.** The companion page at
+<https://gi-os.github.io/WebTools/> writes a shelf tool as a line of JSON. Roll recognizes the
+envelope, titles the sheet with the tool's name or the site it opens, and the row reads ADD TO WEB
+TOOLS. Codes split over several images say which part you just read. The payload crosses whole:
+`Codes.isWebTool` only looks for the envelope, and everything about what is inside it — the wall,
+a carried-over login, a malformed code — is Web Tools' to say. Two parsers of one format in two
+apps is how they drift.
+
 Roll hands only seven schemes to the system:
 
 ```
