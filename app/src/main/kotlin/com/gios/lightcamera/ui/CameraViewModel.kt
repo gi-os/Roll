@@ -25,7 +25,9 @@ import com.gios.lightcamera.camera.Ring
 import com.gios.lightcamera.map.Locations
 import com.gios.lightcamera.map.Point
 import com.gios.lightcamera.map.Tiles
+import com.gios.lightcamera.camera.BlankFrame
 import com.gios.lightcamera.camera.PanelFlash
+import com.gios.lightcamera.hw.SaveLock
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
@@ -941,9 +943,18 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }, "darkroom").apply { priority = Thread.MIN_PRIORITY }
         }.asCoroutineDispatcher()
 
+    /**
+     * Keeps the processor running while there is a photograph still to write. See [SaveLock].
+     */
+    private val saveLock = SaveLock(app)
+
     private fun startDarkroom() {
         viewModelScope.launch {
             for (job in darkroom) {
+                // **Held per job, dropped when the queue empties.** The press is over by now and
+                // the screen may go off at any point in here, which on this phone means the
+                // processor is free to suspend with the encode half done.
+                saveLock.hold()
                 val startedAt = SystemClock.elapsedRealtime()
                 _developingSince.value = startedAt
                 try {
@@ -996,7 +1007,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 } finally {
                     if (job is PanelJob) _panelQueued.value -= 1
                     _developing.value -= 1
-                    if (_developing.value <= 0) _developingSince.value = 0L
+                    if (_developing.value <= 0) {
+                        _developingSince.value = 0L
+                        // Nothing left to write, so nothing left to stay awake for. After the
+                        // decrement above, never before it.
+                        saveLock.release()
+                    }
                 }
             }
         }
@@ -2786,7 +2802,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     lookForShot().lowRes ||
                     lookForShot().facesAware
                 ) {
-                    if (!shootPanelFrame(click = true)) showNotice("Nothing on the viewfinder yet")
+                    if (!shootPanelFrame(click = true)) showNotice(grabFault)
                     return@launch
                 }
 
@@ -2855,7 +2871,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     if (!captureGate.tryAcquire()) {
                         viewModelScope.launch {
                             if (!shootPanelFrame(click = false)) {
-                                showNotice("Nothing on the viewfinder yet")
+                                showNotice(grabFault)
                             }
                         }
                         return@launch
@@ -2914,6 +2930,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                                 val why = failure.message?.take(48)
                                 val said = when {
                                     rescued -> "Sensor didn't answer. Saved the viewfinder frame"
+                                    // **The screen going off is its own answer, not a shutter
+                                    // fault.** Turning it off aborts the capture and stops the
+                                    // window drawing in the same moment, so the rescue reaches a
+                                    // viewfinder that is already dark. Naming that is worth more
+                                    // than repeating whatever CameraX said as the capture died.
+                                    grabFault == VIEWFINDER_DARK -> VIEWFINDER_DARK
                                     why.isNullOrBlank() -> "Shutter failed"
                                     else -> "Shutter: $why"
                                 }
@@ -2945,6 +2967,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     showNotice(
                         when {
                             rescued -> "Sensor didn't answer. Saved the viewfinder frame"
+                            grabFault == VIEWFINDER_DARK -> VIEWFINDER_DARK
                             why.isNullOrBlank() -> "Shutter failed"
                             else -> "Shutter: $why"
                         },
@@ -3255,7 +3278,67 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * instead of frozen into the file, it is off by default, and Simple without it is exactly as
      * quick as it ever was.
      */
-    private suspend fun grabBestFrame(): Bitmap? {
+    /**
+     * Why the last grab produced no photograph, for whoever has to say so.
+     *
+     * A string rather than a thrown type because every caller does the same thing with it — puts
+     * it on screen — and because "there is no frame yet" and "the frame was not a picture" are the
+     * same event to everything except the sentence.
+     */
+    private var grabFault = NO_FRAME_YET
+
+    /**
+     * The frame, or null if it is not a photograph.
+     *
+     * **The viewfinder does not fail by returning nothing.** Turn the screen off — which on this
+     * phone is a deliberate press, since the window never dims on its own — and the window stops
+     * drawing, but `PreviewView.getBitmap()` goes on answering: a bitmap of the right size, full of
+     * zeroes. Every check on this path was a null check, so the black rectangle sailed through the
+     * shader, the encoder and the MediaStore write and landed in the roll as a photograph.
+     *
+     * The rescue after a failed sensor capture is where it hurt most. Turning the screen off
+     * aborts a capture in flight, the catch reaches for the viewfinder frame instead, and the
+     * viewfinder had stopped drawing for the same reason the capture died — so the consolation
+     * prize for a lost photograph was a black file and a notice saying it had been saved.
+     *
+     * See [BlankFrame] for the test and why it is the strict one.
+     */
+    private fun picture(frame: Bitmap?): Bitmap? {
+        if (frame == null) {
+            grabFault = NO_FRAME_YET
+            return null
+        }
+        val blank = runCatching {
+            val points = BlankFrame.points(frame.width, frame.height)
+            if (points.size < BlankFrame.SAMPLES * 2) return@runCatching false
+            val samples = IntArray(BlankFrame.SAMPLES)
+            for (i in samples.indices) {
+                samples[i] = frame.getPixel(points[i * 2], points[i * 2 + 1])
+            }
+            BlankFrame.isBlank(samples)
+            // **A frame that cannot be sampled is kept.** The alternative is throwing away a real
+            // photograph over a bitmap config this code did not expect, which is the worse of the
+            // two mistakes by a wide margin.
+        }.getOrDefault(false)
+        if (!blank) {
+            grabFault = NO_FRAME_YET
+            return frame
+        }
+        runCatching { frame.recycle() }
+        grabFault = VIEWFINDER_DARK
+        return null
+    }
+
+    /**
+     * The frame to develop: the best one going, once it has been asked whether it is a picture.
+     *
+     * The test is on the way out rather than inside the burst, because it is the frame that gets
+     * saved that has to be a photograph, and sixty-four reads per press is cheap where eight times
+     * that is waste.
+     */
+    private suspend fun grabBestFrame(): Bitmap? = picture(pickFrame())
+
+    private suspend fun pickFrame(): Bitmap? {
         // **The ring first, because it costs nothing at the press.** If frames have been arriving
         // all along there is no reason to go and fetch more: reach back to the moment asked for,
         // or take the sharpest of what is held. This is the version of "sharpest of eight" that
@@ -3379,7 +3462,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // that would mean picking the sharpest of eight differently-lit pictures.
                 val grabbed = withPanelFlash { grabBestFrame() }
                 if (grabbed == null) {
-                    showNotice("Nothing on the viewfinder yet")
+                    showNotice(grabFault)
                     return@launch
                 }
                 val grabMs = (System.nanoTime() - startedAt) / 1_000_000
@@ -3466,9 +3549,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
                     // A booth flashes, and it flashes for every panel — the four frames are one
                     // object and three of them lit differently is a strip that does not stack.
-                    val grabbed = withPanelFlash { engine.previewFrame() }
+                    val grabbed = withPanelFlash { picture(engine.previewFrame()) }
                     if (grabbed == null) {
-                        showNotice("Nothing on the viewfinder yet")
+                        showNotice(grabFault)
                         return@launch
                     }
                     _shutterTick.tryEmit(Unit)
@@ -3753,6 +3836,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         observer?.let { runCatching { it.close() } }
         observer = null
+        // The queue dies with the scope, so there is nothing left to stay awake for — and a lock
+        // outliving the thing that holds it is a phone that will not sleep.
+        saveLock.release()
         engine.shutdown()
         ShaderRuntime.releasePool()
         beeps.release()
@@ -3843,6 +3929,21 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** Quarter resolution to here (~0.6MB); past it a drop is at least a named one. */
         const val PANEL_MAX_DEPTH = 32
+
+        /**
+         * The viewfinder has not produced a frame yet — the camera is still coming up, or the
+         * readback failed once. Ordinary, and it fixes itself.
+         */
+        const val NO_FRAME_YET = "Nothing on the viewfinder yet"
+
+        /**
+         * The viewfinder answered with a frame that was not a picture.
+         *
+         * Says "nothing saved" out loud on purpose. The thing this replaced wrote the black frame
+         * to the camera roll and reported a success, so the one fact worth putting on screen is
+         * that there is no file to go and find.
+         */
+        const val VIEWFINDER_DARK = "Screen went dark mid-shot. Nothing saved"
 
         /**
          * The Auto-flash probe, at the same size the histogram meters at — a mean brightness needs

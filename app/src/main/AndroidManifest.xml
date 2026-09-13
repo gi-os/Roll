@@ -20,6 +20,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
+      The press is over long before the file is. Every capture is handed to the darkroom and
+      developed behind the viewfinder, and turning the screen off inside that window lets the
+      processor suspend with the photograph half written. Held only while the queue has work, and
+      with a three-minute ceiling under it. See `hw/SaveLock.kt`.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
       Where a photograph was taken, for the map.
 
       Coarse and fine are both declared and neither is required: a coarse fix is enough to put a

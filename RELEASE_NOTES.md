@@ -1,3 +1,44 @@
+## Roll v3.9 — turning the screen off no longer costs you the photograph
+
+**Take a picture, press the power key while it is still saving, and what landed in the roll was a
+black rectangle.** Two faults behind it, and they are opposite in kind: one where the app kept
+working and should not have, one where it stopped working and should not have.
+
+**The viewfinder does not fail by returning nothing.** Half of Roll's capture paths take the frame
+that is already on the panel — Simple, the Screen size, every coarse filter, and the rescue that
+runs when a sensor capture fails. When the window stops drawing, which is what the screen going off
+means, `PreviewView.getBitmap()` does not return null. It hands back a bitmap of the right size,
+full of zeroes. Every check on that path was a null check, so the black rectangle went through the
+shader, through the encoder and into the camera roll with a correct timestamp on it.
+
+The rescue is where it hurt most, and it is worth spelling out because it reads like malice. Turning
+the screen off stops an in-flight sensor capture. The catch around that reaches for the viewfinder
+frame instead, on the reasoning that a panel-resolution photograph beats no photograph. But the
+viewfinder had gone dark for the same reason the capture died, in the same instant — so the
+consolation prize for a lost picture was a black file, announced as a success.
+
+A frame is now asked whether it is a picture, not merely whether it is there. Sixty-four points
+spread across it: a dead readback is the same number at every one of them, and a real photograph —
+even one taken in the dark, even with a hand over the lens — has sensor noise, so it never is. Fail
+the test and nothing is saved and the notice says so. The test is deliberately the strictest one
+available, because the two mistakes do not cost the same: refusing a real photograph loses a picture
+somebody cannot take again, while accepting a dead one writes a black file they have to go and find.
+
+**The other half is that the save now finishes.** The shutter hands every capture to the darkroom
+and returns — that is what makes it quick — and the decode, the shader pass, the encode and the
+write all happen behind the viewfinder, most of a second for one frame and several for a queue.
+Turning the screen off inside that window let the processor suspend with the photograph half
+written. It resumed whenever something next woke the phone, which could be minutes, and never at all
+if the app was killed first. Roll now holds a partial wake lock while the darkroom has work and
+drops it the moment the queue drains: the screen still goes off immediately, the processor stays up
+just long enough to finish the file. There is a three-minute ceiling under it so a bug in that
+bookkeeping cannot flatten a battery.
+
+What this does not change: a sensor capture that was in flight when the screen went off is gone.
+The camera is unbound the moment the app stops and there is no getting that frame back. The
+difference is that Roll now says "Screen went dark mid-shot. Nothing saved" instead of writing a
+black file and calling it a photograph.
+
 ## Roll v3.8 — the flash fires
 
 **Reported plainly: "the flash never fires when taking a photo."** It never did. Not in Pro, not in
