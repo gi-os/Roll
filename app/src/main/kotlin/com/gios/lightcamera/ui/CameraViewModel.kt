@@ -25,6 +25,7 @@ import com.gios.lightcamera.camera.Ring
 import com.gios.lightcamera.map.Locations
 import com.gios.lightcamera.map.Point
 import com.gios.lightcamera.map.Tiles
+import com.gios.lightcamera.camera.PanelFlash
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
@@ -2150,11 +2151,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applyMode(next: CaptureMode, keepFilter: Boolean = false) {
-        // **Simple drops Auto flash.** Auto is not free even when it decides not to fire: the HAL runs a
-        // precapture metering sequence — often a preflash — before it will start the frame you asked for,
-        // which is most of a second that a mode whose whole argument is speed should not be spending. Off
-        // by default there; explicitly turning it on in Simple still works.
-        if (next.isSimple && prefs.flash.value == FlashMode.Auto) prefs.setFlash(FlashMode.Off)
+        // **Simple keeps Auto flash now, and the reason it used to lose it was never true here.**
+        // The old rule said Auto costs a precapture metering sequence even when it declines to
+        // fire, which is a real cost and a good reason — on the path that calls `takePicture`.
+        // Simple does not call it. It grabs the panel, so the flash mode reached nothing at all,
+        // and the rule was silently changing a setting to avoid a cost the mode never paid.
+        // Auto on a panel grab is now one downscaled brightness reading (see [withPanelFlash]),
+        // which is worth what it buys: a camera that lights a dark room by itself.
         // A result belongs to the mode that produced it. Leaving QR with the sheet up would carry a
         // stale payload back into Pro, where the shutter would then try to open it.
         _scan.value = null
@@ -2985,7 +2988,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * already sounded at the press and a second one would claim a second photograph.
      */
     private suspend fun shootPanelFrame(click: Boolean): Boolean {
-        val grabbed = grabBestFrame() ?: return false
+        val grabbed = withPanelFlash { grabBestFrame() } ?: return false
         if (click) _shutterTick.tryEmit(Unit)
         val activeFilter = lookForShot()
         val seed = Random.nextFloat() * 1000f
@@ -3180,6 +3183,64 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Run a panel grab with the lamp on, if the flash asked for one.
+     *
+     * **The three fast capture paths never called `takePicture`, so the flash mode never reached
+     * the camera.** Simple, the Screen size and the coarse filters all shoot the frame that is
+     * already on the panel; `ImageCapture.flashMode` is a property of a capture and there is no
+     * capture. The chip cycled, the icon lit, and nothing happened — which is most of what "the
+     * flash never fires" means in the reports.
+     *
+     * A grab has nothing to synchronise a flash with, so what it gets is the lamp held on across
+     * it. See [CameraEngine.lampOn] for why there is a wait in the middle of it and [PanelFlash]
+     * for which grabs get one.
+     *
+     * **Off costs nothing measurable and Auto costs one readback.** The probe below is a full panel
+     * grab, so it is taken only when the answer actually turns on it.
+     */
+    private suspend fun <T> withPanelFlash(grab: suspend () -> T): T {
+        val mode = prefs.flash.value
+        val hasLamp = engine.hasFlash()
+        val torchHeld = engine.torch.value
+        val luma = if (mode == FlashMode.Auto && hasLamp && !torchHeld) probeLuma() else null
+        if (!PanelFlash.wanted(mode, hasLamp, torchHeld, luma)) return grab()
+        val lit = engine.lampOn()
+        return try {
+            grab()
+        } finally {
+            // **In a `finally`, and this is the one that matters.** A cancelled press, a throw out
+            // of the grab or a burst abandoned halfway would otherwise leave the lamp on with no
+            // control on screen that turns it off — a camera that has become a torch. Roll has
+            // shipped that shape of bug before, with a busy flag cleared on the happy path only.
+            if (lit) engine.lampOff()
+        }
+    }
+
+    /**
+     * How bright the scene is, 0-255, for the Auto flash decision.
+     *
+     * The panel rather than a luma plane, for the reason `rememberLuma` gives: this app binds no
+     * analysis stream outside QR mode, and a readback once per press is far cheaper than a second
+     * full-rate consumer of the ISP running all day for it.
+     */
+    private suspend fun probeLuma(): Int? {
+        val panel = engine.previewFrame() ?: return null
+        return try {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    val small = Bitmap.createScaledBitmap(panel, PROBE_W, PROBE_H, true)
+                    val pixels = IntArray(PROBE_W * PROBE_H)
+                    small.getPixels(pixels, 0, PROBE_W, 0, 0, PROBE_W, PROBE_H)
+                    if (small != panel) small.recycle()
+                    PanelFlash.meanLuma(pixels, PROBE_W, PROBE_H)
+                }.getOrNull()
+            }
+        } finally {
+            runCatching { panel.recycle() }
+        }
+    }
+
+    /**
      * The frame to make the photograph out of — the newest, or the sharpest of a short burst.
      *
      * **Why the burst happens after the press and not before it.** The textbook version keeps a ring
@@ -3312,7 +3373,11 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 // back's description makes the same promise — but this path read the panel
                 // directly, so neither setting did anything in the mode most people shoot in.
                 // With both off, grabBestFrame *is* a straight panel read.
-                val grabbed = grabBestFrame()
+                //
+                // The lamp wraps the whole grab rather than one frame of it: with the burst on,
+                // eight frames are read across a quarter of a second and lighting only part of
+                // that would mean picking the sharpest of eight differently-lit pictures.
+                val grabbed = withPanelFlash { grabBestFrame() }
                 if (grabbed == null) {
                     showNotice("Nothing on the viewfinder yet")
                     return@launch
@@ -3399,7 +3464,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     _countdown.value = null
                     showNotice("$shot of ${PuriStrip.SHOTS}")
 
-                    val grabbed = engine.previewFrame()
+                    // A booth flashes, and it flashes for every panel — the four frames are one
+                    // object and three of them lit differently is a strip that does not stack.
+                    val grabbed = withPanelFlash { engine.previewFrame() }
                     if (grabbed == null) {
                         showNotice("Nothing on the viewfinder yet")
                         return@launch
@@ -3776,6 +3843,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
         /** Quarter resolution to here (~0.6MB); past it a drop is at least a named one. */
         const val PANEL_MAX_DEPTH = 32
+
+        /**
+         * The Auto-flash probe, at the same size the histogram meters at — a mean brightness needs
+         * far fewer pixels than it needs to be the right pixels.
+         */
+        const val PROBE_W = 96
+        const val PROBE_H = 128
 
         /** Small enough that eight Laplacian passes are free, large enough to still contain the edges. */
         const val SCORE_W = 96

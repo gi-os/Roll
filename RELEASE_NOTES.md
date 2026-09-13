@@ -1,3 +1,58 @@
+## Roll v3.8 — the flash fires
+
+**Reported plainly: "the flash never fires when taking a photo."** It never did. Not in Pro, not in
+Simple, not on Auto, not on a filter. The icon lit, the chip cycled through its three states, and
+the lamp stayed dark in every mode the app has. The torch kept working the whole time, which is why
+this looked like a setting that had not taken rather than a camera that could not fire.
+
+Three separate faults, and each one would have been enough on its own.
+
+**Auto exposure was overwriting the order to fire.** On Camera2 a flash is not its own control. It
+*is* the auto-exposure mode: CameraX turns `FLASH_MODE_ON` into `CONTROL_AE_MODE_ON_ALWAYS_FLASH`
+and `FLASH_MODE_AUTO` into `CONTROL_AE_MODE_ON_AUTO_FLASH`, and asks the camera for that on the
+still. Roll's manual-exposure code sets `CONTROL_AE_MODE_OFF` when you hold a shutter speed, and the
+other half of that branch set `CONTROL_AE_MODE_ON` when you do not — which reads like the harmless
+opposite and is not, because options set that way take priority over the ones CameraX sets. So every
+capture in the app went out carrying plain auto exposure with the flash instruction stripped off it.
+Auto exposure now says nothing there, which hands the decision back to CameraX. Coming out of manual
+still restores metering, by the same mechanism as before.
+
+**Half of Roll's photographs never asked the sensor for a frame.** Simple shoots the picture that is
+already on the screen. So does the Screen size, and so does every coarse filter whatever the size
+says — that is the whole reason those paths are fast. A flash mode belongs to a capture, and on
+those three there is no capture, so the flash setting reached nothing at all. A grab has no exposure
+to synchronize with, so what it gets now is the lamp held on across it. On a phone that is what a
+flash already is: an LED, not a xenon tube, and the only difference is that it stays lit for a third
+of a second instead of a hundredth.
+
+The lamp is held for 320 ms before the frame is taken, and the wait is the meter rather than the
+light. An LED is at full output immediately. The preview is still metered for the room as it was a
+moment ago, and a frame grabbed the instant the light arrives is that old metering applied to a
+newly lit scene, which is a face burned to white against a black room. Every camera runs a preflash
+for this reason. Roll runs it on the preview stream, because on these paths the preview stream is
+the photograph.
+
+**Auto now means something in Simple, and stops being switched off behind your back.** Simple used
+to force Auto down to Off on the way in, because Auto costs a metering pass even when it declines to
+fire. That cost is real on the path that calls the sensor and Simple never calls it, so the rule was
+changing a setting to avoid a bill the mode was not being sent. Auto on a panel grab is one
+downscaled brightness reading of the frame you are already looking at, taken only when Auto is
+selected and the camera has a lamp.
+
+**A tap on the flash chip no longer expires.** Every recovery path in the camera rebinds with the
+flash the session was last *bound* with — the stale-preview watchdog, the zero-shutter-lag abandon,
+the bind owed after a recording, the flat and lens-correction toggles. The chip wrote the new mode
+onto the live use case and nowhere else, so the next rebind built a fresh one from a value that
+predated your tap and the flash quietly went back to off with the icon still lit. Since the setting
+had not changed, nothing put it back: the only way out was cycling the chip twice. The chip now
+writes the mode the rebinds read.
+
+Three smaller notes. A torch you switched on by hand is left alone — it already lights the scene,
+and a lamp cycle would end by turning your torch off as a side effect of taking a picture. The lamp
+goes out in a `finally`, so a canceled press or a failed grab cannot leave a camera that has quietly
+become a flashlight. And a Purikura strip flashes on all four panels or none, because four frames
+lit three different ways is a strip that does not stack.
+
 ## Roll v3.7 — a scanned code goes to Web Tools
 
 **Open, on a scanned link, now names Web Tools.** The Light Phone III ships with no browser at all,

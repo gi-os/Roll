@@ -54,6 +54,7 @@ import com.gios.lightcamera.CaptureMode
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.qr.QrAnalyzer
 import androidx.lifecycle.LifecycleOwner
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -145,6 +146,13 @@ class CameraEngine(private val context: Context) {
 
     private val _torch = MutableStateFlow(false)
     val torch: StateFlow<Boolean> = _torch.asStateFlow()
+
+    /**
+     * True while the lamp is being held on *for a photograph*, which is a different thing from the
+     * torch above and must not be drawn as one. See [lampOn].
+     */
+    private val _lamp = MutableStateFlow(false)
+    val lamp: StateFlow<Boolean> = _lamp.asStateFlow()
 
     private val _facesSupported = MutableStateFlow(false)
     val facesSupported: StateFlow<Boolean> = _facesSupported.asStateFlow()
@@ -549,7 +557,19 @@ class CameraEngine(private val context: Context) {
      */
     fun canFireInstantly(): Boolean = zslWarm() && imageCapture?.flashMode == ImageCapture.FLASH_MODE_OFF
 
+    /**
+     * The flash mode, on the use case and on the record of what the session was asked for.
+     *
+     * **`lastFlash` is written here and that is not bookkeeping.** Every recovery path in this
+     * class rebinds with `rebind(lastFlash)` — the watchdog, the ZSL abandon, the owed bind after
+     * a recording, the flat and lens-correction toggles — and `lastFlash` was only ever written by
+     * `rebind` itself. So the chip in the band set `flashMode` on the *current* use case, the next
+     * rebind built a new one from a value that predated the tap, and the flash went off again with
+     * the icon still lit. A `StateFlow` does not re-emit an unchanged value, so nothing put it
+     * back: the only route out was toggling the chip twice.
+     */
     fun setFlash(mode: FlashMode) {
+        lastFlash = mode
         imageCapture?.flashMode = when (mode) {
             FlashMode.Off -> ImageCapture.FLASH_MODE_OFF
             FlashMode.On -> ImageCapture.FLASH_MODE_ON
@@ -1446,10 +1466,21 @@ class CameraEngine(private val context: Context) {
             _exposureReachable.value = Exposure.withinRange(shutter, iso, shutterRange, isoRange)
             _exposureLabel.value = "${Exposure.shutterLabel(shutter)} · ${Exposure.isoLabel(iso)}"
         } else {
-            builder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_MODE,
-                CameraMetadata.CONTROL_AE_MODE_ON,
-            )
+            // **Auto exposure says nothing here, and that is the fix for the flash.**
+            //
+            // This branch used to pin `CONTROL_AE_MODE_ON` as a session option, which reads like
+            // the harmless opposite of the manual branch above and is not. Firing a flash is not a
+            // separate control on Camera2: it *is* the auto-exposure mode. CameraX turns
+            // `FLASH_MODE_ON` into `CONTROL_AE_MODE_ON_ALWAYS_FLASH` and `FLASH_MODE_AUTO` into
+            // `CONTROL_AE_MODE_ON_AUTO_FLASH` on the precapture and still requests — and options
+            // set through `Camera2CameraControl` take priority over the ones CameraX sets, by
+            // documented design. So this line quietly overwrote the request to fire, on every
+            // capture, in every mode, and the lamp never lit. The torch went on working because a
+            // torch is `FLASH_MODE_TORCH`, which is not an AE mode and was never overridden.
+            //
+            // Leaving the option out is what restores it: `setCaptureRequestOptions` replaces the
+            // whole set each time, so an absent key hands the decision back to CameraX rather than
+            // to the HAL's default — which is also how coming out of manual gets AE back.
             _exposureReachable.value = true
             _exposureLabel.value = ""
         }
@@ -1572,6 +1603,52 @@ class CameraEngine(private val context: Context) {
     }
 
     fun hasFlash(): Boolean = camera?.cameraInfo?.hasFlashUnit() ?: false
+
+    /**
+     * Light the lamp for a photograph that has no shutter to sync it to.
+     *
+     * **Half this camera's photographs never call `takePicture`.** Simple shoots the panel, the
+     * Screen size shoots the panel, and every coarse filter shoots the panel whatever the size says
+     * — that is the whole reason those paths are fast. A flash mode is a property of a *capture*,
+     * so on all three it was a setting with nothing underneath it: the chip cycled, the icon lit,
+     * and the lamp stayed dark.
+     *
+     * A grab has no exposure to synchronise with, so the flash it can honestly have is a lamp held
+     * on across the grab. That is what a phone's "flash" is anyway — an LED, not a xenon tube — and
+     * the visible difference is only that it stays lit for a third of a second instead of a
+     * hundredth.
+     *
+     * Returns true when the lamp is lit and the caller owes a [lampOff]. False means nothing was
+     * touched, which is the answer for a camera with no lamp, a lamp already held on by hand, and a
+     * camera that refused.
+     */
+    suspend fun lampOn(): Boolean {
+        val control = camera?.cameraControl ?: return false
+        if (!hasFlash()) return false
+        // **A torch the person switched on is theirs.** It is already lighting the scene, there is
+        // nothing to add, and turning it off afterwards would be the app taking a control away.
+        if (_torch.value) return false
+        val lit = runCatching { control.enableTorch(true) }.isSuccess
+        if (!lit) return false
+        _lamp.value = true
+        // **The wait is the exposure, not the lamp.** An LED is at full output in microseconds; the
+        // meter is what takes time. Grab the frame the instant the light arrives and you get the
+        // scene metered for the dark — a white blown face against a black room — because auto
+        // exposure has not caught up yet. This is the preflash every camera runs, spent on the
+        // preview stream because the preview stream is the photograph here.
+        delay(PanelFlash.SETTLE_MS)
+        return true
+    }
+
+    /** Put the lamp out. Safe to call when it was never lit. */
+    fun lampOff() {
+        _lamp.value = false
+        val control = camera?.cameraControl ?: return
+        // Never against a torch the person is holding on: [lampOn] declines that case, so reaching
+        // here with `_torch` set means the two overlapped and the person's switch wins.
+        if (_torch.value) return
+        runCatching { control.enableTorch(false) }
+    }
 
     fun hasFrontCamera(): Boolean = runCatching {
         provider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
