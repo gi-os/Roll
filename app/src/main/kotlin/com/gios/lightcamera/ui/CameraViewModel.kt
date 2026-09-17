@@ -715,6 +715,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             append("restart ").append(recoveries).append(" of this minute\n")
             if (death == null) {
                 append("the engine kept no record of the death — it healed between the poll and this\n")
+            } else if (death.bindFailed) {
+                append("the camera was not bound at all — bindToLifecycle had thrown, and until ")
+                    .append("now nothing in the app retried it\n")
+                append("flash ").append(death.flash)
+                    .append(", manual exposure ").append(death.manualAe).append('\n')
+            } else if (death.waitingForFirstFrameMs != null) {
+                append("a fresh bind never produced a first frame: ")
+                    .append(death.waitingForFirstFrameMs)
+                    .append("ms against a limit of ").append(death.limitMs).append("ms\n")
+                append("zero-shutter-lag: wanted=").append(death.zslWanted)
+                    .append(" allowed=").append(death.zslWasAllowed).append('\n')
+                append("flash ").append(death.flash)
+                    .append(", manual exposure ").append(death.manualAe).append('\n')
             } else if (death.finalizeStuckForMs != null) {
                 append("the recorder never finalized: ").append(death.finalizeStuckForMs)
                     .append("ms after stop, with no Finalize event\n")
@@ -1635,13 +1648,24 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                     // few seconds (`!8` in the field), heats the phone, and fixes nothing. One
                     // honest sentence beats eight identical ones; the next app launch starts the
                     // watchdog fresh.
+                    // **Three strikes inside a minute slows it down; it no longer stops it.**
+                    // The cap is right — a preview that dies again immediately after a rebind is
+                    // allergic to something a rebind faithfully reproduces, and hammering it
+                    // tallies a fault every few seconds and heats the phone. Standing down for
+                    // the life of the process was wrong: it left a phone whose camera could not
+                    // come back without being force-quit, which is the thing the watchdog exists
+                    // to prevent. So it backs off to once a minute and keeps trying, quietly —
+                    // one fault filed, no further notices.
                     if (recoveries >= 3) {
-                        showNotice("Camera keeps dying. Close and reopen Roll")
-                        recordFault(
-                            "keep the camera alive — three restarts inside a minute",
-                            deathDetail(recoveries),
-                        )
-                        return@launch
+                        if (recoveries == 3) {
+                            showNotice("Camera keeps dying. Close and reopen Roll")
+                            recordFault(
+                                "keep the camera alive — three restarts inside a minute",
+                                deathDetail(recoveries),
+                            )
+                        }
+                        delay(60_000)
+                        continue
                     }
                     showNotice("Camera restarted")
                     // **Named as something the app could not do.** The report template heads a

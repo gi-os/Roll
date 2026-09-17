@@ -31,6 +31,7 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -410,6 +411,9 @@ class CameraEngine(private val context: Context) {
             return
         }
         owed = null
+        // Said out loud, so the watchdog does not read a deliberate unbind as a death and
+        // rebind the camera behind the roll.
+        releasedOnPurpose = true
         runCatching { orientation.disable() }
         runCatching { provider?.unbindAll() }
         // The analyser holds a reference to the view model through its callback and would otherwise
@@ -936,6 +940,7 @@ class CameraEngine(private val context: Context) {
             }
             val bound = provider.bindToLifecycle(owner, cameraSelector, preview, second)
             camera = bound
+            watchCameraState(owner, bound)
             readCameraLimits(bound)
             // A rebind builds a new session, and session capture options do not survive one. Any
             // manual exposure or flat profile in force has to be put back or it silently reverts
@@ -943,11 +948,62 @@ class CameraEngine(private val context: Context) {
             applyCaptureOptions()
             _bindEpoch.value += 1
             _ready.value = true
+            // The clock the first-frame deadline is measured from. Set here rather than in
+            // [rebind] so it marks a bind that actually succeeded.
+            boundAtElapsed = SystemClock.elapsedRealtime()
+            firstFrameLimitMs = COLD_FIRST_FRAME_MS
+            releasedOnPurpose = false
         }.onFailure {
             Log.e(TAG, "bind failed", it)
             _ready.value = false
+            // **A failed bind used to be the end.** `_ready` went false and [recoverIfDead]
+            // returned on that very check, so nothing in the app ever tried again — the camera
+            // was dead until you killed Roll and reopened it. Stamped so the watchdog has
+            // something to measure and can retry.
+            boundAtElapsed = SystemClock.elapsedRealtime()
+            releasedOnPurpose = false
         }
     }
+
+    /**
+     * Listen to CameraX's own verdict on the camera, instead of only inferring one.
+     *
+     * Everything else in this class works out that the camera has died by noticing it has stopped
+     * saying anything, which costs a stale limit before anyone is sure. CameraX already knows:
+     * `cameraState` reports a `StateError` the moment the device is disconnected, the session
+     * cannot be configured, or the HAL returns a fatal error — which is most of the ways a camera
+     * dies here, and it arrives in milliseconds rather than seconds.
+     *
+     * **It reports rather than rebinds.** The obvious thing is to bind again right here, and that
+     * is a loop with no counter: a configuration the HAL refuses errors again the moment it is
+     * rebound, and nothing on this path would ever stop. So this only clears the heartbeat, which
+     * is the vocabulary the watchdog already speaks — [recoverIfDead] picks it up on its next tick
+     * a beat later, and everything already built around it comes along: the three-strikes cap, the
+     * ZSL quarantine, the fault report with the state attached.
+     */
+    private fun watchCameraState(owner: LifecycleOwner, bound: Camera) {
+        runCatching {
+            // Observers are added per bind and would otherwise stack up one per rebind, each
+            // still holding the camera it was created for.
+            cameraStateSource?.removeObservers(owner)
+            val source = bound.cameraInfo.cameraState
+            cameraStateSource = source
+            source.observe(owner) { state ->
+                val error = state?.error ?: return@observe
+                // A recording in flight is the one time a rebind is forbidden outright — see
+                // [stopRecording]. The finalize path re-arms the deadline anyway.
+                if (_recording.value || finalizing) return@observe
+                Log.w(TAG, "CameraX reports camera error ${error.code}; handing it to the watchdog")
+                lastResultAt = 0L
+                boundAtElapsed = SystemClock.elapsedRealtime()
+                // Nothing to wait for: CameraX has already said it is broken.
+                firstFrameLimitMs = 0L
+            }
+        }.onFailure { Log.w(TAG, "could not observe camera state", it) }
+    }
+
+    /** Held so the previous bind's observers can be detached before the next one adds its own. */
+    private var cameraStateSource: androidx.lifecycle.LiveData<CameraState>? = null
 
     private class Hardware(
         val sensorOrientation: Int,
@@ -1887,6 +1943,32 @@ class CameraEngine(private val context: Context) {
     @Volatile private var lastResultAt = 0L
 
     /**
+     * When the current session was bound, and how long it has to prove itself.
+     *
+     * **A camera that never delivers a first frame was invisible to the watchdog, permanently.**
+     * [rebind] zeroes [lastResultAt] on purpose — a stale stamp from before a release would
+     * convict a healthy camera — and [recoverIfDead] reads zero as "no data yet". Nothing ever
+     * put a deadline on *yet*. So a bind that came up dead, which is exactly what the camera
+     * looks like after the recorder has had it, sat at zero for the life of the process with the
+     * watchdog declining to look at it. Every death this class has ever recovered from was one
+     * that produced frames first and then stopped.
+     */
+    @Volatile private var boundAtElapsed = 0L
+
+    /** How long that bind gets. Short after a recording, where a dead camera is the likely case. */
+    @Volatile private var firstFrameLimitMs = COLD_FIRST_FRAME_MS
+
+    /**
+     * True when the camera is unbound because this app asked for it — the roll is open, or the
+     * activity has gone.
+     *
+     * The watchdog has to tell that apart from a camera that fell over, because they look
+     * identical from here: no frames, nothing bound. One is the app working correctly and must
+     * not be "recovered"; the other is the whole reason the watchdog exists.
+     */
+    @Volatile private var releasedOnPurpose = false
+
+    /**
      * How long silence is allowed to run before [recoverIfDead] treats it as death.
      *
      * Generous with a manual shutter held open: a 30-second exposure is 30 legitimate seconds of
@@ -1924,6 +2006,13 @@ class CameraEngine(private val context: Context) {
          * Null for an ordinary dark preview, which is the common case.
          */
         val finalizeStuckForMs: Long? = null,
+        /**
+         * How long a fresh bind had gone without producing its first frame.
+         * Null for a preview that was delivering and then stopped, which is the older case.
+         */
+        val waitingForFirstFrameMs: Long? = null,
+        /** True when the camera was not bound at all — `bindToLifecycle` had thrown. */
+        val bindFailed: Boolean = false,
     )
 
     @Volatile
@@ -1959,11 +2048,63 @@ class CameraEngine(private val context: Context) {
             abandonFinalize("no Finalize in ${FINALIZE_TIMEOUT_MS}ms")
             return true
         }
-        if (!_ready.value) return false
         if (_recording.value || finalizing) return false
+        // Nothing to recover to. The provider and the view are what a rebind is made of.
+        if (stopped || owner == null || provider == null || previewView == null) return false
+        // The app unbound the camera itself — the roll is open, or we are in the background.
+        // That is not a death.
+        if (releasedOnPurpose) return false
+
+        val now = SystemClock.elapsedRealtime()
+
+        // **A bind that failed is a death too.** This used to be `if (!_ready.value) return false`
+        // as the very first line, which meant the one state the app cannot get out of by itself
+        // was the one state the watchdog refused to look at: `bindToLifecycle` throws, `_ready`
+        // goes false, and Roll sits on a black rectangle until it is force-quit. Give the failure
+        // a beat in case something transient is clearing, then bind again.
+        if (!_ready.value) {
+            if (boundAtElapsed == 0L || now - boundAtElapsed < staleLimitMs()) return false
+            lastDeath = PreviewDeath(
+                silentForMs = 0L,
+                limitMs = staleLimitMs(),
+                zslWasAllowed = zslAllowed,
+                zslWanted = zslWanted,
+                flash = lastFlash.name,
+                manualAe = _exposureMode.value.manualAe,
+                bindFailed = true,
+            )
+            Log.w(TAG, "the camera is not bound and nothing else will retry it; binding again")
+            rebind(lastFlash)
+            return true
+        }
+
         val last = lastResultAt
-        if (last == 0L) return false
-        val silentFor = SystemClock.elapsedRealtime() - last
+        if (last == 0L) {
+            // **Bound, claiming ready, and has never produced a single frame.** The old code
+            // returned here — zero meant "no data yet" and nothing ever put a deadline on yet.
+            // This is the shape a camera takes after the recorder has finished with it, and it
+            // was the one shape that could not be recovered from.
+            if (boundAtElapsed == 0L) return false
+            val waitingFor = now - boundAtElapsed
+            if (waitingFor < firstFrameLimitMs) return false
+            lastDeath = PreviewDeath(
+                silentForMs = 0L,
+                limitMs = firstFrameLimitMs,
+                zslWasAllowed = zslAllowed,
+                zslWanted = zslWanted,
+                flash = lastFlash.name,
+                manualAe = _exposureMode.value.manualAe,
+                waitingForFirstFrameMs = waitingFor,
+            )
+            if (zslAllowed) {
+                Log.w(TAG, "no first frame; quarantining ZSL for this session")
+                zslAllowed = false
+            }
+            Log.w(TAG, "no first frame in ${firstFrameLimitMs}ms; rebinding the camera")
+            rebind(lastFlash)
+            return true
+        }
+        val silentFor = now - last
         if (silentFor < staleLimitMs()) return false
         // **What the watchdog knew, kept for the report.** Three dark-preview reports are on file
         // against v3.1, v3.3 and v3.4 (light-reports#233, #293, #309) and not one of them says
@@ -2060,7 +2201,18 @@ class CameraEngine(private val context: Context) {
                         // lets go, and a session that genuinely died in the flush is still
                         // caught one limit later — zero would blind the watchdog to it
                         // forever.
-                        lastResultAt = SystemClock.elapsedRealtime()
+                        // **Armed rather than excused.** v3.1 stamped this to *now*, which
+                        // stopped the false death verdict and also stopped the true one: a
+                        // camera the recorder had killed then looked exactly as healthy as one
+                        // that was about to resume, and the watchdog waited a full stale limit
+                        // before noticing — if it noticed at all. Zeroed and re-armed instead:
+                        // the recorder has let go, so the preview owes a frame, and it has
+                        // [RECORDING_FIRST_FRAME_MS] to produce one before this is treated as
+                        // the death it usually is. A healthy camera stamps it back within a
+                        // frame or two and nothing happens.
+                        lastResultAt = 0L
+                        boundAtElapsed = SystemClock.elapsedRealtime()
+                        firstFrameLimitMs = RECORDING_FIRST_FRAME_MS
                         _finalizing.value = false
                         _recording.value = false
                         activeRecording = null
@@ -2259,6 +2411,7 @@ class CameraEngine(private val context: Context) {
         // provider is about to go. A camera rebound after the activity has gone is a sensor
         // running for nobody.
         stopped = true
+        releasedOnPurpose = true
         stopRecording()
         // Nothing here can wait for the flush — this is the activity going away — but the owed
         // bind must not fire into a torn-down provider if a `Finalize` lands on the way out.
@@ -2288,6 +2441,24 @@ class CameraEngine(private val context: Context) {
          * actually arrives.
          */
         const val FINALIZE_TIMEOUT_MS = 30_000L
+
+        /**
+         * How long a fresh bind may go without a first frame before it counts as dead.
+         *
+         * Generous, because a cold camera genuinely takes a moment and the cost of being wrong
+         * here is a rebind of a camera that was about to work.
+         */
+        const val COLD_FIRST_FRAME_MS = 4_000L
+
+        /**
+         * The same deadline, straight after a recording, where it is much shorter.
+         *
+         * A preview that has just been handed back by the recorder is not cold — the session is
+         * up, the surface is attached, frames should resume within one or two of them. Seconds of
+         * nothing here has one likely meaning and it is not patience. This is the number that
+         * decides how long a black viewfinder lasts after filming, which is the complaint.
+         */
+        const val RECORDING_FIRST_FRAME_MS = 1_200L
 
         const val TAG = "CameraEngine"
 
