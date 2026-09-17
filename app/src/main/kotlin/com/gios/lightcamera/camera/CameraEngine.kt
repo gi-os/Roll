@@ -837,15 +837,26 @@ class CameraEngine(private val context: Context) {
                     FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
                 ),
             )
-            // **The bitrate is the save time.** Everything the stop has to wait for is measured in
-            // bytes: the muxer's flush, the write through the scoped-storage FUSE layer, and then
-            // MediaProvider's own pass over the finished file when `IS_PENDING` is cleared — which
-            // happens inside the update CameraX makes *before* `Finalize` fires, so it is on the
-            // clock the person is watching. Left to the device, `Quality.HD` takes its bitrate from
-            // the camcorder profile, which on this phone is tuned for a screen this phone does not
-            // have. Half the bytes is half of all three waits, and at 720p the difference is not
-            // visible on a 3.92" panel or on a laptop.
-            .setTargetVideoEncodingBitRate(VIDEO_BITRATE)
+            // **No `setTargetVideoEncodingBitRate` here, and that is the finding.**
+            //
+            // v3.10 asked for 6 Mbit/s, on sound reasoning: the muxer flush, the scoped-storage
+            // write and MediaProvider's pass over the finished file are all linear in file size
+            // and all three run before the record button comes back, so halving the bytes halves
+            // the wait. It shipped and recording stopped working — a press died on the spot and
+            // left the viewfinder black.
+            //
+            // The reasoning was right and the lever was wrong. That call does not set a bitrate,
+            // it sets a *constraint* the recorder then has to satisfy against the encoder this
+            // phone actually has; when the number is outside the range `MediaCodecInfo` advertises,
+            // the config cannot be resolved, the recording finalizes with an error the instant it
+            // starts, and the camera is left holding a session that never began. Six megabits is a
+            // perfectly ordinary 720p bitrate, which is exactly why this was not visible without
+            // the hardware in hand.
+            //
+            // So the device chooses again. **Anything that goes back here has to ask the encoder
+            // what it will take** — `VideoCapabilities.getBitrateRange()` — and clamp into it
+            // rather than assert a number, and it has to be tried on a phone before it is tried on
+            // everybody's phone.
             .build()
         val video = VideoCapture.withOutput(recorder).also { it.targetRotation = lastRotation }
         this.videoCapture = video
@@ -2277,17 +2288,6 @@ class CameraEngine(private val context: Context) {
          * actually arrives.
          */
         const val FINALIZE_TIMEOUT_MS = 30_000L
-
-        /**
-         * 6 Mbit/s for 720p, against a camcorder-profile default that is usually 10-14.
-         *
-         * Not a quality knob turned down to save space — space was never the complaint. It is the
-         * one number that shortens the wait after the stop, because the flush, the FUSE write and
-         * MediaProvider's scan are all linear in file size and all three run before the button
-         * comes back. 6 Mbit/s is comfortably above where 720p30 handheld footage starts to show
-         * blocking; a minute of clip lands around 45 MB instead of 90.
-         */
-        const val VIDEO_BITRATE = 6_000_000
 
         const val TAG = "CameraEngine"
 

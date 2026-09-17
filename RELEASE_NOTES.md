@@ -1,3 +1,26 @@
+## Roll v3.11 — recording works again
+
+**v3.10 broke video, and this puts it back.** Press record on v3.10 and the recording died where
+it started, leaving a black viewfinder. One line did it.
+
+v3.10 capped the encoder at 6 Mbit/s. The reasoning behind that was sound — the muxer flush, the
+scoped-storage write and MediaProvider's pass over the finished file are all linear in file size,
+and all three run before the record button comes back, so halving the bytes halves the wait. The
+lever was wrong. `setTargetVideoEncodingBitRate` does not set a bitrate; it sets a constraint the
+recorder then has to satisfy against the encoder this particular phone has. When the number falls
+outside the range the encoder advertises, the configuration cannot be resolved, the recording
+finalizes with an error the instant it begins, and the camera is left holding a session that never
+started. Six megabits is an ordinary 720p bitrate, which is why this was invisible without the
+hardware in hand.
+
+The device chooses again. Anything that tries this a second time has to ask the encoder what it
+will accept — `VideoCapabilities.getBitrateRange()` — and clamp into it rather than assert a
+number, and it has to be run on a phone before it is run on everybody's phone.
+
+The other two changes from v3.10 stay, because neither goes anywhere near the encoder: a clip now
+carries a `DATE_TAKEN`, and the finished file is re-scanned once after the finalize so the object
+a computer is handed over USB has a real size and duration. The Wi-Fi drop is untouched.
+
 ## Roll v3.10 — the roll opens in a browser on your laptop
 
 **There has never been an easy way to get a video off this phone.** The share sheet resolves to
