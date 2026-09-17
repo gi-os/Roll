@@ -628,6 +628,31 @@ class CameraEngine(private val context: Context) {
         // for an opaque one, so face-priority AF is done here instead, from the boxes the
         // detector publishes, via `startFocusAndMetering`.
         Camera2Interop.Extender(previewBuilder).apply {
+            // **Asking for OFF out loud, because not asking is not the same as asking.**
+            //
+            // CameraX defaults both stabilisations to disabled and this app has never enabled
+            // either, so for three releases the assumption was that no stabilisation ran. The
+            // device log from 2026-09-17 13:19 says otherwise: CamX built
+            // `VideoEIS3PreviewEIS2RealTime` and a `VideoMorphoEISV3Offline` session, and its own
+            // override dump carries `persist.vendor.camera.enableEIS = 1` — a vendor property no
+            // app can write. EIS is on at the device, not at our request.
+            //
+            // That matters because the Morpho `moviesolid` node in that offline session is what
+            // stops signalling fences the moment a recorder lets go: 37 requests stuck in SUBMIT,
+            // CamX into recovery, and a `flush()` that cannot return because it is waiting on
+            // those same fences. That is the black viewfinder, and it is also why rebinding into
+            // it takes cameraserver down — the unbind is queued behind a flush that never ends.
+            //
+            // Not asking leaves the choice to the property. Asking `OFF` puts the standard key in
+            // the session parameters, where CamX's usecase selection reads it. Whether it is read
+            // early enough to keep the EIS graph from being built at all is the open question and
+            // the reason this is on a branch: verify on the phone with
+            // `adb logcat | grep VideoMorphoEISV3Offline` across a record and a stop before this
+            // goes anywhere near main.
+            setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            )
             if (_facesSupported.value) {
                 setCaptureRequestOption(
                     CaptureRequest.STATISTICS_FACE_DETECT_MODE,
@@ -858,7 +883,18 @@ class CameraEngine(private val context: Context) {
             // rather than assert a number, and it has to be tried on a phone before it is tried on
             // everybody's phone.
             .build()
-        val video = VideoCapture.withOutput(recorder).also { it.targetRotation = lastRotation }
+        // The same `OFF` on the use case whose presence is what makes CamX pick the EIS
+        // usecase in the first place. The preview key alone may not be consulted: it is the
+        // video stream in the configuration that selects `VideoEIS3PreviewEIS2RealTime`.
+        val videoBuilder = VideoCapture.Builder(recorder)
+            .setTargetRotation(lastRotation)
+        Camera2Interop.Extender(videoBuilder).apply {
+            setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            )
+        }
+        val video = videoBuilder.build()
         this.videoCapture = video
 
         // **The live-stream experiment is gone, and this is the note it leaves behind.**
