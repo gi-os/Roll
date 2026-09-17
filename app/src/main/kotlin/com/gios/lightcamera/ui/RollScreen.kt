@@ -445,7 +445,7 @@ fun RollScreen(
                 maxLines = 1,
                 modifier = Modifier
                     .lightClickable(onClick = onWebServer)
-                    .padding(vertical = 6.dp, end = 4.dp),
+                    .padding(top = 6.dp, bottom = 6.dp, end = 4.dp),
             )
             Spacer(Modifier.weight(1f))
             LightText(
