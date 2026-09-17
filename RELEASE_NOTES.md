@@ -1,3 +1,29 @@
+## Nightly — FHD video, to move the stream off the EIS usecase
+
+**Unverified on hardware. This is a probe, not a fix.**
+
+Nightly 3.13.172 asked the camera HAL for stabilization off, on the preview and on the video use
+case. The device log answers that question. The HAL built the EIS graph anyway.
+
+CamX picks the usecase when it configures the streams. A per-request key arrives after that
+decision. So the standard key is not the lever, and this app never had the lever it looked like.
+
+The same log shows the failure in more detail than before. The Morpho node errors on its first
+frame, `Fcode:0x1 frame_id:0`. It keeps taking buffers after that and signals none back.
+Thirty-seven requests later the video port pool is empty and the HAL enters recovery. Thirty-seven
+is the depth of that pool, not a timeout. Two separate runs stalled on the same number.
+
+This release changes the one input to usecase selection the app controls. That input is the shape
+of the stream set. Video recording moves from 720p to 1080p. If CamX has a usecase for that
+configuration without the Morpho node, the black viewfinder goes away.
+
+Video files roughly double in size. On its own terms that is a bad trade, on a 3.92 inch screen
+that cannot resolve the difference. Against a camera that bricks itself mid-recording it is a fine
+one.
+
+If this nightly stalls the same way, the lever is not in the app. The work then moves to surviving
+the recovery rather than preventing it.
+
 ## Nightly — the HAL is asked for stabilisation off, out loud
 
 **Unverified on hardware. This is a nightly because the question it answers can only be answered

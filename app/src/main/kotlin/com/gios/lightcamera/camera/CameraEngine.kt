@@ -853,12 +853,36 @@ class CameraEngine(private val context: Context) {
         boundAt = System.currentTimeMillis()
         setFlash(flash)
 
-        // HD rather than the highest the sensor will give: a 50MP phone will happily offer 4K,
-        // and 4K on a 3.92" screen is a minute a gigabyte for a picture nothing here can show.
+        // FHD, and the reason is not picture quality.
+        //
+        // Still not the highest the sensor will give: a 50MP phone will happily offer 4K, and 4K
+        // on a 3.92" screen is a minute a gigabyte for a picture nothing here can show. That part
+        // of the old reasoning stands, and is why this is not `Quality.HIGHEST`.
+        //
+        // What changed is that HD is what CamX was looking at when it decided to build the EIS
+        // graph. On this phone `persist.vendor.camera.enableEIS` is 1 — a vendor property no app
+        // can write — and with a 1280x720 video stream next to a 1280x960 preview the usecase
+        // selector picks `VideoEIS3PreviewEIS2RealTime` plus a `VideoMorphoEISV3Offline` session.
+        // That offline session is where recording dies: `com.morpho.node.moviesolid` errors on
+        // its first frame (`Fcode:0x1 frame_id:0`), keeps taking buffers, signals none back, and
+        // roughly 37 requests later — the depth of the video port's pool — it has drained the
+        // pool and the HAL enters recovery. The viewfinder goes black and stays black.
+        //
+        // The obvious lever was tried first and does not work. Nightly 3.13.172 asked for
+        // `CONTROL_VIDEO_STABILIZATION_MODE = OFF` explicitly, on the preview *and* the video use
+        // case, and the EIS graph was built anyway. The usecase is chosen at stream-configuration
+        // time from the vendor property and the shape of the stream set; a per-request key is
+        // read after that decision has already been made. So the only input to that decision this
+        // app actually controls is the shape of the stream set, which is this line.
+        //
+        // Whether FHD lands on a usecase without the morpho node is a question about a selector
+        // table inside a vendor blob, so this is a probe, not a fix. If it works, video costs
+        // about twice the bytes for a picture this screen cannot resolve any better — a bad trade
+        // taken on its own, a fine one to stop the camera bricking itself mid-recording.
         val recorder = Recorder.Builder()
             .setQualitySelector(
                 QualitySelector.from(
-                    Quality.HD,
+                    Quality.FHD,
                     FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
                 ),
             )
