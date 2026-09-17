@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +43,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
+import com.gios.lightcamera.drop.WifiDrop
 import com.gios.lightcamera.media.DayLabels
 import com.gios.lightcamera.media.Photo
 import com.gios.lightcamera.media.durationLabel
@@ -87,6 +89,8 @@ fun RollScreen(
     onRequestMedia: () -> Unit,
     onOpen: (Photo) -> Unit,
     onOpenSettings: () -> Unit,
+    /** Open the Wi-Fi drop's screen, which is what starts the server if it is not already up. */
+    onWebServer: () -> Unit,
     onBackToCamera: () -> Unit,
     onSend: (List<Photo>) -> Unit,
 ) {
@@ -424,12 +428,35 @@ fun RollScreen(
                 )
                 return@Row
             }
-            LightText("ROLL", LightTextVariant.Detail)
+            // **The title is gone and the server is in its place.** "ROLL" named a screen you
+            // were already looking at, which is the least useful thing a bar can say. Getting
+            // photographs onto a computer is the one job the roll cannot do by itself, and it was
+            // buried two taps into the send picker — behind a contacts permission it has nothing
+            // to do with. It is the first thing on the bar now.
+            //
+            // The label carries the state rather than a separate indicator: a server running
+            // somewhere with nothing on screen saying so is the failure worth designing out.
+            // Tapping it while it runs reopens the address and PIN rather than starting a second
+            // one — see [com.gios.lightcamera.drop.WifiDrop.start].
+            val drop by WifiDrop.live.collectAsState()
+            LightText(
+                text = if (drop != null) "WEB SERVER ON" else "START WEB SERVER",
+                variant = LightTextVariant.Detail,
+                maxLines = 1,
+                modifier = Modifier
+                    .lightClickable(onClick = onWebServer)
+                    .padding(vertical = 6.dp, end = 4.dp),
+            )
             Spacer(Modifier.weight(1f))
             LightText(
                 text = scope.label.uppercase(),
                 variant = LightTextVariant.Superfine,
                 lighten = true,
+                // **It yields, and the label above does not.** Both are on one 3.92" bar with a
+                // settings icon, and "START WEB SERVER" beside "CAMERA ROLL" is more than fits.
+                // The scope is the one that can be read off the grid underneath it.
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .lightClickable {
                         // Three now: everything, the camera roll, the starred ones. A tap walks them,

@@ -1,3 +1,26 @@
+## Roll v3.12 — the web server is one tap from the roll, and its page filters
+
+**Starting the server was two taps into the send picker, behind a contacts permission it has
+nothing to do with.** Share a photograph, scroll past the address book, find the computer. That is
+a strange place for it: reaching your own laptop has nothing to do with who a photograph is for,
+and somebody who declined contacts could not get to it at all.
+
+It is at the top left of the roll now, where the screen's title used to be. "ROLL" named a screen
+you were already looking at, which is the least useful thing a bar can say, and getting
+photographs onto a computer is the one job the roll cannot do by itself. It reads **Start web
+server**, or **Web server on** while it is running — the state is in the label rather than in a
+separate mark, because a server running with nothing on screen saying so is the failure worth
+designing out. Tapping it while it runs shows the address and PIN again instead of starting a
+second one.
+
+**On the page itself, three things.** A filter — All, Photos, Videos — because a laptop open to
+pull one clip off should not be a wall of stills, and the arrow keys respect it rather than
+wandering back into the kind you filtered out. The close control moved from the bottom bar to the
+top, where every window anybody has ever shut keeps it, and away from the download buttons it was
+sitting beside. And a full-size frame now fades in behind a Loading label instead of snapping out
+of black when the last byte lands — a frame off the phone takes a moment over Wi-Fi, and the snap
+read as a glitch, worst of all when stepping through with the arrows.
+
 ## Roll v3.11 — recording works again
 
 **v3.10 broke video, and this puts it back.** Press record on v3.10 and the recording died where
