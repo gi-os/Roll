@@ -37,22 +37,36 @@
   .mark { font-size: 13px; letter-spacing: .22em; text-transform: uppercase; }
   .count { color: var(--dim); font-size: 13px; letter-spacing: .06em; }
   .spacer { flex: 1; }
-  button.plain {
+  /* **The class, not the element.** The download controls are anchors — a download is a
+     navigation, and making it a <button> with a script behind it breaks right-click, middle
+     click and "save link as". Scoping this rule to `button.plain` meant those anchors missed
+     every line of it and rendered as default blue underlined link text sitting between two
+     buttons. `display: inline-flex` with an explicit line height is what makes an <a> and a
+     <button> come out the same height, which they do not by default. */
+  .plain {
     appearance: none;
+    display: inline-flex;
+    align-items: center;
     background: none;
     border: 1px solid var(--rule);
     color: var(--fg);
     border-radius: 2px;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font: inherit;
     font-size: 12px;
+    line-height: 1;
     letter-spacing: .14em;
     text-transform: uppercase;
+    text-decoration: none;
+    white-space: nowrap;
     cursor: pointer;
   }
-  button.plain:hover { border-color: var(--dim); }
-  button.plain[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-  button.plain:disabled { opacity: .35; cursor: default; }
+  .plain:hover { border-color: var(--dim); }
+  .plain:active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .plain[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .plain:disabled { opacity: .35; cursor: default; }
+  /* A keyboard has to be able to see it, and an outline is the only thing black-on-black has. */
+  .plain:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   main { padding: 0 18px 80px; }
   h2 {
@@ -160,7 +174,7 @@
   }
   .nav.prev { left: 0; }
   .nav.next { right: 0; }
-  a.dl { text-decoration: none; }
+  #vformats { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   @media (max-width: 560px) {
     .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
     header { gap: 10px; padding: 12px; }
@@ -338,12 +352,12 @@
     // so the laptop can take the one it wants rather than the one the grid happens to draw.
     (item.formats || []).forEach(function (format) {
       var link = document.createElement("a");
-      link.className = "plain dl";
+      link.className = "plain";
       link.href = "/file/" + format.id + "?dl=1";
+      // An empty `download` lets the server's Content-Disposition name the file, which is where
+      // the real display name already is.
       link.download = "";
       link.textContent = (item.formats.length > 1 ? format.label : "Download");
-      link.style.marginRight = "8px";
-      link.style.display = "inline-block";
       formats.appendChild(link);
     });
 
