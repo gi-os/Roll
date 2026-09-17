@@ -1,3 +1,38 @@
+## Roll v3.10 — a recording stops sooner, and a clip arrives on a computer as a file
+
+**Two complaints about video, and underneath they are the same fact: a clip is bytes, and every
+wait it causes is proportional to how many.**
+
+**The stop.** Pressing stop does not end a recording; it asks for one to end. The muxer still has
+to flush, rewrite the moov atom and hand the file back, and CameraX then clears `IS_PENDING` —
+which sends MediaProvider over the whole file before `Finalize` is allowed to fire. All three of
+those are linear in file size, and all three happen while the button says SAVING and the
+viewfinder is frozen. Roll was letting the device choose the bitrate, and `Quality.HD` on this
+phone takes it from a camcorder profile tuned for a screen this phone does not have. It is now
+capped at 6 Mbit/s. A minute of clip lands around 45 MB instead of 90, the three waits halve with
+it, and at 720p on a 3.92" panel — or on a laptop — there is nothing to see. The size was never
+the complaint. The time was.
+
+**The computer.** A laptop plugged into this phone never reads its filesystem. MTP and PTP both
+serve an object list that MediaProvider builds out of its own database, so a clip is only as
+visible from a computer as the last scan of it made it — and a row with a size of zero is exactly
+what a host shows as a thumbnail it will not open or copy. Clearing `IS_PENDING` normally sends
+MediaProvider to go and look, and normally that is enough. When it is not, nothing ever asked
+again. Roll now asks, once, after the file is closed and off the path the stop waits on. The scan
+is idempotent, so the ordinary case costs a query and a no-op.
+
+**And a clip finally carries the time it was shot.** Stills have written `DATE_TAKEN` since the
+first release. A recording went in with a name, a type and a folder, and every reader that files
+by capture time — this app's own sort, other galleries, the metadata a computer is handed over
+USB — had to fall back to when the row was made.
+
+**What this does not fix.** If videos show on your computer as thumbnails you cannot open while
+photos come across fine, the phone is almost certainly handing the computer PTP rather than MTP.
+PTP is the still-image protocol; it is what Image Capture on a Mac speaks, and it does not carry
+video. On the Light Phone III, set *Settings › Preferences › USB Preferences* to **Media
+Transfer** — it resets to charging every time you unplug — and browse the phone with a file
+manager rather than a photo importer.
+
 ## Roll v3.9 — turning the screen off no longer costs you the photograph
 
 **Take a picture, press the power key while it is still saving, and what landed in the roll was a

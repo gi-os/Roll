@@ -285,12 +285,15 @@ on the stock camera.
 
 - **Selfie** is the front lens and nothing else, which is what it is on the stock camera too. A
   double tap on the image switches lens as well.
-- **Video** records HD into `DCIM/Camera` through CameraX's `VideoCapture`. Roll binds it
-  *instead of* `ImageCapture` rather than alongside it, because only `LEVEL_3` hardware
-  guarantees all three use cases at once. Audio arrives when the permission does, and Roll asks
-  on entering the mode rather than at the moment you press record. Filters stay off in video: a
-  `RenderEffect` belongs to the view and never reaches the recorded stream, so a filtered preview
-  would promise something the file cannot deliver.
+- **Video** records HD into `DCIM/Camera` through CameraX's `VideoCapture`, at 6 Mbit/s rather
+  than whatever the camcorder profile asks for — the wait after a stop is linear in file size, so
+  the bitrate is the save time. Roll binds it *instead of* `ImageCapture` rather than alongside
+  it, because only `LEVEL_3` hardware guarantees all three use cases at once. Audio arrives when
+  the permission does, and Roll asks on entering the mode rather than at the moment you press
+  record. Filters stay off in video: a `RenderEffect` belongs to the view and never reaches the
+  recorded stream, so a filtered preview would promise something the file cannot deliver. The
+  finished clip is re-scanned once, after the finalize, so the row a computer reads over USB
+  carries a real size and duration.
 - Filters and settings sit on the end of the same strip, so the band stays at four items.
 
 Roll hides the system bars, so the picture starts at the panel's edge. The image itself carries
@@ -617,6 +620,7 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
+| `v3.10.x` | this commit | **A recording stops sooner, and a clip arrives on a computer as a file.** Everything the stop waits for is measured in bytes — the muxer flush, the write through scoped storage, and MediaProvider's own pass over the file when `IS_PENDING` clears, which happens before `Finalize` fires. `Quality.HD` was taking its bitrate from the device profile; it is now capped at 6 Mbit/s, which roughly halves all three waits and is invisible at 720p. Separately, a clip now goes in with a `DATE_TAKEN` (stills always had one) and is re-scanned once after the finalize, so the object a computer is handed over USB has a size and a duration rather than a zero-byte row that shows as a thumbnail nothing will open. |
 | `v3.5.x` | this commit | **A dark preview now says what it knew.** The watchdog reads the stale gap, the limit it is measured against, the state of the zero-shutter-lag ring, the flash mode and the exposure mode to decide a preview has died — and kept none of it, so three reports carry one sentence and nothing to work from. All of it now rides along, with the mode, filter, zone focus and captures in flight. The fault is also named as a verb phrase, so it stops arriving titled "Could not Preview went dark. Camera restarted". Instrumentation, not a fix. [light-reports#233], [light-reports#293], [light-reports#309] |
 | `v3.1.x` | this commit | **Stopping a recording no longer restarts the camera.** The muxer flush stalls the repeating request for seconds, and when `Finalize` cleared the rebind guard the watchdog was left comparing against a frame stamp from before the stop — a guaranteed false death verdict on its next tick, so every video ended in a dark viewfinder and "Camera restarted", and the false rebind also quarantined ZSL for the session, degrading photo mode after each video. The stamp clock now restarts the moment the recorder lets go. [light-reports#214], [light-reports#213] |
 | `v2.74.x` | (see log) | **A mode change starts clean.** A filter chosen in Pro was carried into Video, QR, Text and back again — and the modes with no filter track hide the dial without clearing it, so the filter went invisible rather than off and the only way to find it was to return to Pro and walk the dial to None by hand. Picking a mode now resets the filter to None. Flipping the lens does not: Photo and Selfie are one mode wearing two lenses, and turning the camera around mid-shoot is not a new decision about the photograph. The grade is untouched either way — it is persisted on purpose. [light-reports#123], [light-reports#128]. The report sheet's note field also no longer hides under the keyboard as you type [light-reports#134] |

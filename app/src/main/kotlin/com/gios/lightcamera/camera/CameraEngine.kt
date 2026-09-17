@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -836,6 +837,15 @@ class CameraEngine(private val context: Context) {
                     FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
                 ),
             )
+            // **The bitrate is the save time.** Everything the stop has to wait for is measured in
+            // bytes: the muxer's flush, the write through the scoped-storage FUSE layer, and then
+            // MediaProvider's own pass over the finished file when `IS_PENDING` is cleared — which
+            // happens inside the update CameraX makes *before* `Finalize` fires, so it is on the
+            // clock the person is watching. Left to the device, `Quality.HD` takes its bitrate from
+            // the camcorder profile, which on this phone is tuned for a screen this phone does not
+            // have. Half the bytes is half of all three waits, and at 720p the difference is not
+            // visible on a 3.92" panel or on a laptop.
+            .setTargetVideoEncodingBitRate(VIDEO_BITRATE)
             .build()
         val video = VideoCapture.withOutput(recorder).also { it.targetRotation = lastRotation }
         this.videoCapture = video
@@ -1997,11 +2007,21 @@ class CameraEngine(private val context: Context) {
         // recording: `start()` throws, the failure path below pulled `_recording` down under the
         // recording that *was* running, and the button could then neither start nor stop.
         if (activeRecording != null || _recording.value || finalizing) return false
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val startedAt = System.currentTimeMillis()
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(startedAt))
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+            // **A clip went in with no capture date.** Stills have carried `DATE_TAKEN` since the
+            // first release; a recording carried a name, a type and a folder, and every reader
+            // that files by when a thing was shot — this app's own `COALESCE` sort, other
+            // galleries, and the object metadata a computer is handed over USB — had to fall back
+            // to `DATE_ADDED`, which is when the row was made rather than when you pressed record.
+            // The recorder knows. Only `DATE_TAKEN`: `DATE_MODIFIED` belongs to the muxer's last
+            // write, which has not happened yet, and writing a guess here would be worse than the
+            // truth MediaProvider fills in at the finalize.
+            put(MediaStore.Video.Media.DATE_TAKEN, startedAt)
         }
         val options = MediaStoreOutputOptions
             .Builder(context.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
@@ -2033,7 +2053,11 @@ class CameraEngine(private val context: Context) {
                         _finalizing.value = false
                         _recording.value = false
                         activeRecording = null
-                        if (event.hasError()) Log.e(TAG, "recording failed: ${event.error}")
+                        if (event.hasError()) {
+                            Log.e(TAG, "recording failed: ${event.error}")
+                        } else {
+                            indexForUsb(event.outputResults.outputUri)
+                        }
                         payOwedBind()
                     }
                 }
@@ -2046,6 +2070,51 @@ class CameraEngine(private val context: Context) {
             activeRecording = null
             _recording.value = false
         }.getOrDefault(false)
+    }
+
+    /**
+     * Make sure the finished clip is an indexed *file*, not only a row.
+     *
+     * **A computer plugged into this phone never reads the filesystem.** MTP and PTP both serve an
+     * object list that MediaProvider builds out of its own `files` table, so a clip is only as
+     * visible from a laptop as the last scan of it made it. CameraX ends a recording by clearing
+     * `IS_PENDING`, which normally sends MediaProvider to go and look; when that scan does not
+     * land — it lost a race with the muxer's last write, or the provider was restarted under a
+     * long recording — the row keeps a size of zero and no duration, and a zero-byte object is
+     * precisely what a host shows as a thumbnail it will not open or copy.
+     *
+     * The scan is idempotent: MediaProvider compares size and mtime and does nothing when the row
+     * already agrees, so the ordinary case costs one query and a no-op.
+     *
+     * **Deliberately after `Finalize`, never inside the stop.** This is about the clip being
+     * readable from a laptop tomorrow; nothing in it may be allowed to lengthen the wait between
+     * the press and the button coming back. It runs on [captureExecutor], which is idle by
+     * construction at this moment — the recorder has just let the camera go and no still can be
+     * in flight — rather than costing a thread of its own for one call per clip.
+     */
+    private fun indexForUsb(uri: Uri?) {
+        // `OutputResults` hands back `Uri.EMPTY` rather than null when there is no file, which
+        // is not a thing to go looking for a path under.
+        if (uri == null || uri == Uri.EMPTY) return
+        // `execute` throws on a shut-down executor, which is what a finalize arriving after
+        // [release] looks like. There is nothing left to index for at that point.
+        runCatching {
+            captureExecutor.execute {
+                runCatching {
+                    val path = context.contentResolver.query(
+                        uri,
+                        arrayOf(MediaStore.MediaColumns.DATA),
+                        null,
+                        null,
+                        null,
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                    if (path.isNullOrEmpty()) return@runCatching
+                    MediaStore.scanFile(context.contentResolver, File(path))
+                }.onFailure { Log.w(TAG, "could not re-index the clip for USB", it) }
+            }
+        }
     }
 
     /**
@@ -2202,6 +2271,17 @@ class CameraEngine(private val context: Context) {
          * actually arrives.
          */
         const val FINALIZE_TIMEOUT_MS = 30_000L
+
+        /**
+         * 6 Mbit/s for 720p, against a camcorder-profile default that is usually 10-14.
+         *
+         * Not a quality knob turned down to save space — space was never the complaint. It is the
+         * one number that shortens the wait after the stop, because the flush, the FUSE write and
+         * MediaProvider's scan are all linear in file size and all three run before the button
+         * comes back. 6 Mbit/s is comfortably above where 720p30 handheld footage starts to show
+         * blocking; a minute of clip lands around 45 MB instead of 90.
+         */
+        const val VIDEO_BITRATE = 6_000_000
 
         const val TAG = "CameraEngine"
 
