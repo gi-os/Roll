@@ -1,4 +1,32 @@
-## Roll v3.10 — a recording stops sooner, and a clip arrives on a computer as a file
+## Roll v3.10 — the roll opens in a browser on your laptop
+
+**There has never been an easy way to get a video off this phone.** The share sheet resolves to
+messaging apps, and MMS caps out around three megabytes — four seconds of clip. USB works and is
+not easy: the phone's USB mode resets to charging on every unplug, macOS needs third-party
+software now that Android File Transfer is gone, and a photo importer speaks PTP, which is the
+still-image protocol and does not carry video. That last one is why a clip so often lands on a
+computer as a thumbnail nothing will open.
+
+So the phone serves the roll itself. Open the send picker and the first destination is **a
+computer on this Wi-Fi**. The phone shows an address and four digits; type them into a browser on
+a laptop on the same network and there is the roll — day headings, thumbnails, a player that
+scrubs properly, every file one press wrote (the JPEG, the lossless copy, the negative) and a
+select-several-and-download mode for taking a whole shoot at once. Closing the screen leaves it
+running, so you can keep shooting while the laptop downloads.
+
+**The shape of it is deliberately small.** Four reads and no writes: no upload, no delete, no
+rename. The PIN is new every time the server starts and five wrong guesses stop it answering.
+Every route resolves a MediaStore row id against the list the roll is already showing, so there is
+no point anywhere in it where a string off the network becomes part of a filename —
+`/file/../../etc/passwd` is a 404 because it is not a number, not because a check caught it. It
+serves only what the roll is showing, it stops after ten minutes with nobody asking for anything,
+and nothing leaves the network.
+
+Ranges are honoured, which is the difference between a video that plays and a video you can
+scrub: a `<video>` element does not download a file, it asks for the index and then for the part
+it wants, and a server that answers each of those with the whole file gives you a dead scrub bar.
+
+### Also in v3.10 — a recording stops sooner, and a clip arrives on a computer as a file
 
 **Two complaints about video, and underneath they are the same fact: a clip is bytes, and every
 wait it causes is proportional to how many.**

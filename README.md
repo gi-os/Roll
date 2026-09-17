@@ -64,6 +64,7 @@ Uninstall it and the stock camera is exactly as it was.
 | **A two-stage shutter** | The half press locks focus. The full press shoots. LightOS itself uses only the second detent. |
 | **Face detection** | From the camera's own hardware detector, not a bundled model. Focus follows the face the lens works on. |
 | **A gallery worth using** | Every photo on the phone, day headings, multi-select, and trash — long-press a day heading to take the whole day, which is how a burst gets cleaned up in three taps. The send button picks a person, not an app. |
+| **The roll, on your laptop** | Choose a computer in the send picker and the phone serves the whole roll to a browser on the same Wi-Fi: an address, four digits, and a grid you can scrub videos in and download from. It is how you get a clip off this phone without USB. |
 | **Film-roll mode** | Load 12, 24 or 36 frames. No preview and no review, just a counter and a click, until you develop the roll. |
 | **QR scanning** | A camera mode rather than a separate app. Nothing opens by itself. |
 | **Date backs** | Three of them, drawn the way the originals worked: an LED dot matrix, a seven-segment quartz back, and a camcorder character generator. |
@@ -498,6 +499,34 @@ book knows about people, and a group iMessage is a chat room rather than a perso
 offer it deliberately. Groups go to LightChat alone. A single person can fall through to any
 messaging app that understands the standard extra.
 
+## Getting it onto a computer
+
+**There is no easy way to get a video off a Light Phone, so Roll serves the roll itself.** The
+share sheet resolves to messaging apps and MMS caps out around three megabytes, which is four
+seconds of clip. USB works and is not easy: the phone's USB mode resets to charging on every
+unplug, macOS needs third-party software now that Android File Transfer is gone, and a photo
+importer — Image Capture on a Mac, "Import photos" on Windows — speaks PTP, which is the
+still-image protocol and does not carry video. That is why a clip so often arrives on a computer
+as a thumbnail nothing will open, and it is not something the phone did wrong.
+
+Open the send picker and the first destination is **a computer on this Wi-Fi**. The phone shows an
+address like `192.168.1.42:8088` and four digits; type both into a browser on a laptop on the same
+network and there is the roll: day headings, thumbnails, a player that scrubs, every format one
+press wrote — the JPEG, the lossless copy, the negative — and a select-several-and-download mode
+for pulling a shoot off in one go.
+
+Closing the screen leaves it running, so you can keep shooting while the laptop downloads. It
+stops when you press stop, after ten minutes with nobody asking for anything, or when Roll's
+process dies.
+
+**What it will and will not do.** It is four reads and no writes: no upload, no delete, no rename.
+The PIN is new every time it starts and five wrong guesses stop it answering. Every route resolves
+a MediaStore row id against the list the roll is already showing, so there is no point at which a
+string off the network becomes part of a filename — `/file/../../etc/passwd` is a 404 because it
+is not a number, not because a check caught it. Nothing leaves the network, and nothing is
+uploaded anywhere. Parsing lives in `DropProtocol`, which has no Android in it and is unit tested;
+`WifiDrop` holds the sockets.
+
 ## Setting it as the default camera
 
 The app claims `STILL_IMAGE_CAMERA`, `IMAGE_CAPTURE`, `CAMERA_BUTTON` and the `_SECURE` variants.
@@ -620,7 +649,7 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v3.10.x` | this commit | **A recording stops sooner, and a clip arrives on a computer as a file.** Everything the stop waits for is measured in bytes — the muxer flush, the write through scoped storage, and MediaProvider's own pass over the file when `IS_PENDING` clears, which happens before `Finalize` fires. `Quality.HD` was taking its bitrate from the device profile; it is now capped at 6 Mbit/s, which roughly halves all three waits and is invisible at 720p. Separately, a clip now goes in with a `DATE_TAKEN` (stills always had one) and is re-scanned once after the finalize, so the object a computer is handed over USB has a size and a duration rather than a zero-byte row that shows as a thumbnail nothing will open. |
+| `v3.10.x` | this commit | **The roll opens in a browser on your laptop, and a recording stops sooner.** Choose a computer in the send picker and Roll serves the roll over Wi-Fi — an address, a four-digit PIN, a grid with day headings, a video player that scrubs, every format one press wrote, and a select-and-download-many mode. It exists because there was no easy way to get a clip off this phone: MMS caps at a few megabytes and a photo importer speaks PTP, which carries stills and not video. Four reads and no writes, ids rather than paths, a new PIN per start, and it closes itself after ten quiet minutes. Also: **a recording stops sooner, and a clip arrives on a computer as a file.** Everything the stop waits for is measured in bytes — the muxer flush, the write through scoped storage, and MediaProvider's own pass over the file when `IS_PENDING` clears, which happens before `Finalize` fires. `Quality.HD` was taking its bitrate from the device profile; it is now capped at 6 Mbit/s, which roughly halves all three waits and is invisible at 720p. Separately, a clip now goes in with a `DATE_TAKEN` (stills always had one) and is re-scanned once after the finalize, so the object a computer is handed over USB has a size and a duration rather than a zero-byte row that shows as a thumbnail nothing will open. |
 | `v3.5.x` | this commit | **A dark preview now says what it knew.** The watchdog reads the stale gap, the limit it is measured against, the state of the zero-shutter-lag ring, the flash mode and the exposure mode to decide a preview has died — and kept none of it, so three reports carry one sentence and nothing to work from. All of it now rides along, with the mode, filter, zone focus and captures in flight. The fault is also named as a verb phrase, so it stops arriving titled "Could not Preview went dark. Camera restarted". Instrumentation, not a fix. [light-reports#233], [light-reports#293], [light-reports#309] |
 | `v3.1.x` | this commit | **Stopping a recording no longer restarts the camera.** The muxer flush stalls the repeating request for seconds, and when `Finalize` cleared the rebind guard the watchdog was left comparing against a frame stamp from before the stop — a guaranteed false death verdict on its next tick, so every video ended in a dark viewfinder and "Camera restarted", and the false rebind also quarantined ZSL for the session, degrading photo mode after each video. The stamp clock now restarts the moment the recorder lets go. [light-reports#214], [light-reports#213] |
 | `v2.74.x` | (see log) | **A mode change starts clean.** A filter chosen in Pro was carried into Video, QR, Text and back again — and the modes with no filter track hide the dial without clearing it, so the filter went invisible rather than off and the only way to find it was to return to Pro and walk the dial to None by hand. Picking a mode now resets the filter to None. Flipping the lens does not: Photo and Selfie are one mode wearing two lenses, and turning the camera around mid-shoot is not a new decision about the photograph. The grade is untouched either way — it is persisted on purpose. [light-reports#123], [light-reports#128]. The report sheet's note field also no longer hides under the keyboard as you type [light-reports#134] |
