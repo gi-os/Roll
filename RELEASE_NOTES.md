@@ -1,3 +1,28 @@
+## Nightly — the HAL is asked for stabilisation off, out loud
+
+**Unverified on hardware. This is a nightly because the question it answers can only be answered
+on a phone.**
+
+A device log finally shows what happens between a recorder letting go and a session coming back,
+which is what v3.13 said the next attempt had to start from. The camera HAL builds a
+`VideoEIS3PreviewEIS2RealTime` usecase and a `VideoMorphoEISV3Offline` stabilisation session for
+every video this app has ever recorded — and it does so without being asked. CameraX defaults
+stabilisation off and this app has never turned it on; the switch is `persist.vendor.camera.enableEIS`,
+a vendor property set on the device that no app can write.
+
+Inside that stabilisation session, a Morpho node stops signalling completion the instant the
+recorder detaches — thirty-seven frames left outstanding, the HAL into its own recovery, and a
+flush that cannot finish because it is waiting on the very frames that are stuck. That is the black
+viewfinder. It is also why v3.12 rebooted a phone: an unbind queued behind a flush that never ends
+is not a rebind, it is the camera service going down.
+
+Not asking is not the same as asking. This puts `CONTROL_VIDEO_STABILIZATION_MODE` explicitly to
+off in the session parameters, on both the preview and the video use case, where the HAL's usecase
+selection reads it. Whether it is read early enough to keep the stabilisation graph from being
+built at all is exactly what this build is for.
+
+The watchdog is untouched. v3.13's revert stands.
+
 ## Roll v3.13 — the camera recovery from v3.12 is withdrawn
 
 **v3.12 rebooted a phone, and this takes it straight back out.**
