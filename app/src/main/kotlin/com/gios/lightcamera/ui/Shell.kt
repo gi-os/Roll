@@ -238,6 +238,7 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                         onRequestMedia = { ask.launch(MEDIA_PERMISSIONS) },
                         onOpen = { viewing = it },
                         onOpenSettings = { settingsOpen = true },
+                        onWebServer = { dropOpen = true },
                         onBackToCamera = {
                             scope.launch { pager.animateScrollToPage(PAGE_CAMERA) }
                         },
@@ -301,7 +302,6 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                     recentKeys = recents,
                     onRemember = { vm.prefs.rememberRecipient(it) },
                     onNotice = { vm.showNotice(it) },
-                    onComputer = { dropOpen = true },
                     onClose = { sending = emptyList() },
                 )
             }

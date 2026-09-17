@@ -52,7 +52,6 @@ import com.gios.lightcamera.send.GroupsRepo
 import com.gios.lightcamera.send.Handoff
 import com.gios.lightcamera.send.Recipient
 import com.gios.lightcamera.send.Recipients
-import com.gios.lightcamera.drop.WifiDrop
 import com.gios.lightcamera.ui.theme.LightIcon
 import com.gios.lightcamera.ui.theme.LightIcons
 import com.gios.lightcamera.ui.theme.LightText
@@ -90,8 +89,6 @@ fun SendSheet(
     recentKeys: List<String>,
     onRemember: (String) -> Unit,
     onNotice: (String) -> Unit,
-    /** The one destination that is not a person: a browser on the same network. */
-    onComputer: () -> Unit,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -190,34 +187,6 @@ fun SendSheet(
             // being pushed off it by an icon on one side only.
             Spacer(Modifier.width(2f.gridUnitsAsDp()))
         }
-
-        // ---- a computer -------------------------------------------------------------
-        //
-        // **Above the address book, and above the permission wall.** This screen's argument is
-        // that the question is who the photograph is for, and on this phone a laptop is one of
-        // the answers — the only one that can take a video, since MMS caps out at about three
-        // megabytes and there is no cloud app to hand it to. It sits outside the contacts branch
-        // below on purpose: reaching your own computer has nothing to do with the address book,
-        // and burying it behind a permission somebody declined would hide the one route off the
-        // phone that always works.
-        //
-        // It does not take the selection with it. What opens is the whole roll in a browser,
-        // which is the useful thing at a desk — you came here from one photograph, and by the
-        // time the laptop is open you want the other nine.
-        val drop by WifiDrop.live.collectAsState()
-        SectionHeading("COMPUTER")
-        PickerRow(
-            title = "A computer on this Wi-Fi",
-            subtitle = drop?.let { "Running · " + it.url.removePrefix("http://") }
-                ?: "Open the whole roll in a browser",
-            chosen = false,
-            onClick = onComputer,
-        )
-        HorizontalDivider(
-            thickness = 1.dp,
-            color = colours.rule,
-            modifier = Modifier.padding(vertical = 6.dp),
-        )
 
         // **Who this is going to, and the two ways out of it.**
         //

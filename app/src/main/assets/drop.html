@@ -33,16 +33,18 @@
     background: rgba(0, 0, 0, .92);
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--rule);
+    flex-wrap: wrap;
   }
   .mark { font-size: 13px; letter-spacing: .22em; text-transform: uppercase; }
   .count { color: var(--dim); font-size: 13px; letter-spacing: .06em; }
   .spacer { flex: 1; }
+
   /* **The class, not the element.** The download controls are anchors — a download is a
      navigation, and making it a <button> with a script behind it breaks right-click, middle
-     click and "save link as". Scoping this rule to `button.plain` meant those anchors missed
-     every line of it and rendered as default blue underlined link text sitting between two
-     buttons. `display: inline-flex` with an explicit line height is what makes an <a> and a
-     <button> come out the same height, which they do not by default. */
+     click and "save link as". Scoped to `button.plain` those anchors missed every line of this
+     and rendered as default blue underlined link text between two buttons. `display: inline-flex`
+     with an explicit line height is what makes an <a> and a <button> come out the same height,
+     which they do not by default. */
   .plain {
     appearance: none;
     display: inline-flex;
@@ -67,6 +69,14 @@
   .plain:disabled { opacity: .35; cursor: default; }
   /* A keyboard has to be able to see it, and an outline is the only thing black-on-black has. */
   .plain:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+  /* The three kinds join into one control, the way a segmented switch reads: one decision,
+     three positions, rather than three buttons that happen to be adjacent. */
+  .segment { display: inline-flex; }
+  .segment .plain { border-radius: 0; margin-left: -1px; }
+  .segment .plain:first-child { border-radius: 2px 0 0 2px; margin-left: 0; }
+  .segment .plain:last-child { border-radius: 0 2px 2px 0; }
+  .segment .plain[aria-pressed="true"] { position: relative; z-index: 1; }
 
   main { padding: 0 18px 80px; }
   h2 {
@@ -129,6 +139,13 @@
     flex-direction: column;
   }
   #view.on { display: flex; }
+  #view .top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--rule);
+  }
   #view .stage {
     flex: 1;
     min-height: 0;
@@ -136,12 +153,32 @@
     align-items: center;
     justify-content: center;
     padding: 8px;
+    position: relative;
   }
+  /* **It fades in rather than appearing.** A full-size frame off the phone takes a moment over
+     Wi-Fi, and drawing it the instant the last byte lands is a black rectangle that snaps into a
+     photograph — which reads as a glitch, and reads worst when stepping through with the arrow
+     keys. Opacity is the whole of it: the element is laid out and sized from the start, so
+     nothing moves, it only arrives. */
   #view img, #view video {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    opacity: 0;
+    transition: opacity .28s ease;
   }
+  #view img.in, #view video.in { opacity: 1; }
+  /* Something under the fade, so a slow frame is a photograph arriving rather than a blank
+     screen you wonder about. Hidden the moment the picture is in. */
+  #view .waiting {
+    position: absolute;
+    color: var(--dim);
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    transition: opacity .2s ease;
+  }
+  #view .waiting.gone { opacity: 0; }
   #view .bar {
     display: flex;
     align-items: center;
@@ -150,7 +187,7 @@
     border-top: 1px solid var(--rule);
     flex-wrap: wrap;
   }
-  #view .meta { min-width: 0; }
+  #view .meta { min-width: 0; flex: 1; }
   #view .name {
     font-size: 13px;
     white-space: nowrap;
@@ -158,6 +195,7 @@
     text-overflow: ellipsis;
   }
   #view .when { font-size: 12px; color: var(--dim); }
+  #vformats { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .nav {
     position: absolute;
     top: 50%;
@@ -174,11 +212,11 @@
   }
   .nav.prev { left: 0; }
   .nav.next { right: 0; }
-  #vformats { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   @media (max-width: 560px) {
     .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
     header { gap: 10px; padding: 12px; }
     main { padding: 0 12px 60px; }
+    #view .top, #view .bar { padding: 10px 12px; }
   }
 </style>
 </head>
@@ -187,6 +225,11 @@
 <header>
   <span class="mark">Roll</span>
   <span class="count" id="count">reading…</span>
+  <span class="segment" role="group" aria-label="Show">
+    <button class="plain" id="fall" aria-pressed="true">All</button>
+    <button class="plain" id="fphoto" aria-pressed="false">Photos</button>
+    <button class="plain" id="fvideo" aria-pressed="false">Videos</button>
+  </span>
   <span class="spacer"></span>
   <button class="plain" id="pick" aria-pressed="false">Select</button>
   <button class="plain" id="save" hidden>Download</button>
@@ -196,18 +239,24 @@
 <main id="main"><div class="empty">Reading the roll…</div></main>
 
 <div id="view" role="dialog" aria-modal="true">
-  <div class="stage" id="stage">
-    <button class="nav prev" id="prev" aria-label="Previous">&#8249;</button>
-    <button class="nav next" id="next" aria-label="Next">&#8250;</button>
-  </div>
-  <div class="bar">
+  <!-- **Close is at the top.** It was in the bottom bar beside the downloads, which put the way
+       out next to the irreversible-looking thing and a long way from where a browser's own close
+       lives. Every window a person has ever shut had its control up here. -->
+  <div class="top">
     <div class="meta">
       <div class="name" id="vname"></div>
       <div class="when" id="vwhen"></div>
     </div>
+    <button class="plain" id="vclose">Close</button>
+  </div>
+  <div class="stage" id="stage">
+    <span class="waiting" id="vwait">Loading</span>
+    <button class="nav prev" id="prev" aria-label="Previous">&#8249;</button>
+    <button class="nav next" id="next" aria-label="Next">&#8250;</button>
+  </div>
+  <div class="bar">
     <span class="spacer"></span>
     <span id="vformats"></span>
-    <button class="plain" id="vclose">Close</button>
   </div>
 </div>
 
@@ -216,6 +265,11 @@
   "use strict";
 
   var items = [];
+  // **What the grid is showing, which is not always what the phone sent.** The viewer walks this
+  // list rather than `items`, so the arrow keys step through the kind you filtered to instead of
+  // wandering back into the one you filtered out.
+  var shown = [];
+  var kind = "all";
   var picking = false;
   var picked = new Set();
   var at = -1;
@@ -250,21 +304,48 @@
     });
   }
 
+  // ---- what is on screen ----------------------------------------------------
+
+  function matching() {
+    if (kind === "photo") return items.filter(function (i) { return !i.video; });
+    if (kind === "video") return items.filter(function (i) { return i.video; });
+    return items;
+  }
+
+  function say() {
+    var n = shown.length;
+    var noun = kind === "photo" ? "photo" : kind === "video" ? "video" : "item";
+    $("count").textContent = n + " " + noun + (n === 1 ? "" : "s");
+  }
+
+  function setKind(next) {
+    kind = next;
+    $("fall").setAttribute("aria-pressed", next === "all" ? "true" : "false");
+    $("fphoto").setAttribute("aria-pressed", next === "photo" ? "true" : "false");
+    $("fvideo").setAttribute("aria-pressed", next === "video" ? "true" : "false");
+    close();
+    draw();
+  }
+
   // ---- the grid -------------------------------------------------------------
 
   function draw() {
+    shown = matching();
+    say();
     var main = $("main");
     main.textContent = "";
-    if (!items.length) {
+    if (!shown.length) {
       var none = document.createElement("div");
       none.className = "empty";
-      none.textContent = "Nothing in the roll yet.";
+      none.textContent = items.length
+        ? "No " + (kind === "video" ? "videos" : "photos") + " in the roll."
+        : "Nothing in the roll yet.";
       main.appendChild(none);
       return;
     }
     var day = null;
     var grid = null;
-    items.forEach(function (item, index) {
+    shown.forEach(function (item, index) {
       var itsDay = dayOf(item.takenAt);
       if (itsDay !== day) {
         day = itsDay;
@@ -323,11 +404,12 @@
 
   function open(index) {
     at = index;
-    var item = items[at];
+    var item = shown[at];
     if (!item) return;
     var stage = $("stage");
     var old = stage.querySelector("img, video");
     if (old) { old.remove(); }
+    $("vwait").classList.remove("gone");
 
     var node;
     if (item.video) {
@@ -335,13 +417,21 @@
       node.controls = true;
       node.playsInline = true;
       node.preload = "metadata";
+      // `loadeddata` rather than `canplay`: it is the first moment there is a frame to look at,
+      // which is what the fade is waiting for. `canplay` waits for enough to play through.
+      node.addEventListener("loadeddata", arrived);
       node.src = "/file/" + item.id;
     } else {
       node = document.createElement("img");
       node.alt = item.name;
+      node.addEventListener("load", arrived);
       node.src = "/file/" + item.id;
     }
+    // A frame the browser already has decoded fires nothing, so the fade would never start and
+    // the picture would stay invisible. Complete means it is here.
+    node.addEventListener("error", arrived);
     stage.appendChild(node);
+    if (node.complete) { arrived(); }
 
     $("vname").textContent = item.name;
     $("vwhen").textContent = stamp(item.takenAt) + (item.w ? "  ·  " + item.w + "×" + item.h : "");
@@ -363,7 +453,13 @@
 
     $("view").classList.add("on");
     $("prev").style.visibility = at > 0 ? "visible" : "hidden";
-    $("next").style.visibility = at < items.length - 1 ? "visible" : "hidden";
+    $("next").style.visibility = at < shown.length - 1 ? "visible" : "hidden";
+  }
+
+  function arrived() {
+    var node = $("stage").querySelector("img, video");
+    if (node) { node.classList.add("in"); }
+    $("vwait").classList.add("gone");
   }
 
   function close() {
@@ -377,7 +473,7 @@
 
   function step(by) {
     var next = at + by;
-    if (next >= 0 && next < items.length) open(next);
+    if (next >= 0 && next < shown.length) open(next);
   }
 
   // ---- bulk download --------------------------------------------------------
@@ -412,7 +508,6 @@
         picked.forEach(function (id) {
           if (!items.some(function (item) { return item.id === id; })) picked.delete(id);
         });
-        $("count").textContent = items.length + (items.length === 1 ? " item" : " items");
         countSaved();
         draw();
       })
@@ -422,6 +517,9 @@
   }
 
   $("again").addEventListener("click", load);
+  $("fall").addEventListener("click", function () { setKind("all"); });
+  $("fphoto").addEventListener("click", function () { setKind("photo"); });
+  $("fvideo").addEventListener("click", function () { setKind("video"); });
   $("pick").addEventListener("click", function () {
     picking = !picking;
     $("pick").setAttribute("aria-pressed", picking ? "true" : "false");
