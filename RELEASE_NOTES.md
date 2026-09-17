@@ -1,3 +1,28 @@
+## Roll v3.13 — the camera recovery from v3.12 is withdrawn
+
+**v3.12 rebooted a phone, and this takes it straight back out.**
+
+v3.12 taught the watchdog to recover from three states it had been blind to, including a camera
+that never produces a first frame after a recording — with a deadline of 1.2 seconds. The
+diagnosis stands. The remedy was wrong in a way that matters far more than the bug it was for: a
+rebind is an `unbindAll` and a `bindToLifecycle` in the same tick, and this file has said for
+several releases that two of those back to back on this hardware is the thing everything else in
+it is written to avoid. A short deadline plus a rebind that fails plus a retry is exactly that
+pattern on a loop, and on a HAL still tearing down a recording session it does not recover the
+camera — it takes cameraserver with it, and on this phone that is a reboot.
+
+So v3.12's recovery changes are reverted entire: the first-frame deadlines, the retry of a failed
+bind, the `cameraState` observer, the re-armed heartbeat at finalize, and the back-off that kept
+trying once a minute. The watchdog is exactly what it was in v3.11.
+
+**That leaves the original fault unfixed, and it should be named rather than quietly dropped.** A
+recording can still hand back a black viewfinder that nothing restarts. It is the less damaging of
+the two behaviours by a wide margin, and the next attempt at it has to start from a device log
+rather than from reasoning — the failure is in what the HAL does between a recorder letting go and
+a session coming back, and that is not visible from the source.
+
+The web server and everything else in v3.12 are untouched.
+
 ## Roll v3.12 — the camera always comes back
 
 **Filming left the viewfinder black, and nothing brought it back.** Three separate states the
