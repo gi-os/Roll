@@ -566,6 +566,16 @@ object WifiDrop {
     private const val READ_TIMEOUT_MS = 20_000
     private const val COOKIE = "roll_drop"
 
+    /**
+     * Interface name prefixes that belong to the carrier, not to the network the laptop is on.
+     *
+     * `rmnet` and `ccmni` are the mobile data interfaces on Qualcomm and MediaTek respectively,
+     * `pdp` is the older name for the same thing, and `clat` is the 464XLAT shim sitting on top
+     * of one. An address on any of them is reachable from the carrier's network and from nothing
+     * a person is sitting in front of, so serving a page there would at best reach no one.
+     */
+    private val CARRIER = listOf("rmnet", "ccmni", "pdp", "clat")
+
     /** Ten minutes with nobody asking for anything and the socket closes itself. */
     private const val IDLE_MS = 10 * 60 * 1000L
 }
