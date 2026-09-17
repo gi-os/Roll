@@ -1,3 +1,42 @@
+## Roll v3.12 — the camera always comes back
+
+**Filming left the viewfinder black, and nothing brought it back.** Three separate states the
+watchdog could not recover from, and stopping a recording tended to produce all three.
+
+**A bind that never delivers a first frame.** Every recovery this app has ever made was from a
+camera that produced frames and then stopped — the watchdog reads the gap since the last one.
+A fresh bind starts that clock at zero on purpose, because a stale stamp from before a release
+would convict a healthy camera, and zero is read as "no data yet". Nothing ever put a deadline on
+*yet*. So a session that came up dead — which is exactly what the camera looks like after the
+recorder has finished with it — sat at zero for the rest of the process, with the watchdog
+declining to look at it. There is a first-frame deadline now: four seconds for a cold camera,
+1.2 seconds straight after a recording, where the session is already up and the surface already
+attached and seconds of nothing has only one likely meaning.
+
+**A bind that failed outright.** The watchdog's first line was a check on whether the camera was
+ready, so the single state the app could not get out of by itself was the single state it refused
+to examine: `bindToLifecycle` throws, ready goes false, and Roll sits on a black rectangle until
+it is force-quit. It retries now.
+
+**A finalize that handed back a dead camera.** v3.1 stamped the heartbeat to *now* when a
+recording finalized, which correctly stopped a false death verdict and also hid the true one — a
+camera the recorder had killed looked exactly as healthy as one about to resume. The heartbeat is
+cleared and re-armed instead, so the preview owes a frame and has a short moment to produce it.
+
+**And the camera is asked, not only inferred from.** CameraX reports a camera error through
+`cameraState` the moment the device disconnects, a session cannot be configured or the HAL returns
+something fatal. That is now observed, and it arrives in milliseconds rather than after a stale
+limit. It clears the heartbeat rather than rebinding directly — a configuration the HAL refuses
+would error again the instant it was rebound, and that is a loop with no counter — so the
+watchdog does the work and everything already built around it comes along: the cap on restarts,
+the zero-shutter-lag quarantine, the fault report with the state attached.
+
+Three restarts inside a minute used to stand the watchdog down for the life of the process. The
+cap is right — a preview that dies again immediately is allergic to something a rebind faithfully
+reproduces, and hammering it heats the phone and fixes nothing — but giving up entirely left a
+phone whose camera could not return without a force-quit, which is the thing the watchdog is for.
+It backs off to once a minute now and keeps trying, quietly.
+
 ## Roll v3.12 — the web server is one tap from the roll, and its page filters
 
 **Starting the server was two taps into the send picker, behind a contacts permission it has
