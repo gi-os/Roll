@@ -16,6 +16,7 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.Face
 import android.hardware.camera2.params.TonemapCurve
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.MediaStore
 import android.os.SystemClock
@@ -65,7 +66,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -2084,7 +2084,8 @@ class CameraEngine(private val context: Context) {
      * precisely what a host shows as a thumbnail it will not open or copy.
      *
      * The scan is idempotent: MediaProvider compares size and mtime and does nothing when the row
-     * already agrees, so the ordinary case costs one query and a no-op.
+     * already agrees, so the ordinary case costs one query and a no-op. Asked for through
+     * `MediaScannerConnection`, because `MediaStore.scanFile` is not public SDK.
      *
      * **Deliberately after `Finalize`, never inside the stop.** This is about the clip being
      * readable from a laptop tomorrow; nothing in it may be allowed to lengthen the wait between
@@ -2111,7 +2112,12 @@ class CameraEngine(private val context: Context) {
                         if (cursor.moveToFirst()) cursor.getString(0) else null
                     }
                     if (path.isNullOrEmpty()) return@runCatching
-                    MediaStore.scanFile(context.contentResolver, File(path))
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(path),
+                        arrayOf("video/mp4"),
+                        null,
+                    )
                 }.onFailure { Log.w(TAG, "could not re-index the clip for USB", it) }
             }
         }
