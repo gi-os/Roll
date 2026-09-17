@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Roll</title>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #fff;
+    --dim: #8a8a8a;
+    --rule: #262626;
+    --cell: #101010;
+    --gap: 3px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 15px/1.45 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    background: rgba(0, 0, 0, .92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .mark { font-size: 13px; letter-spacing: .22em; text-transform: uppercase; }
+  .count { color: var(--dim); font-size: 13px; letter-spacing: .06em; }
+  .spacer { flex: 1; }
+  /* **The class, not the element.** The download controls are anchors — a download is a
+     navigation, and making it a <button> with a script behind it breaks right-click, middle
+     click and "save link as". Scoping this rule to `button.plain` meant those anchors missed
+     every line of it and rendered as default blue underlined link text sitting between two
+     buttons. `display: inline-flex` with an explicit line height is what makes an <a> and a
+     <button> come out the same height, which they do not by default. */
+  .plain {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    background: none;
+    border: 1px solid var(--rule);
+    color: var(--fg);
+    border-radius: 2px;
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .plain:hover { border-color: var(--dim); }
+  .plain:active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .plain[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .plain:disabled { opacity: .35; cursor: default; }
+  /* A keyboard has to be able to see it, and an outline is the only thing black-on-black has. */
+  .plain:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+  main { padding: 0 18px 80px; }
+  h2 {
+    margin: 26px 0 10px;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--gap);
+  }
+  .cell {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--cell);
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity .18s ease;
+  }
+  .cell img.in { opacity: 1; }
+  .cell.picked { border-color: var(--fg); }
+  .cell.picked::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+  }
+  .badge {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    z-index: 2;
+    font-size: 11px;
+    letter-spacing: .08em;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, .66);
+    border-radius: 2px;
+  }
+  .empty { color: var(--dim); padding: 80px 0; text-align: center; }
+
+  /* ---- one photograph, full size ---- */
+  #view {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: #000;
+    display: none;
+    flex-direction: column;
+  }
+  #view.on { display: flex; }
+  #view .stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+  }
+  #view img, #view video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  #view .bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--rule);
+    flex-wrap: wrap;
+  }
+  #view .meta { min-width: 0; }
+  #view .name {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #view .when { font-size: 12px; color: var(--dim); }
+  .nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    font-size: 30px;
+    line-height: 1;
+    color: var(--fg);
+    background: rgba(0, 0, 0, .45);
+    border: 0;
+    padding: 18px 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .nav.prev { left: 0; }
+  .nav.next { right: 0; }
+  #vformats { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 560px) {
+    .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+    header { gap: 10px; padding: 12px; }
+    main { padding: 0 12px 60px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="mark">Roll</span>
+  <span class="count" id="count">reading…</span>
+  <span class="spacer"></span>
+  <button class="plain" id="pick" aria-pressed="false">Select</button>
+  <button class="plain" id="save" hidden>Download</button>
+  <button class="plain" id="again">Refresh</button>
+</header>
+
+<main id="main"><div class="empty">Reading the roll…</div></main>
+
+<div id="view" role="dialog" aria-modal="true">
+  <div class="stage" id="stage">
+    <button class="nav prev" id="prev" aria-label="Previous">&#8249;</button>
+    <button class="nav next" id="next" aria-label="Next">&#8250;</button>
+  </div>
+  <div class="bar">
+    <div class="meta">
+      <div class="name" id="vname"></div>
+      <div class="when" id="vwhen"></div>
+    </div>
+    <span class="spacer"></span>
+    <span id="vformats"></span>
+    <button class="plain" id="vclose">Close</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var items = [];
+  var picking = false;
+  var picked = new Set();
+  var at = -1;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function dayOf(ms) {
+    var d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function dayLabel(ms) {
+    var today = dayOf(Date.now());
+    var days = Math.round((today - ms) / 86400000);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    var d = new Date(ms);
+    var opts = { day: "numeric", month: "long" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString(undefined, opts);
+  }
+
+  function clock(ms) {
+    var total = Math.max(0, Math.floor(ms / 1000));
+    return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+  }
+
+  function stamp(ms) {
+    return new Date(ms).toLocaleString(undefined, {
+      day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+  }
+
+  // ---- the grid -------------------------------------------------------------
+
+  function draw() {
+    var main = $("main");
+    main.textContent = "";
+    if (!items.length) {
+      var none = document.createElement("div");
+      none.className = "empty";
+      none.textContent = "Nothing in the roll yet.";
+      main.appendChild(none);
+      return;
+    }
+    var day = null;
+    var grid = null;
+    items.forEach(function (item, index) {
+      var itsDay = dayOf(item.takenAt);
+      if (itsDay !== day) {
+        day = itsDay;
+        var heading = document.createElement("h2");
+        heading.textContent = dayLabel(itsDay);
+        main.appendChild(heading);
+        grid = document.createElement("div");
+        grid.className = "grid";
+        main.appendChild(grid);
+      }
+      grid.appendChild(cell(item, index));
+    });
+  }
+
+  function cell(item, index) {
+    var box = document.createElement("div");
+    box.className = "cell" + (picked.has(item.id) ? " picked" : "");
+    box.dataset.id = String(item.id);
+
+    var img = document.createElement("img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = item.name;
+    img.src = "/thumb/" + item.id;
+    img.addEventListener("load", function () { img.classList.add("in"); });
+    // A row MediaStore has no thumbnail for is still a file you can download — the cell stays,
+    // it just has nothing to draw.
+    img.addEventListener("error", function () { img.remove(); });
+    box.appendChild(img);
+
+    if (item.video) {
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = clock(item.ms);
+      box.appendChild(badge);
+    }
+
+    box.addEventListener("click", function () {
+      if (picking) {
+        if (picked.has(item.id)) { picked.delete(item.id); } else { picked.add(item.id); }
+        box.classList.toggle("picked");
+        countSaved();
+      } else {
+        open(index);
+      }
+    });
+    return box;
+  }
+
+  function countSaved() {
+    $("save").textContent = picked.size ? "Download " + picked.size : "Download";
+    $("save").disabled = picked.size === 0;
+  }
+
+  // ---- one photograph -------------------------------------------------------
+
+  function open(index) {
+    at = index;
+    var item = items[at];
+    if (!item) return;
+    var stage = $("stage");
+    var old = stage.querySelector("img, video");
+    if (old) { old.remove(); }
+
+    var node;
+    if (item.video) {
+      node = document.createElement("video");
+      node.controls = true;
+      node.playsInline = true;
+      node.preload = "metadata";
+      node.src = "/file/" + item.id;
+    } else {
+      node = document.createElement("img");
+      node.alt = item.name;
+      node.src = "/file/" + item.id;
+    }
+    stage.appendChild(node);
+
+    $("vname").textContent = item.name;
+    $("vwhen").textContent = stamp(item.takenAt) + (item.w ? "  ·  " + item.w + "×" + item.h : "");
+
+    var formats = $("vformats");
+    formats.textContent = "";
+    // One press can have written a JPEG, a lossless PNG and a negative. Each is its own button,
+    // so the laptop can take the one it wants rather than the one the grid happens to draw.
+    (item.formats || []).forEach(function (format) {
+      var link = document.createElement("a");
+      link.className = "plain";
+      link.href = "/file/" + format.id + "?dl=1";
+      // An empty `download` lets the server's Content-Disposition name the file, which is where
+      // the real display name already is.
+      link.download = "";
+      link.textContent = (item.formats.length > 1 ? format.label : "Download");
+      formats.appendChild(link);
+    });
+
+    $("view").classList.add("on");
+    $("prev").style.visibility = at > 0 ? "visible" : "hidden";
+    $("next").style.visibility = at < items.length - 1 ? "visible" : "hidden";
+  }
+
+  function close() {
+    $("view").classList.remove("on");
+    var playing = $("stage").querySelector("video");
+    if (playing) { playing.pause(); }
+    var old = $("stage").querySelector("img, video");
+    if (old) { old.remove(); }
+    at = -1;
+  }
+
+  function step(by) {
+    var next = at + by;
+    if (next >= 0 && next < items.length) open(next);
+  }
+
+  // ---- bulk download --------------------------------------------------------
+
+  // One anchor click per file, spaced out. A browser asked to save twenty files at once will
+  // ask permission and then take them; asked to save them all in the same tick, it drops most.
+  function savePicked() {
+    var wanted = items.filter(function (item) { return picked.has(item.id); });
+    wanted.forEach(function (item, index) {
+      setTimeout(function () {
+        var link = document.createElement("a");
+        link.href = "/file/" + item.id + "?dl=1";
+        link.download = item.name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }, index * 400);
+    });
+  }
+
+  // ---- loading --------------------------------------------------------------
+
+  function load() {
+    $("count").textContent = "reading…";
+    fetch("/api/items", { cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 401) { location.reload(); return []; }
+        return r.json();
+      })
+      .then(function (data) {
+        items = data || [];
+        picked.forEach(function (id) {
+          if (!items.some(function (item) { return item.id === id; })) picked.delete(id);
+        });
+        $("count").textContent = items.length + (items.length === 1 ? " item" : " items");
+        countSaved();
+        draw();
+      })
+      .catch(function () {
+        $("count").textContent = "the phone stopped answering";
+      });
+  }
+
+  $("again").addEventListener("click", load);
+  $("pick").addEventListener("click", function () {
+    picking = !picking;
+    $("pick").setAttribute("aria-pressed", picking ? "true" : "false");
+    $("save").hidden = !picking;
+    if (!picking) { picked.clear(); draw(); }
+    countSaved();
+  });
+  $("save").addEventListener("click", savePicked);
+  $("vclose").addEventListener("click", close);
+  $("prev").addEventListener("click", function () { step(-1); });
+  $("next").addEventListener("click", function () { step(1); });
+
+  document.addEventListener("keydown", function (e) {
+    if (!$("view").classList.contains("on")) return;
+    if (e.key === "Escape") close();
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

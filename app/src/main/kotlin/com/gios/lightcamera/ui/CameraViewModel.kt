@@ -31,6 +31,7 @@ import com.gios.lightcamera.hw.SaveLock
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
+import com.gios.lightcamera.drop.WifiDrop
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
 import com.gios.lightcamera.filter.FaceTune
@@ -3833,9 +3834,36 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /* ---------------- the roll, on a laptop ---------------- */
+
+    /**
+     * The address and PIN while Roll is serving the roll over Wi-Fi, null when it is not.
+     *
+     * Straight through from [WifiDrop] rather than mirrored into a flow of this class's own: the
+     * server outlives any one screen — that is the whole point of Back leaving it running — so
+     * there is exactly one piece of state and every screen reads it.
+     */
+    val drop: StateFlow<WifiDrop.Live?> = WifiDrop.live
+
+    /**
+     * Open the socket, handing it the roll as a function rather than a list.
+     *
+     * [groups] rather than [photos], because a group is every file one press wrote and the web
+     * page offers all of them — the JPEG the grid draws, the lossless copy beside it and the
+     * negative. Read per request, so a photograph taken while the laptop is open appears on the
+     * next refresh.
+     */
+    fun startDrop(): WifiDrop.Start = WifiDrop.start(getApplication()) { groups.value }
+
+    fun stopDrop() = WifiDrop.stop()
+
     override fun onCleared() {
         observer?.let { runCatching { it.close() } }
         observer = null
+        // **The drop dies with the app.** It is a socket and a wake lock held on behalf of a
+        // screen that no longer exists; leaving it up would be a phone serving its camera roll
+        // with nothing anywhere saying so.
+        WifiDrop.stop()
         // The queue dies with the scope, so there is nothing left to stay awake for — and a lock
         // outliving the thing that holds it is a phone that will not sleep.
         saveLock.release()

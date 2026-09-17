@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Roll</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font: 400 15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    text-align: center;
+  }
+  .mark { font-size: 13px; letter-spacing: .22em; text-transform: uppercase; }
+  p { color: #8a8a8a; max-width: 30rem; margin: 0; }
+  form { display: flex; gap: 10px; align-items: center; }
+  input {
+    width: 7rem;
+    background: #000;
+    border: 1px solid #262626;
+    border-radius: 2px;
+    color: #fff;
+    font: inherit;
+    font-size: 28px;
+    letter-spacing: .5em;
+    text-align: center;
+    padding: 10px 4px 10px 14px;
+  }
+  input:focus { outline: none; border-color: #8a8a8a; }
+  button {
+    appearance: none;
+    background: none;
+    border: 1px solid #262626;
+    border-radius: 2px;
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    padding: 12px 16px;
+    cursor: pointer;
+  }
+  .bad { color: #fff; border-top: 1px solid #262626; padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <span class="mark">Roll</span>
+  <p>The phone is showing four digits. Type them here.</p>
+  <form method="post" action="/unlock">
+    <input name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" autofocus aria-label="PIN">
+    <button type="submit">Open</button>
+  </form>
+  <div class="bad" id="bad" hidden>That wasn’t it. Five wrong tries and the phone stops answering.</div>
+</main>
+<script>
+  if (location.search.indexOf("bad=1") >= 0) { document.getElementById("bad").hidden = false; }
+</script>
+</body>
+</html>

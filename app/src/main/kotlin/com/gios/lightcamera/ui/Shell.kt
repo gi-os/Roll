@@ -170,6 +170,9 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
      */
     var sending by remember { mutableStateOf<List<Photo>>(emptyList()) }
 
+    /** The Wi-Fi drop's own screen. The server behind it is not tied to this flag. */
+    var dropOpen by remember { mutableStateOf(false) }
+
     val pager = rememberPagerState(initialPage = PAGE_CAMERA, pageCount = { 2 })
 
     // **The roll can be shut while the phone is.** The app is `showWhenLocked`, so without this
@@ -298,9 +301,17 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                     recentKeys = recents,
                     onRemember = { vm.prefs.rememberRecipient(it) },
                     onNotice = { vm.showNotice(it) },
+                    onComputer = { dropOpen = true },
                     onClose = { sending = emptyList() },
                 )
             }
+        }
+
+        // Above the send picker, so backing out of it lands on the picker and then on the
+        // photograph — one level at a time, the same as everywhere else. The server it starts is
+        // not tied to this screen and keeps running when it closes; see [DropScreen].
+        AnimatedVisibility(visible = dropOpen, enter = fadeIn(), exit = fadeOut()) {
+            DropScreen(vm = vm, onClose = { dropOpen = false })
         }
 
         /**
