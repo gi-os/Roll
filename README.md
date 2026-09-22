@@ -513,18 +513,20 @@ importer — Image Capture on a Mac, "Import photos" on Windows — speaks PTP, 
 still-image protocol and does not carry video. That is why a clip so often arrives on a computer
 as a thumbnail nothing will open, and it is not something the phone did wrong.
 
-**Start web server** sits at the top left of the roll, where the screen's own title used to be —
+**Send to computer** sits at the top left of the roll, where the screen's own title used to be —
 a title naming the screen you are already looking at is the least useful thing a bar can say, and
-this is the one job the roll cannot do by itself. The phone shows an address like
-`192.168.1.42:8088` and four digits; type both into a browser on a laptop on the same network and
-there is the roll: day headings, thumbnails, a player that scrubs, every format one press wrote —
-the JPEG, the lossless copy, the negative — and a select-several-and-download mode for pulling a
-shoot off in one go. Filter the page to photos or videos alone when you are after one or the
-other. The label reads **Web server on** while it is running, so a server up with nothing saying
-so is not a state the phone can be in.
+this is the one job the roll cannot do by itself. It asks first what the computer should see: the
+photographs you had selected (hold one on the roll to select it, then tap **Computer** on the
+selection bar), or the entire roll. Neither is chosen for you. Then the phone shows an address
+like `192.168.1.42:8088` and four digits; open the address in a browser on a laptop on the same
+network, type the PIN, and there they are: day headings, thumbnails, a player that scrubs, every
+format one press wrote — the JPEG, the lossless copy, the negative — and a
+select-several-and-download mode for pulling a shoot off in one go. Filter the page to photos or
+videos alone when you are after one or the other. The label reads **Sending to computer** while
+it is running, so a server up with nothing saying so is not a state the phone can be in.
 
-Closing the screen leaves it running, so you can keep shooting while the laptop downloads. It
-stops when you press stop, after ten minutes with nobody asking for anything, or when Roll's
+Closing the screen keeps sending, so you can keep shooting while the laptop downloads. It stops
+when you press **Stop sending**, after ten minutes with nobody asking for anything, or when Roll's
 process dies.
 
 **What it will and will not do.** It is four reads and no writes: no upload, no delete, no rename.
@@ -561,7 +563,8 @@ Everything is in the in-app Settings screen. There is no config file and nothing
 | Self timer | Off / seconds | |
 | Sounds | On / off | Follows the ringer either way. A silent phone is a silent camera. |
 | Sending | Recents, and clearing them | The send picker's six-slot recent-recipient list. |
-| Simple mode | On / off | Hides the parts of the viewfinder you do not use. |
+| Instant — smaller photos | On / off | Offers the Instant mode: the frame on the panel, saved the instant you press, at panel resolution rather than 12MP. |
+| Bursts may shrink | On / off | Off, a burst of panel frames keeps every photograph at full size and refuses a press past the queue's limit, with a notice. On, later frames shrink to half and then a quarter size instead. |
 | Purikura | — | Has its own menu in the viewfinder. Select Purikura on the wheel, then tap **PURI** in the band. Frame, stickers, date and the four-shot strip sit next to the picture they change. Roll rolls every choice at random when the app starts, because a booth does not remember what you picked last week. |
 | About | Last crash | The first lines of the last uncaught exception, worth pasting into an issue. |
 
@@ -648,6 +651,10 @@ the LPIII.
 - Raise `versionName`'s `major.minor` in `app/build.gradle.kts` when a release deserves it. CI
   stamps the run number on as the patch and tags `vMAJOR.MINOR.RUN` on every push to `main`.
   There is no separate tagging step.
+- A camera change ships as a nightly first, and a nightly stays a nightly until
+  [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) passes on a Light Phone III. The
+  sandbox cannot run the HAL, and the failures that matter — a black viewfinder after a
+  recording, a fault chip that was not there before — only happen on the phone.
 
 ## Version history
 
@@ -657,7 +664,8 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v3.13.x` | this commit | **v3.12's camera recovery is withdrawn.** It rebooted a phone. A rebind is an `unbindAll` and a `bindToLifecycle` in the same tick; a 1.2-second deadline plus a failed rebind plus a retry is that pair on a loop, and against a HAL still tearing down a recording session it takes cameraserver down rather than recovering the camera. The watchdog is what it was in v3.11. The fault it was aiming at — a recording that hands back a black viewfinder nothing restarts — is still open, and the next attempt needs a device log rather than more reasoning from the source. |
+| `v3.14.x` | this commit | **Recovery adopts, develop stages, and the roll is sent on your terms.** Film-roll recovery used to delete any frame its index did not know about — a crash between the frame and the index line lost the photograph; it adopts the frame now, and removes only a zero-byte or non-image file (`RollIndex`, tested). A develop truncated the MediaStore row before writing the filtered JPEG, so a failure mid-write left half a photograph; `Replacement` stages the new bytes whole, keeps a copy of the original, and restores it on failure. "Simple" is **Instant — smaller photos**, and the panel queue only shrinks a burst when **Bursts may shrink** is on (default off). "Start web server" is **Send to computer**, which asks for the selected photographs or the entire roll before it opens the socket. `docs/RELEASE_CHECKLIST.md` gates camera changes on hardware. Nightly until that checklist passes on the FHD probe already on main. |
+| `v3.13.x` | 3f9099c | **v3.12's camera recovery is withdrawn.** It rebooted a phone. A rebind is an `unbindAll` and a `bindToLifecycle` in the same tick; a 1.2-second deadline plus a failed rebind plus a retry is that pair on a loop, and against a HAL still tearing down a recording session it takes cameraserver down rather than recovering the camera. The watchdog is what it was in v3.11. The fault it was aiming at — a recording that hands back a black viewfinder nothing restarts — is still open, and the next attempt needs a device log rather than more reasoning from the source. |
 | `v3.12.x` | (see log) | **The camera always comes back.** Three states the watchdog could not recover from, and a recording tended to produce all three. A bind that never delivers a first frame: `rebind` zeroes the heartbeat on purpose and the watchdog read zero as "no data yet" with no deadline on *yet*, so a session that came up dead — which is what the camera looks like after the recorder has had it — sat at zero for the life of the process. There is a first-frame deadline now, 4 s cold and 1.2 s straight after a recording. A bind that failed: a check on `_ready` was the watchdog's first line, so the one state the app could not leave by itself was the one it refused to look at. And a finalize that handed back a dead camera: v3.1 stamped the heartbeat to now to stop a false death verdict, which also hid the true one. CameraX's own `cameraState` is observed as well, so an error the HAL reports arrives in milliseconds rather than after a stale limit, and three restarts in a minute now backs off to once a minute instead of standing down for good. |
 | `v3.12.x` | this commit | **The web server is one tap from the roll, and its page filters.** The launcher moved out of the send picker — where it sat behind a contacts permission it has nothing to do with — to the top left of the roll, in place of the "ROLL" title, reading **Start web server** or **Web server on**. On the page: All / Photos / Videos, which the arrow keys respect; the close control moved from the bottom bar to the top, where every window a person has ever shut keeps it; and a full-size frame fades in behind a Loading label rather than snapping from black, which mattered most when stepping through with the arrow keys. |
 | `v3.11.x` | (see log) | **Recording works again.** v3.10 capped the encoder at 6 Mbit/s to shorten the wait after a stop; `setTargetVideoEncodingBitRate` is a constraint the recorder has to satisfy against the encoder this phone actually has, and an unsatisfiable one finalizes the recording with an error the instant it starts — a press that died on the spot and a viewfinder left black. The device picks the bitrate again. The reasoning was right and the lever was wrong: anything that goes back has to ask `VideoCapabilities.getBitrateRange()` and clamp into it, on hardware, first. The `DATE_TAKEN` and the post-finalize re-scan from v3.10 are untouched — neither goes near the encoder. |

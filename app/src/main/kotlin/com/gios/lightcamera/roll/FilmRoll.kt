@@ -18,6 +18,8 @@ data class Exposure(
     val filterId: String,
     val width: Int,
     val height: Int,
+    /** True for a frame the index had lost and recovery adopted. See [RollIndex]. */
+    val recovered: Boolean = false,
 )
 
 /** A roll of film, part way through. */
@@ -47,8 +49,8 @@ data class Roll(
  * the whole state is a dozen lines that has to survive a crash mid-roll and be readable by
  * eye when something has gone wrong. Each frame is written before the index line, so a
  * process death between the two loses the index entry and leaves an orphan file, which
- * [recover] sweeps up — the other order would leave an index pointing at a file that isn't
- * there.
+ * [recover] adopts back onto the roll — the other order would leave an index pointing at a
+ * file that isn't there, and there is no recovering from that.
  */
 class FilmRoll(private val context: Context) {
 
@@ -112,7 +114,11 @@ class FilmRoll(private val context: Context) {
     ): Roll? = withContext(Dispatchers.IO) {
         val current = _roll.value ?: return@withContext null
         if (current.finished) return@withContext current
-        val index = current.shot + 1
+        // One past the highest number on the roll, not the count plus one. The two differ only
+        // after a recovery that dropped a line or adopted a frame, and then the count would name
+        // a number that is already taken — and a frame written over another frame is the one
+        // outcome recovery exists to prevent.
+        val index = (current.exposures.maxOfOrNull { it.index } ?: 0) + 1
         val file = File(dirFor(current.number), frameName(index))
         val ok = runCatching { file.writeBytes(jpeg) }
             .onFailure { Log.e(TAG, "frame $index failed to write", it) }
@@ -121,9 +127,7 @@ class FilmRoll(private val context: Context) {
 
         val exposure = Exposure(index, file, takenAt, filterId, width, height)
         runCatching {
-            indexFile(current.number).appendText(
-                listOf(index, takenAt, filterId, width, height, file.name).joinToString("|") + "\n",
-            )
+            indexFile(current.number).appendText(RollIndex.formatLine(exposure.toEntry()) + "\n")
         }
         val updated = current.copy(exposures = current.exposures + exposure)
         _roll.value = updated
@@ -187,51 +191,87 @@ class FilmRoll(private val context: Context) {
         if (number < 0) return null
         val length = prefs.getInt(KEY_LENGTH, 24)
         val started = prefs.getLong(KEY_STARTED, System.currentTimeMillis())
-        val exposures = readIndex(number)
-        recover(number, exposures)
+        val exposures = recover(number, readIndex(number))
         return Roll(number, length, started, exposures)
     }
 
-    private fun readIndex(number: Int): List<Exposure> {
+    /** Every line that parses, whether or not its file is there. [recover] decides that. */
+    private fun readIndex(number: Int): List<IndexEntry> {
         val file = indexFile(number)
         if (!file.exists()) return emptyList()
-        return runCatching {
-            file.readLines().mapNotNull { line ->
-                val parts = line.split("|")
-                if (parts.size < 6) return@mapNotNull null
-                val frame = File(dirFor(number), parts[5])
-                if (!frame.exists()) return@mapNotNull null
-                Exposure(
-                    index = parts[0].toIntOrNull() ?: return@mapNotNull null,
-                    file = frame,
-                    takenAt = parts[1].toLongOrNull() ?: 0L,
-                    filterId = parts[2],
-                    width = parts[3].toIntOrNull() ?: 0,
-                    height = parts[4].toIntOrNull() ?: 0,
-                )
-            }.sortedBy { it.index }
-        }.getOrDefault(emptyList())
+        return runCatching { file.readLines().mapNotNull(RollIndex::parseLine) }
+            .getOrDefault(emptyList())
     }
 
     /**
-     * Delete frames the index doesn't know about.
+     * Bring the index and the directory back into agreement, keeping every photograph.
      *
-     * These are the frames that were written when the process died before the index line
-     * landed. Keeping them would be worse than losing them: they would develop out of order
-     * and the counter would disagree with the roll.
+     * **These used to be deleted.** A frame the index does not know about is exactly what a
+     * process death between the file write and the index line leaves behind, and for as long as
+     * this app has had a film roll it swept those up as rubbish — a whole photograph, gone, with
+     * the counter one short and nothing on screen to say so. The reasoning was that an unindexed
+     * frame would develop out of order. It develops in the order it was written, which
+     * [RollIndex.reconcile] recovers from the file's own clock; what it lacks is its filter and
+     * its dimensions, and a photograph without those is still a photograph.
+     *
+     * What still goes: a zero-byte file, or one whose first bytes are not an image — the shape a
+     * write leaves when the process dies *during* it rather than after. The index is rewritten
+     * whenever the decision changed it, so the next launch reads the same roll this one did.
      */
-    private fun recover(number: Int, known: List<Exposure>) {
-        val expected = known.map { it.file.name }.toSet()
-        runCatching {
-            dirFor(number).listFiles()?.forEach { file ->
-                if (file.name == "index.txt") return@forEach
-                if (file.name !in expected) {
-                    Log.w(TAG, "discarding orphaned frame ${file.name}")
-                    file.delete()
+    private fun recover(number: Int, known: List<IndexEntry>): List<Exposure> {
+        val dir = dirFor(number)
+        val onDisk = runCatching {
+            dir.listFiles().orEmpty()
+                .filter { it.isFile && it.name != RollIndex.INDEX_NAME }
+                .map { file ->
+                    DiskFrame(
+                        name = file.name,
+                        size = file.length(),
+                        modifiedAt = file.lastModified(),
+                        head = runCatching { readHead(file) }.getOrDefault(ByteArray(0)),
+                    )
                 }
-            }
+        }.getOrDefault(emptyList())
+        val decision = RollIndex.reconcile(known, onDisk)
+        decision.delete.forEach { name ->
+            Log.w(TAG, "discarding $name: not an image")
+            runCatching { File(dir, name).delete() }
         }
+        decision.adopted.forEach { Log.w(TAG, "recovered frame ${it.fileName} as ${it.index}") }
+        if (decision.changed) writeIndex(number, decision.entries)
+        return decision.entries.map { it.toExposure(dir) }
     }
+
+    /** The first few bytes, enough for [RollIndex.looksLikeImage]. */
+    private fun readHead(file: File): ByteArray = file.inputStream().use { input ->
+        val buffer = ByteArray(HEAD_BYTES)
+        val read = input.read(buffer)
+        if (read <= 0) ByteArray(0) else buffer.copyOf(read)
+    }
+
+    /**
+     * Replace the index whole. Written beside and renamed over, so a death mid-write leaves the
+     * old index rather than half of the new one.
+     */
+    private fun writeIndex(number: Int, entries: List<IndexEntry>) {
+        runCatching {
+            val target = indexFile(number)
+            val staging = File(target.parentFile, "${target.name}.tmp")
+            staging.writeText(entries.joinToString("") { RollIndex.formatLine(it) + "\n" })
+            if (!staging.renameTo(target)) {
+                // A rename that fails on the same directory is rare enough to fall back to a
+                // plain write: the alternative is an index that still names deleted files.
+                target.writeText(entries.joinToString("") { RollIndex.formatLine(it) + "\n" })
+                staging.delete()
+            }
+        }.onFailure { Log.e(TAG, "index rewrite failed", it) }
+    }
+
+    private fun Exposure.toEntry(): IndexEntry =
+        IndexEntry(index, takenAt, filterId, width, height, file.name, recovered)
+
+    private fun IndexEntry.toExposure(dir: File): Exposure =
+        Exposure(index, File(dir, fileName), takenAt, filterId, width, height, recovered)
 
     private fun frameName(index: Int): String = "frame-%02d.jpg".format(index)
 
@@ -241,5 +281,8 @@ class FilmRoll(private val context: Context) {
         const val KEY_LENGTH = "length"
         const val KEY_STARTED = "started"
         const val KEY_DEVELOPED = "developed"
+
+        /** Enough for a JPEG's SOI and a PNG's eight-byte signature. */
+        const val HEAD_BYTES = 8
     }
 }

@@ -27,10 +27,12 @@ import com.gios.lightcamera.map.Point
 import com.gios.lightcamera.map.Tiles
 import com.gios.lightcamera.camera.BlankFrame
 import com.gios.lightcamera.camera.PanelFlash
+import com.gios.lightcamera.camera.PanelPressure
 import com.gios.lightcamera.hw.SaveLock
 import com.gios.lightcamera.camera.PuriArt
 import com.gios.lightcamera.camera.PuriStrip
 import com.gios.lightcamera.camera.Sharpness
+import com.gios.lightcamera.drop.DropScope
 import com.gios.lightcamera.drop.WifiDrop
 import com.gios.lightcamera.filter.FaceQuad
 import com.gios.lightcamera.filter.FaceQuads
@@ -868,6 +870,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * pixels traded), and past a dozen the shot is refused *out loud*. A refusal with a named
      * reason is a camera being honest about its limits; a wait is a camera lying about whose time
      * it is spending.
+     *
+     * **Whether it degrades at all is now the person's choice, and the default is that it does
+     * not.** The ladder shipped as the only behaviour, which meant a burst in Instant could quietly
+     * hand back photographs a quarter the size of the ones before them. With the setting off — the
+     * default — a queued frame keeps its full dimensions and the queue is capped sooner, at the
+     * same heap; the press past the cap is refused out loud, as it always was past the ladder's
+     * end. See [PanelPressure] for the tiers and the reasoning.
      */
     private suspend fun enqueuePanel(job: PanelJob) {
         // Retuned after a field test came back `!54`: sustained hammering outran the drain and
@@ -878,16 +887,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // twelve, quarter to thirty-two — roughly 45MB of heap at the very worst, most of it in
         // the cheap tiers, against a drain that accelerates as the queue deepens.
         val depth = _panelQueued.value
-        val divisor = when {
-            depth < PANEL_FULL_DEPTH -> 1
-            depth < PANEL_HALF_DEPTH -> 2
-            depth < PANEL_MAX_DEPTH -> 4
-            else -> {
-                runCatching { job.bitmap.recycle() }
-                recordFault("Buffer full. A shot was dropped")
-                showNotice("Buffer full")
-                return
-            }
+        val divisor = PanelPressure.divisor(depth, prefs.burstShrinks.value)
+        if (divisor == null) {
+            runCatching { job.bitmap.recycle() }
+            recordFault("Buffer full. A shot was dropped")
+            showNotice("Buffer full")
+            return
         }
         val queued = if (divisor == 1) {
             job
@@ -3851,9 +3856,14 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
      * [groups] rather than [photos], because a group is every file one press wrote and the web
      * page offers all of them — the JPEG the grid draws, the lossless copy beside it and the
      * negative. Read per request, so a photograph taken while the laptop is open appears on the
-     * next refresh.
+     * next refresh. [scope] is what the computer may see of it, chosen on the screen that calls
+     * this — see [DropScope].
      */
-    fun startDrop(): WifiDrop.Start = WifiDrop.start(getApplication()) { groups.value }
+    fun startDrop(scope: DropScope): WifiDrop.Start =
+        WifiDrop.start(getApplication(), scope) { groups.value }
+
+    /** Change what the running server offers, keeping its address and PIN. */
+    fun rescopeDrop(scope: DropScope) = WifiDrop.rescope(scope)
 
     fun stopDrop() = WifiDrop.stop()
 
@@ -3949,14 +3959,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
          */
         const val MAX_IN_FLIGHT = 1
 
-        /** Panel frames queued at full resolution before the ladder starts trading pixels. */
-        const val PANEL_FULL_DEPTH = 2
-
-        /** Half resolution to here: ~2.5MB a frame, a quarter of the encode. */
-        const val PANEL_HALF_DEPTH = 12
-
-        /** Quarter resolution to here (~0.6MB); past it a drop is at least a named one. */
-        const val PANEL_MAX_DEPTH = 32
+        /**
+         * The panel queue's tiers. Kept under these names for whoever reads the log lines that
+         * quote them; the values and the reasoning live in [PanelPressure].
+         */
+        const val PANEL_FULL_DEPTH = PanelPressure.FULL_DEPTH
+        const val PANEL_HALF_DEPTH = PanelPressure.HALF_DEPTH
+        const val PANEL_MAX_DEPTH = PanelPressure.MAX_DEPTH
 
         /**
          * The viewfinder has not produced a frame yet — the camera is still coming up, or the

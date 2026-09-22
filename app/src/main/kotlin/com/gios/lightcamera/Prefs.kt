@@ -109,20 +109,20 @@ enum class Colour(val label: String) {
  */
 enum class CaptureMode(val label: String) {
     /**
-     * **The one the camera opens on, and the one that just takes a photograph.**
+     * **The mode that just takes a photograph, and says what that costs.**
      *
      * Everything this app is proud of — the filters, the stamps, the crops, the booth — costs a decode
-     * and a re-encode, and a decode of a 50-megapixel JPEG is most of a second before anything else
-     * happens. Simple takes none of those options, which is not a restriction so much as the whole point:
-     * with no filter, no crop and no stamp, [com.gios.lightcamera.camera.Frames] writes **the sensor's own
-     * JPEG, untouched** — no decode, no re-encode, EXIF intact — and the shutter is as quick as the
-     * hardware is.
+     * and a re-encode, and a still costs the sensor about 1.8 seconds on this hardware before any of
+     * that begins. This mode takes none of those options, which is not a restriction so much as the
+     * whole point: it grabs the frame already on the panel, so the shutter is as quick as a readback.
      *
-     * Quality is not what is traded away. It shoots 12 megapixels, which is four times the largest print
-     * anybody makes from a phone, and the file is the ISP's own output rather than something this app
-     * re-compressed.
+     * **What is traded away is resolution, and the label now says so.** The panel is 1080 pixels
+     * across; a Pro still is 4000. A panel frame is real for sending and for looking at, not for
+     * cropping or printing. The mode was called "Simple" for a long time, which named the interface
+     * and hid the price; it reads "Instant" on the picker and "Instant — smaller photos" where there
+     * is room for the second half. The enum keeps its old name so nothing stored under it moves.
      */
-    Simple("Simple"),
+    Simple("Instant"),
 
     /** Everything: filters, sizes up to 50MP, crops, date backs, self timer, the booth. */
     Photo("Pro"),
@@ -167,7 +167,7 @@ enum class CaptureMode(val label: String) {
     /** What the mode slot in the band reads. */
     val bandLabel: String
         get() = when (this) {
-            Simple -> "SIMPLE"
+            Simple -> "INSTANT"
             Photo -> "PRO"
             Video -> "VIDEO"
             Selfie -> "SELFIE"
@@ -408,9 +408,9 @@ class Prefs(context: Context) {
      * finding it still in video a day later, with the shutter recording instead of shooting, is
      * a photograph missed.
      */
-    // **Pro, and Simple is opt-in.** Simple exists because a still costs 1.8 s on this camera, and the way
-    // round that is a panel-resolution frame — a real trade, not a free win. So it is a switch you turn on
-    // rather than the thing the camera hands you: off, it is not in the mode picker at all.
+    // **Pro, and Instant is opt-in.** Instant exists because a still costs 1.8 s on this camera, and the
+    // way round that is a panel-resolution frame — a real trade, not a free win. So it is a switch you turn
+    // on rather than the thing the camera hands you: off, it is not in the mode picker at all.
     private val _mode = MutableStateFlow(CaptureMode.Photo)
     val mode: StateFlow<CaptureMode> = _mode.asStateFlow()
 
@@ -593,15 +593,30 @@ class Prefs(context: Context) {
     fun isFavourite(name: String): Boolean = name in _favourites.value
 
     /**
-     * Whether Simple is offered at all.
+     * Whether Instant is offered at all.
      *
-     * Off by default. Simple trades resolution for an instant shutter — panel-sized rather than 12MP — and
-     * that is a decision worth making deliberately rather than finding yourself in. Switched on, it joins the
-     * mode picker and the wheel walks into it; switched off, it does not exist as far as the camera is
-     * concerned.
+     * Off by default. Instant trades resolution for an instant shutter — panel-sized rather than 12MP —
+     * and that is a decision worth making deliberately rather than finding yourself in. Switched on, it
+     * joins the mode picker and the wheel walks into it; switched off, it does not exist as far as the
+     * camera is concerned. The key still says `simpleMode`: the mode's old name, kept so the switch
+     * survives the rename.
      */
     private val _simpleMode = MutableStateFlow(prefs.getBoolean(SIMPLE_MODE, false))
     val simpleMode: StateFlow<Boolean> = _simpleMode.asStateFlow()
+
+    /**
+     * Whether a burst of panel frames may shrink to keep up.
+     *
+     * Off by default. Instant and the coarse filters shoot the frame on the panel and hand it to the
+     * darkroom, and a finger can press faster than the darkroom encodes. With this off a queued frame
+     * keeps its full dimensions and a press past the queue's cap is refused out loud. With it on, the
+     * queue trades pixels for depth instead — half size past a couple of frames, quarter size past a
+     * dozen — so a long burst keeps every moment at the cost of some of them being smaller. Either is
+     * a fair trade; neither should be made silently, which is why it is a switch and why it is off.
+     * See [com.gios.lightcamera.camera.PanelPressure].
+     */
+    private val _burstShrinks = MutableStateFlow(prefs.getBoolean(BURST_SHRINKS, false))
+    val burstShrinks: StateFlow<Boolean> = _burstShrinks.asStateFlow()
 
     /**
      * The people last sent a photograph, most recent first, so the picker opens with them on
@@ -959,6 +974,9 @@ class Prefs(context: Context) {
 
     fun setSimpleMode(value: Boolean) = set(_simpleMode, value) { putBoolean(SIMPLE_MODE, value) }
 
+    fun setBurstShrinks(value: Boolean) =
+        set(_burstShrinks, value) { putBoolean(BURST_SHRINKS, value) }
+
     /* ---------------- the Preset grade ---------------- */
 
     /**
@@ -1054,6 +1072,7 @@ class Prefs(context: Context) {
         const val LEVEL = "level"
         const val TIMINGS = "timings"
         const val SIMPLE_MODE = "simpleMode"
+        const val BURST_SHRINKS = "burstShrinks"
         const val PURI_FRAME = "puriFrame2"
         const val PURI_DATE = "puriDate"
         const val PURI_STRIP = "puriStrip"

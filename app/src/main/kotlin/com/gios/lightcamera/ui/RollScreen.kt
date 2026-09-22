@@ -89,8 +89,12 @@ fun RollScreen(
     onRequestMedia: () -> Unit,
     onOpen: (Photo) -> Unit,
     onOpenSettings: () -> Unit,
-    /** Open the Wi-Fi drop's screen, which is what starts the server if it is not already up. */
-    onWebServer: () -> Unit,
+    /**
+     * Send to computer. The list is the selection it was pressed with — empty from the bar's
+     * own button, the selected photographs from the selection bar — and the screen it opens
+     * asks which scope to serve either way.
+     */
+    onSendToComputer: (List<Photo>) -> Unit,
     onBackToCamera: () -> Unit,
     onSend: (List<Photo>) -> Unit,
 ) {
@@ -395,6 +399,22 @@ fun RollScreen(
                 Spacer(Modifier.weight(1f))
                 LightText("${selected.size} SELECTED", LightTextVariant.Detail)
                 Spacer(Modifier.weight(1f))
+                // **A selection can go to a computer as well as to a person.** The share icon
+                // asks who; this asks nothing and opens the Send to computer screen with these
+                // photographs as one of its two scopes. The selection is left standing — the
+                // screen only snapshots the ids, and coming back to find the ticks gone would
+                // read as the send having failed.
+                LightText(
+                    text = "COMPUTER",
+                    variant = LightTextVariant.Detail,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .lightClickable {
+                            val chosen = photos.filter { it.id in selected }
+                            if (chosen.isNotEmpty()) onSendToComputer(chosen)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                )
                 ChromeIcon(
                     icon = LightIcons.Trash,
                     onClick = {
@@ -434,17 +454,20 @@ fun RollScreen(
             // buried two taps into the send picker — behind a contacts permission it has nothing
             // to do with. It is the first thing on the bar now.
             //
-            // The label carries the state rather than a separate indicator: a server running
-            // somewhere with nothing on screen saying so is the failure worth designing out.
-            // Tapping it while it runs reopens the address and PIN rather than starting a second
-            // one — see [com.gios.lightcamera.drop.WifiDrop.start].
+            // **Named for the job, not the mechanism.** It read "Start web server" for two
+            // releases, which is what it does and not what it is for; nobody on this phone wants
+            // a web server, they want the photographs on their laptop. The label carries the
+            // state rather than a separate indicator: a server running somewhere with nothing on
+            // screen saying so is the failure worth designing out. Tapping it while it runs
+            // reopens the address and PIN rather than starting a second one — see
+            // [com.gios.lightcamera.drop.WifiDrop.start].
             val drop by WifiDrop.live.collectAsState()
             LightText(
-                text = if (drop != null) "WEB SERVER ON" else "START WEB SERVER",
+                text = if (drop != null) "SENDING TO COMPUTER" else "SEND TO COMPUTER",
                 variant = LightTextVariant.Detail,
                 maxLines = 1,
                 modifier = Modifier
-                    .lightClickable(onClick = onWebServer)
+                    .lightClickable { onSendToComputer(emptyList()) }
                     .padding(top = 6.dp, bottom = 6.dp, end = 4.dp),
             )
             Spacer(Modifier.weight(1f))
@@ -453,7 +476,7 @@ fun RollScreen(
                 variant = LightTextVariant.Superfine,
                 lighten = true,
                 // **It yields, and the label above does not.** Both are on one 3.92" bar with a
-                // settings icon, and "START WEB SERVER" beside "CAMERA ROLL" is more than fits.
+                // settings icon, and "SEND TO COMPUTER" beside "CAMERA ROLL" is more than fits.
                 // The scope is the one that can be read off the grid underneath it.
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

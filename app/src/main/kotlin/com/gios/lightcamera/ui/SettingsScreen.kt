@@ -187,10 +187,11 @@ private fun FrameTab(vm: CameraViewModel) {
     val chrome by vm.prefs.chrome.collectAsState()
     val level by vm.prefs.level.collectAsState()
     val simpleMode by vm.prefs.simpleMode.collectAsState()
+    val burstShrinks by vm.prefs.burstShrinks.collectAsState()
 
     Section("Frame") {
         Note(
-            "Size is a Pro setting, and Simple ignores it. Simple always takes the frame already on the panel, which is the only instant path this camera has. Pro takes a real still, which costs about 1.8 seconds here no matter what it is asked for.",
+            "Size is a Pro setting, and Instant ignores it. Instant always takes the frame already on the panel, which is the only instant path this camera has and is why its photographs are smaller. Pro takes a real still, which costs about 1.8 seconds here no matter what it is asked for.",
         )
         Note(
             "Half-pressing still helps Pro. Half-press the camera button before pressing it home. That locks focus and exposure, so the shutter has nothing left to work out. With the flash off it can hand back a frame the camera had already buffered, which is as close to instant as the hardware goes.",
@@ -222,10 +223,18 @@ private fun FrameTab(vm: CameraViewModel) {
         vm.prefs.setChrome(all[(all.indexOf(chrome) + 1) % all.size])
     }
     Setting("Level", if (level) "On" else "Off") { vm.prefs.setLevel(!level) }
-    Setting("Simple mode", if (simpleMode) "On" else "Off") {
+    Setting("Instant — smaller photos", if (simpleMode) "On" else "Off") {
         vm.prefs.setSimpleMode(!simpleMode)
     }
 
+    Section("Bursts") {
+        Note(
+            "Instant, the Screen size and the coarse filters all take the frame on the panel and hand it to a queue. Press faster than the queue drains and something has to give. Off, every photograph keeps its full size and a press past the queue's limit is refused, with a notice. On, the queue shrinks later frames instead, to half and then a quarter size, so a long burst keeps every moment at the cost of some of them being smaller. It is off because a smaller photograph you did not ask for is worse than a notice.",
+        )
+    }
+    Setting("Bursts may shrink", if (burstShrinks) "On" else "Off") {
+        vm.prefs.setBurstShrinks(!burstShrinks)
+    }
 }
 
 /* ---------------------------------- camera ---------------------------------- */
@@ -404,8 +413,8 @@ private fun CameraTab(vm: CameraViewModel) {
                 "RAW is the sensor's own readout before the picture is made, so no filter can " +
                 "reach it. There is nothing to put a shader on yet, which is exactly what a " +
                 "negative is for. It comes with its JPEG from the same exposure, not a second one.\n\n" +
-                "Pro only. Simple writes the sensor's own JPEG untouched, and that is the whole " +
-                "point of it.",
+                "Pro only. Instant saves the frame on the panel and nothing else, and that is the " +
+                "whole point of it.",
         )
     }
     val formats by vm.prefs.formats.collectAsState()
@@ -488,7 +497,7 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context, onOpe
 
     Section("Filters") {
         Note(
-            "Which filters are on the wheel, and in what order. Tap a name to take it off. It stays in this list, so you can put it back. It just stops being a notch you have to spin past. The arrows move it. Plain cannot be taken off. It is what the camera does when it is not doing anything, and Video, Simple and Reader are all it.\n\nThe grid and the wheel both read this, so they always agree. A filter added by a later version of Roll arrives at the bottom of the list switched on, rather than being hidden by an order saved before it existed.",
+            "Which filters are on the wheel, and in what order. Tap a name to take it off. It stays in this list, so you can put it back. It just stops being a notch you have to spin past. The arrows move it. Plain cannot be taken off. It is what the camera does when it is not doing anything, and Video, Instant and Reader are all it.\n\nThe grid and the wheel both read this, so they always agree. A filter added by a later version of Roll arrives at the bottom of the list switched on, rather than being hidden by an order saved before it existed.",
         )
     }
     FilterList(vm)
@@ -799,7 +808,7 @@ private fun AboutTab(vm: CameraViewModel, context: android.content.Context, rule
 
     Section("Developer") {
         Note(
-            "After each photograph, how long it took in milliseconds. The capture, and in Simple the save as well. The capture number is the camera hardware answering. The save is this app writing the file. It is here rather than up with the camera settings because it is a measurement, not a preference. It answered its question already (1.8 s in the camera, 87 ms in the app). What it is for now is checking whether a change did what it claimed.",
+            "After each photograph, how long it took in milliseconds. The capture, and in Instant the save as well. The capture number is the camera hardware answering. The save is this app writing the file. It is here rather than up with the camera settings because it is a measurement, not a preference. It answered its question already (1.8 s in the camera, 87 ms in the app). What it is for now is checking whether a change did what it claimed.",
         )
     }
     Setting("Shutter timings", if (timings) "On" else "Off") { vm.prefs.setTimings(!timings) }

@@ -170,8 +170,14 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
      */
     var sending by remember { mutableStateOf<List<Photo>>(emptyList()) }
 
-    /** The Wi-Fi drop's own screen. The server behind it is not tied to this flag. */
-    var dropOpen by remember { mutableStateOf(false) }
+    /**
+     * The Send to computer screen, and what it was opened with.
+     *
+     * Null is closed. An empty list is the bar's own button, with nothing selected; a list of
+     * photographs is the selection bar's, and the screen offers those as one of its two scopes.
+     * The server behind the screen is not tied to this value — see [DropScreen].
+     */
+    var dropRequest by remember { mutableStateOf<List<Photo>?>(null) }
 
     val pager = rememberPagerState(initialPage = PAGE_CAMERA, pageCount = { 2 })
 
@@ -238,7 +244,7 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
                         onRequestMedia = { ask.launch(MEDIA_PERMISSIONS) },
                         onOpen = { viewing = it },
                         onOpenSettings = { settingsOpen = true },
-                        onWebServer = { dropOpen = true },
+                        onSendToComputer = { dropRequest = it },
                         onBackToCamera = {
                             scope.launch { pager.animateScrollToPage(PAGE_CAMERA) }
                         },
@@ -310,8 +316,11 @@ private fun ShellContent(vm: CameraViewModel, captureRequest: Boolean) {
         // Above the send picker, so backing out of it lands on the picker and then on the
         // photograph — one level at a time, the same as everywhere else. The server it starts is
         // not tied to this screen and keeps running when it closes; see [DropScreen].
-        AnimatedVisibility(visible = dropOpen, enter = fadeIn(), exit = fadeOut()) {
-            DropScreen(vm = vm, onClose = { dropOpen = false })
+        AnimatedVisibility(visible = dropRequest != null, enter = fadeIn(), exit = fadeOut()) {
+            val request = dropRequest
+            if (request != null) {
+                DropScreen(vm = vm, selected = request, onClose = { dropRequest = null })
+            }
         }
 
         /**

@@ -39,17 +39,19 @@ import java.util.concurrent.atomic.AtomicLong
  * thumbnail nothing will open. So the phone serves the roll itself: open a URL on a laptop, type
  * four digits, and there is the grid — the same photographs, in a browser, with a download button.
  *
- * **It is off until you ask for it, and it is on a leash.** The socket opens when you choose a
- * computer in the send picker and closes when you press stop, when ten minutes pass with nobody
- * asking for anything, or when the process dies. While it is open a partial wake lock keeps the
- * processor from suspending underneath it, because a laptop halfway through downloading a clip is
- * not a phone that should go to sleep.
+ * **It is off until you ask for it, and it is on a leash.** The socket opens when you tap Send to
+ * computer on the roll and choose what to send — the photographs you had selected, or the entire
+ * roll, see [DropScope] — and closes when you press Stop sending, when ten minutes pass with
+ * nobody asking for anything, or when the process dies. While it is open a partial wake lock
+ * keeps the processor from suspending underneath it, because a laptop halfway through downloading
+ * a clip is not a phone that should go to sleep.
  *
  * **What it will not do.** It serves ids, never paths: every route resolves a MediaStore row id
- * against the list the roll is already showing, so there is no point at which a string from the
- * network becomes part of a filename. A photograph the roll is not showing cannot be requested,
- * a file outside MediaStore cannot be named, and `/file/../../etc/passwd` is a 404 because it is
- * not a number rather than because a check caught it. Nothing is written: there is no upload, no
+ * against the list the roll is already showing, narrowed to the scope that was chosen, so there
+ * is no point at which a string from the network becomes part of a filename. A photograph the
+ * roll is not showing cannot be requested, one outside the chosen scope cannot either, a file
+ * outside MediaStore cannot be named, and `/file/../../etc/passwd` is a 404 because it is not a
+ * number rather than because a check caught it. Nothing is written: there is no upload, no
  * delete, no rename. The whole surface is four reads.
  *
  * The parsing all lives in [DropProtocol], which has no Android in it and is unit tested. What is
@@ -63,6 +65,8 @@ object WifiDrop {
         val port: Int,
         /** Four digits, new every time the server starts. */
         val pin: String,
+        /** What the computer may see. Chosen at the start, changeable without a restart. */
+        val scope: DropScope,
     ) {
         val url: String get() = "http://$host:$port"
     }
@@ -85,6 +89,16 @@ object WifiDrop {
 
     /** The roll, as the app currently has it. Read per request, so starring something shows up. */
     private var source: () -> List<CaptureGroup> = { emptyList() }
+
+    /**
+     * The part of [source] that is on offer.
+     *
+     * A field of its own, read under the object's lock, because a request thread reads it while
+     * the screen may be changing it. Every route goes through [served] rather than [source], so
+     * there is no route that can forget the scope — the same shape as the cookie check.
+     */
+    @Volatile
+    private var scope: DropScope = DropScope.WholeRoll
     private var app: Context? = null
 
     /** The session cookie's value. New every start, so stopping invalidates every open browser. */
@@ -122,7 +136,7 @@ object WifiDrop {
      * take a photograph on the phone and refreshing the page on the laptop should show it.
      */
     @Synchronized
-    fun start(context: Context, source: () -> List<CaptureGroup>): Start {
+    fun start(context: Context, scope: DropScope, source: () -> List<CaptureGroup>): Start {
         _live.value?.let { return Start.Running }
         val host = lanAddress()
             ?: return Start.Refused("This phone isn't on Wi-Fi. Join a network and try again.")
@@ -132,6 +146,7 @@ object WifiDrop {
         val applicationContext = context.applicationContext
         this.app = applicationContext
         this.source = source
+        this.scope = scope
         val random = SecureRandom()
         token = ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) }
         val pin = (1..PIN_DIGITS).map { random.nextInt(10) }.joinToString("")
@@ -156,9 +171,33 @@ object WifiDrop {
             )
         }
 
-        _live.value = Live(host = host, port = socket.localPort, pin = pin)
-        Log.i(TAG, "serving the roll on ${socket.localPort}")
+        _live.value = Live(host = host, port = socket.localPort, pin = pin, scope = scope)
+        Log.i(TAG, "serving ${scope.label()} on ${socket.localPort}")
         return Start.Running
+    }
+
+    /**
+     * Change what is on offer without restarting.
+     *
+     * A restart would mean a new PIN and a new session, and the laptop already has both typed
+     * in. The scope is the only thing that changes; the browser sees it on its next refresh, and
+     * a thumbnail it cached for something no longer offered is a 404 the next time it asks.
+     */
+    @Synchronized
+    fun rescope(scope: DropScope) {
+        val live = _live.value ?: return
+        this.scope = scope
+        _live.value = live.copy(scope = scope)
+        Log.i(TAG, "now serving ${scope.label()}")
+    }
+
+    /** [source], narrowed to [scope]. The only view of the roll any route is given. */
+    private fun served(): List<CaptureGroup> {
+        val allowed = scope
+        if (allowed == DropScope.WholeRoll) return source()
+        return source().filter { group ->
+            allowed.allows(group.primary.photo.id, group.members.map { it.photo.id })
+        }
     }
 
     /** Close it. Safe to call when nothing is running, which is what every teardown path does. */
@@ -178,6 +217,7 @@ object WifiDrop {
         // next time the server started on the same port.
         token = ""
         source = { emptyList() }
+        scope = DropScope.WholeRoll
         release()
         _live.value = null
     }
@@ -326,7 +366,7 @@ object WifiDrop {
     private fun items(out: OutputStream) {
         val body = buildString {
             append('[')
-            source().forEachIndexed { index, group ->
+            served().forEachIndexed { index, group ->
                 val photo = group.primary.photo
                 if (index > 0) append(',')
                 append(
@@ -353,13 +393,15 @@ object WifiDrop {
     }
 
     private fun thumb(context: Context, id: Long, out: OutputStream) {
+        // The scope before the cache. A thumbnail made while the whole roll was on offer must
+        // not go on answering after the offer was narrowed to three photographs.
+        val photo = served().firstOrNull { it.primary.photo.id == id }?.primary?.photo
+            ?: return send(out, "404 Not Found", "text/plain", "No".toByteArray())
         val cached = thumbs.get(id)
         if (cached != null) {
             send(out, "200 OK", "image/jpeg", cached, listOf("Cache-Control: max-age=600"))
             return
         }
-        val photo = source().firstOrNull { it.primary.photo.id == id }?.primary?.photo
-            ?: return send(out, "404 Not Found", "text/plain", "No".toByteArray())
         val bytes = runCatching {
             val bitmap = context.contentResolver.loadThumbnail(photo.uri, Size(THUMB_PX, THUMB_PX), null)
             ByteArrayOutputStream(32 * 1024).also { buffer ->
@@ -382,7 +424,7 @@ object WifiDrop {
     private fun file(context: Context, id: Long, request: DropProtocol.Request, out: OutputStream) {
         // Any member of any group, not only the primaries: this is the route the format buttons
         // use, so a RAW that the roll never draws is still downloadable.
-        val photo = source().asSequence()
+        val photo = served().asSequence()
             .flatMap { it.members.asSequence() }
             .firstOrNull { it.photo.id == id }
             ?.photo

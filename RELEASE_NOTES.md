@@ -1,3 +1,49 @@
+## Nightly — a crash no longer costs a frame, and the roll goes to a computer on your terms
+
+**A nightly, on purpose.** Nothing here touches the camera, but `main` still carries the FHD
+stabilization probe from 3.13.173, which has not passed `docs/RELEASE_CHECKLIST.md` on a phone.
+An official release on top of it would promote that probe. This becomes 3.14 official the day
+the checklist passes.
+
+**A film-roll frame that survived a crash was being thrown away; a develop could leave half a
+photograph; and "Simple" and "Start web server" said what the code did rather than what you
+got.**
+
+The film roll writes each frame before its index line, on purpose — the other order would leave
+an index pointing at nothing. The recovery that ran at the next launch then treated any frame
+the index did not know about as rubbish and deleted it, which turned a process death at
+exactly the wrong millisecond into a lost photograph, silently, with the counter one short.
+Recovery now adopts: a frame the index forgot is put back on the roll in the order it was
+written, marked as recovered, and only a zero-byte file or one whose first bytes are not an
+image is removed. `RollIndex` makes the decision, has no Android in it, and is tested for the
+four cases that matter.
+
+The develop pass replaced a photograph by opening its MediaStore row truncating and writing
+into it, so for the length of the write the file on disk was a partial JPEG. A full disk or a
+failure in that window left it that way. The new bytes are now staged whole in the cache
+first, a whole copy of the original is kept beside them, and only then is the row written in
+one pass; if that pass fails the original is streamed back. A photograph ends a develop either
+filtered or exactly as it was.
+
+The panel-frame queue used to shrink a burst under pressure — half size past two frames, a
+quarter past twelve — with nothing on screen saying so. That is a fair trade and not one to
+make for you. **Bursts may shrink** is a switch in Settings, off by default: off, every queued
+frame keeps its full size and a press past the cap is refused with a notice; on, the ladder is
+what it was. And the mode itself is renamed. "Simple" described the interface and hid the
+price; it reads **Instant** on the picker and **Instant — smaller photos** in Settings, because
+the frame it saves is the panel's, 1080 pixels across, not the sensor's.
+
+**Start web server** is now **Send to computer**, and it asks first. The screen offers the
+photographs you had selected — hold one on the roll, then tap **Computer** on the selection bar
+— or the entire roll, as two buttons, neither chosen for you; before, everything the roll
+showed was on offer the moment the socket opened. The running screen says what it is sending,
+the button reads **Stop sending**, and widening to the whole roll later keeps the same address
+and PIN. The scope is enforced where ids resolve, so a photograph outside it is a 404 from the
+listing, the thumbnail and the file alike.
+
+Also new: `docs/RELEASE_CHECKLIST.md`. A camera change ships as a nightly and stays one until
+that list passes on a Light Phone III.
+
 ## Nightly — FHD video, to move the stream off the EIS usecase
 
 **Unverified on hardware. This is a probe, not a fix.**

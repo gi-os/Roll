@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -198,17 +199,33 @@ class MediaStoreRepo(private val context: Context) {
     /**
      * Replace the bytes of a photograph this app wrote.
      *
-     * For the date stamp in Simple: the untouched JPEG is saved the instant the shutter returns, and the
-     * date is printed on afterwards, off the main thread, while you are already framing the next shot. The
-     * row keeps its id and its timestamp, so nothing that was looking at it has to look again.
+     * For the develop pass: the untouched JPEG is saved the instant the shutter returns, and the filter,
+     * the date back and the crop are put on afterwards, off the main thread, while you are already
+     * framing the next shot. The row keeps its id and its timestamp, so nothing that was looking at it
+     * has to look again.
+     *
+     * **The original is never the only copy while it is being overwritten.** A content URI cannot be
+     * renamed over, so the replacement has to go in through a truncating stream — and for as long as
+     * that stream is open the photograph on disk is a partial file. [Replacement] stages the new bytes
+     * whole in the cache first, keeps a whole copy of the original beside them, and restores it if the
+     * write fails. The two temporaries live in `cacheDir`, which is this app's own storage and needs
+     * no permission, and are gone by the time this returns.
      */
     suspend fun rewrite(uri: Uri, jpeg: ByteArray): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            // "wt" truncates. Without the t a shorter JPEG leaves the tail of the old one behind, which
-            // decodes as a perfectly valid photograph with rubbish at the bottom.
-            context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(jpeg) }
-                ?: error("no stream")
-        }.onFailure { Log.e(TAG, "rewrite failed", it) }.isSuccess
+        val stamp = "${System.nanoTime()}-${Thread.currentThread().id}"
+        val ok = runCatching {
+            Replacement.replace(
+                bytes = jpeg,
+                staging = File(context.cacheDir, "rewrite-$stamp.jpg"),
+                backup = File(context.cacheDir, "rewrite-$stamp.orig"),
+                readTarget = { context.contentResolver.openInputStream(uri) },
+                // "wt" truncates. Without the t a shorter JPEG leaves the tail of the old one behind,
+                // which decodes as a perfectly valid photograph with rubbish at the bottom.
+                writeTarget = { context.contentResolver.openOutputStream(uri, "wt") },
+            )
+        }.onFailure { Log.e(TAG, "rewrite failed", it) }.getOrDefault(false)
+        if (!ok) Log.e(TAG, "rewrite of $uri did not complete; the original stands")
+        ok
     }
 
     /**
