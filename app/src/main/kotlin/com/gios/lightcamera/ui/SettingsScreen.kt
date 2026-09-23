@@ -497,11 +497,21 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context, onOpe
 
     Section("Filters") {
         Note(
-            "Which filters are on the wheel, and in what order. Tap a name to take it off. It stays in this list, so you can put it back. It just stops being a notch you have to spin past. The arrows move it. Plain cannot be taken off. It is what the camera does when it is not doing anything, and Video, Instant and Reader are all it.\n\nThe grid and the wheel both read this, so they always agree. A filter added by a later version of Roll arrives at the bottom of the list switched on, rather than being hidden by an order saved before it existed.",
+            "Which filters are on the wheel, and in what order. Tap a name to take it off. It stays in this list, so you can put it back. It just stops being a notch you have to spin past. The arrows move it. Plain cannot be taken off. It is what the camera does when it is not doing anything, and Instant and Reader are all it. Video has looks of its own, below.\n\nThe grid and the wheel both read this, so they always agree. A filter added by a later version of Roll arrives at the bottom of the list switched on, rather than being hidden by an order saved before it existed.",
         )
     }
     FilterList(vm)
     Action("VIEW FILTERS") { onOpenFilterPicker() }
+
+    val videoLooks by vm.prefs.videoLooks.collectAsState()
+    Section("Video") {
+        Note(
+            "In Video the wheel walks looks instead of filters, and they are recorded into the clip, not laid over the viewfinder. What you see while filming is the file. Most photo filters are here, plus looks that only make sense in motion. Super 8 and Stop Motion change the picture fewer times a second. Trails and Motion remember the last frames. Slit-scan makes each row a different moment. Datamosh drags the old picture along the new one's movement, and clears when you hold still. You can turn the wheel while recording, and the look changes mid-clip.\n\nA photo filter taken off the wheel above is off this one too. Off here, Video records exactly as it did before looks existed.",
+        )
+    }
+    Setting("Looks in video", if (videoLooks) "On" else "Off") {
+        vm.prefs.setVideoLooks(!videoLooks)
+    }
 
     Section("Purikura") {
         Note(

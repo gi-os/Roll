@@ -68,8 +68,14 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           grep -E 'versionCode|versionName' app/build.gradle.kts
 
+      # The video looks are GLSL ES, and VideoShadersTest hands every one of them to Khronos's
+      # reference compiler. It fails rather than skips when this is set and the tool is missing.
+      - name: Install the GLSL validator
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq glslang-tools
+
       - name: Unit tests
         env:
+          REQUIRE_GLSLANG: '1'
           GPR_USER: ${{ secrets.GPR_USER }}
           GPR_TOKEN: ${{ secrets.GPR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

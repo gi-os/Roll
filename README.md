@@ -60,6 +60,7 @@ Uninstall it and the stock camera is exactly as it was.
 | **Zone focus, like a GR** | Lock the wheel's pick onto FOCUS and the app switches to manual focus: distances on the dial with detents at 0.5/1/2 m, the hyperfocal and ∞, a live depth-of-field readout, and focus peaking marking what is sharp. AF/MF fits on a band slot for one-tap street work. |
 | **A map of your roll** | A scope beside the camera roll: photographs placed where they were taken, clustered by street as you zoom. Tagging uses the phone's last known fix, so it costs the shutter nothing. |
 | **18 live filters** | Real fragment shaders, on the viewfinder *and* on the saved file. Film, Dither BW, Dither 16, Dither 32, Halftone, Game Boy, Thermal, Purikura, and the Photo Booth distortions. Turn the wheel to change filter. |
+| **Video looks, in the file** | 28 looks on the Video dial, recorded into the clip rather than laid over the viewfinder. Most photo filters carry over, plus looks that only work in motion: Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan and a live Datamosh. Turn the wheel mid-take to change look inside one clip. |
 | **The wheel does things** | A bare turn steps filters; held and turned, exposure; a click, the torch. Or bind the click to *Wheel channel* and the wheel becomes a real dial: click to pick — filter, EV, shutter, ISO, focus, zoom — turn to choose, click to lock, turn to adjust. Video hands the wheel to zoom by itself. No service, no permission. |
 | **A two-stage shutter** | The half press locks focus. The full press shoots. LightOS itself uses only the second detent. |
 | **Face detection** | From the camera's own hardware detector, not a bundled model. Focus follows the face the lens works on. |
@@ -295,8 +296,9 @@ on the stock camera.
   `ImageCapture` rather than alongside
   it, because only `LEVEL_3` hardware guarantees all three use cases at once. Audio arrives when
   the permission does, and Roll asks on entering the mode rather than at the moment you press
-  record. Filters stay off in video: a `RenderEffect` belongs to the view and never reaches the
-  recorded stream, so a filtered preview would promise something the file cannot deliver. The
+  record. A photo filter's `RenderEffect` belongs to the view and never reaches the recorded
+  stream, so Video has its own looks, drawn between the camera and the encoder. See
+  [Video looks are in the file](#video-looks-are-in-the-file). The
   finished clip is re-scanned once, after the finalize, so the row a computer reads over USB
   carries a real size and duration.
 - Filters and settings sit on the end of the same strip, so the band stays at four items.
@@ -378,6 +380,50 @@ and a full-resolution still is a much larger ask than a preview. The still path 
 **soft**. `ShaderRuntime.applyToBitmap` hands back the bitmap it was given rather than throwing.
 `Frames.process` catches everything, out-of-memory included, and writes the sensor's own frame. A
 filter that cannot run costs you the filter. It must never cost you the photograph.
+
+## Video looks are in the file
+
+A photo filter is a `RenderEffect` on the preview view. The recorder reads the camera, not the
+view, so a filter there never reaches a clip. Video therefore binds the preview and the recorder
+as one `UseCaseGroup` with a CameraX `CameraEffect`. The camera draws into a surface that Roll
+owns. `VideoFx` runs the look on the GPU and draws the result into both outputs. The viewfinder
+and the file get the same frames.
+
+Each frame goes through these steps on one GL thread:
+
+1. The camera frame arrives in an external OES texture.
+2. Preset with no grade goes straight to each output in one draw.
+3. Any other look first turns the frame upright into `src`, the same geometry the photo filters
+   use. It then runs the look into `fx`. Both are texture pairs that swap every frame. A look
+   can therefore read the last camera frame (`uLast`) and its own last output (`uPrev`).
+4. `fx` goes to each output through the inverse turn and the CameraX output transform. The
+   camera timestamp goes with it, which keeps sound and picture in sync.
+
+The photo filters carry over by translation, not by a second copy. AGSL is GLSL ES with other
+type names, so `GlslPort` maps the types with macros and makes three edits. It turns
+`uniform shader src` into a texture, `src.eval` into a sampler call, and `main(float2)` into a
+real `main()`. Film in Video and Film in Pro compile from one source.
+
+The video-only looks are about time:
+
+- **Super 8** holds each frame for 1/18 s, with gate weave, grain, dust and a light leak.
+- **VHS** blurs color along the line, like a tape does, and rolls a tracking band down the frame.
+- **Trails** and **Motion** read the last frames. **Stop Motion** changes the picture 8 times a second.
+- **CCTV** burns the real date and time into the corner, in a 3×5 font packed into integers.
+- **Slit-scan** keeps 30 past frames on the GPU and takes each row from a different one.
+- **Datamosh** searches for block motion at 1/16 size, then moves its own last output along
+  those vectors. That is the sum a decoder computes after a deleted I-frame.
+
+The wheel changes look while you record. A look is a program swap on the GL thread, not a
+rebind. Looks with a horizontal line follow the way you hold the phone, and that turn locks when
+the clip starts.
+
+A shader can fail to compile, or the driver can refuse a surface. Then the looks turn off for
+the session, and Roll shows a notice. A clip in progress keeps recording, without a look. **Looks in video**
+in Settings switches the processor off, which restores the two-stream bind.
+
+Every video shader, 62 in all, goes through Khronos's `glslangValidator` in CI
+(`VideoShadersTest`). No AGSL shader in the app has that check.
 
 ## QR is a mode, not an app
 
@@ -580,6 +626,7 @@ report/     the shake gesture and the issue it files
 roll/       film-roll mode
 send/       the address book, the group provider, and the addressed intents
 ui/         the two pages, the viewfinder chrome, the filter grid
+video/      the video looks, the AGSL-to-GLSL port, and the GL processor
 ```
 
 ## If something goes wrong
@@ -664,7 +711,8 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v3.14.x` | this commit | **Recovery adopts, develop stages, and the roll is sent on your terms.** Film-roll recovery used to delete any frame its index did not know about — a crash between the frame and the index line lost the photograph; it adopts the frame now, and removes only a zero-byte or non-image file (`RollIndex`, tested). A develop truncated the MediaStore row before writing the filtered JPEG, so a failure mid-write left half a photograph; `Replacement` stages the new bytes whole, keeps a copy of the original, and restores it on failure. "Simple" is **Instant — smaller photos**, and the panel queue only shrinks a burst when **Bursts may shrink** is on (default off). "Start web server" is **Send to computer**, which asks for the selected photographs or the entire roll before it opens the socket. `docs/RELEASE_CHECKLIST.md` gates camera changes on hardware. Nightly until that checklist passes on the FHD probe already on main. |
+| `v3.15.x` | this commit | **Video looks, recorded into the clip.** Video binds the preview and the recorder through a CameraX `CameraEffect`, and a GL processor draws the look into both, so the viewfinder and the file agree. 28 looks: 19 photo filters ported from their AGSL by `GlslPort`, Preset with the photo grade, and eight that only work in motion (Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan, live Datamosh). The wheel changes look mid-take. A fault turns the looks off for the session and the clip keeps recording. Every video shader passes `glslangValidator` in CI. Nightly until `docs/RELEASE_CHECKLIST.md` passes. |
+| `v3.14.x` | a671078 | **Recovery adopts, develop stages, and the roll is sent on your terms.** Film-roll recovery used to delete any frame its index did not know about — a crash between the frame and the index line lost the photograph; it adopts the frame now, and removes only a zero-byte or non-image file (`RollIndex`, tested). A develop truncated the MediaStore row before writing the filtered JPEG, so a failure mid-write left half a photograph; `Replacement` stages the new bytes whole, keeps a copy of the original, and restores it on failure. "Simple" is **Instant — smaller photos**, and the panel queue only shrinks a burst when **Bursts may shrink** is on (default off). "Start web server" is **Send to computer**, which asks for the selected photographs or the entire roll before it opens the socket. `docs/RELEASE_CHECKLIST.md` gates camera changes on hardware. Nightly until that checklist passes on the FHD probe already on main. |
 | `v3.13.x` | 3f9099c | **v3.12's camera recovery is withdrawn.** It rebooted a phone. A rebind is an `unbindAll` and a `bindToLifecycle` in the same tick; a 1.2-second deadline plus a failed rebind plus a retry is that pair on a loop, and against a HAL still tearing down a recording session it takes cameraserver down rather than recovering the camera. The watchdog is what it was in v3.11. The fault it was aiming at — a recording that hands back a black viewfinder nothing restarts — is still open, and the next attempt needs a device log rather than more reasoning from the source. |
 | `v3.12.x` | (see log) | **The camera always comes back.** Three states the watchdog could not recover from, and a recording tended to produce all three. A bind that never delivers a first frame: `rebind` zeroes the heartbeat on purpose and the watchdog read zero as "no data yet" with no deadline on *yet*, so a session that came up dead — which is what the camera looks like after the recorder has had it — sat at zero for the life of the process. There is a first-frame deadline now, 4 s cold and 1.2 s straight after a recording. A bind that failed: a check on `_ready` was the watchdog's first line, so the one state the app could not leave by itself was the one it refused to look at. And a finalize that handed back a dead camera: v3.1 stamped the heartbeat to now to stop a false death verdict, which also hid the true one. CameraX's own `cameraState` is observed as well, so an error the HAL reports arrives in milliseconds rather than after a stale limit, and three restarts in a minute now backs off to once a minute instead of standing down for good. |
 | `v3.12.x` | this commit | **The web server is one tap from the roll, and its page filters.** The launcher moved out of the send picker — where it sat behind a contacts permission it has nothing to do with — to the top left of the roll, in place of the "ROLL" title, reading **Start web server** or **Web server on**. On the page: All / Photos / Videos, which the arrow keys respect; the close control moved from the bottom bar to the top, where every window a person has ever shut keeps it; and a full-size frame fades in behind a Loading label rather than snapping from black, which mattered most when stepping through with the arrow keys. |

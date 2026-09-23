@@ -17,6 +17,7 @@ import com.gios.lightcamera.hw.DialAction
 import com.gios.lightcamera.hw.PressAction
 import com.gios.lightcamera.media.CaptureFormat
 import com.gios.lightcamera.media.RollScope
+import com.gios.lightcamera.video.VideoLooks
 import kotlin.random.Random
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -297,6 +298,33 @@ class Prefs(context: Context) {
      */
     private val _moshMode = MutableStateFlow(Filters.moshModes.first().id)
     val moshMode: StateFlow<String> = _moshMode.asStateFlow()
+
+    /**
+     * The look on the Video dial. In memory, like [filterId], and for the same reason: a look is a
+     * decision about one clip, and the camera should open as a camera.
+     */
+    private val _videoLookId = MutableStateFlow(VideoLooks.plain.id)
+    val videoLookId: StateFlow<String> = _videoLookId.asStateFlow()
+
+    fun setVideoLook(id: String) {
+        _videoLookId.value = id
+    }
+
+    /**
+     * Whether Video records through the look processor at all.
+     *
+     * **Persisted, and on by default.** Off, Video binds the camera exactly as it did before looks
+     * existed — preview and encoder as two streams, nothing in between — which is the escape hatch
+     * for a phone where the processor misbehaves, and the fair comparison when chasing a recording
+     * fault.
+     */
+    private val _videoLooks = MutableStateFlow(prefs.getBoolean(VIDEO_LOOKS, true))
+    val videoLooks: StateFlow<Boolean> = _videoLooks.asStateFlow()
+
+    fun setVideoLooks(value: Boolean) = set(_videoLooks, value) { putBoolean(VIDEO_LOOKS, value) }
+
+    /** The Video dial: every look, less the ported ones whose photo filter you switched off. */
+    fun videoDial(): List<VideoLooks.Look> = VideoLooks.dial(_filtersOff.value)
 
     /**
      * Which filters are on the dial, and in what order. **This one is persisted** — and the
@@ -1080,6 +1108,7 @@ class Prefs(context: Context) {
         const val PURI_MARGIN = "puriMargin"
         const val PURI_WASH = "puriWash"
         const val MOSH_MODE = "moshMode"
+        const val VIDEO_LOOKS = "videoLooks"
         const val PURI_SKIN = "puriSkin"
         const val PURI_EYES = "puriEyes"
         const val PURI_CHIN = "puriChin"

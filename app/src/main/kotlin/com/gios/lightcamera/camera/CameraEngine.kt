@@ -37,6 +37,7 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -54,6 +55,8 @@ import androidx.core.content.ContextCompat
 import com.gios.lightcamera.CaptureMode
 import com.gios.lightcamera.PhotoSize
 import com.gios.lightcamera.qr.QrAnalyzer
+import com.gios.lightcamera.video.VideoFx
+import com.gios.lightcamera.video.VideoLooks
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -223,6 +226,114 @@ class CameraEngine(private val context: Context) {
 
     @Volatile
     private var owed: Owed? = null
+
+    /* ---------------- video looks ---------------- */
+
+    /**
+     * The GL processor that puts a look on the recording, built the first time Video is bound and
+     * kept for the life of the engine.
+     *
+     * Kept rather than rebuilt per bind, and released only in [shutdown] after `unbindAll`: CameraX
+     * calls into the processor on its thread for as long as a bind carrying the effect exists, and a
+     * processor torn down under a live bind leaves CameraX waiting on a surface that never arrives.
+     * See [VideoFx] for what it does.
+     */
+    private var fx: VideoFx? = null
+
+    /**
+     * Set the first time the looks fail, for the rest of the process.
+     *
+     * A driver that rejected a shader or an EGL surface once will reject it again, and a Video mode
+     * that rebinds itself into the same failure on every entry is worse than one that records plain.
+     * The fault is said out loud through [fxFault]; the next launch tries again.
+     */
+    @Volatile private var fxOff = false
+
+    /** The switch in settings. Off means Video binds exactly the way it did before looks existed. */
+    @Volatile private var fxWanted = true
+
+    @Volatile private var videoLook: VideoLooks.Look = VideoLooks.plain
+
+    /**
+     * The world's way up when the clip started.
+     *
+     * The file's rotation is written once, at the start, so a look that has a horizontal must keep
+     * the horizontal it started with. Turning the phone mid-clip would otherwise rotate a VHS
+     * tracking line through ninety degrees of a picture whose orientation has not changed.
+     */
+    @Volatile private var recordTurn = 0
+
+    private val _fxFault = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    /** Why the looks switched themselves off, once, for the view model to say so. */
+    val fxFault: SharedFlow<String> = _fxFault.asSharedFlow()
+
+    private val _fxLive = MutableStateFlow(false)
+
+    /** Whether the camera is bound through the look processor right now. */
+    val fxLive: StateFlow<Boolean> = _fxLive.asStateFlow()
+
+    /** Whether looks can reach the file at all this session — the setting, and no fault. */
+    val videoLooksAvailable: Boolean get() = fxWanted && !fxOff
+
+    /**
+     * Put a look on the video. Never rebinds: the processor picks it up on the next frame, which is
+     * what lets the wheel walk the looks *while recording*.
+     */
+    fun setVideoLook(look: VideoLooks.Look) {
+        videoLook = look
+        fx?.setLook(look)
+    }
+
+    /**
+     * The settings switch. Rebinds when it changes in Video, because it decides whether the effect
+     * is part of the bind — and refuses while anything is being written, like every other rebind.
+     */
+    fun setVideoLooksWanted(wanted: Boolean, flash: FlashMode) {
+        if (wanted == fxWanted) return
+        fxWanted = wanted
+        if (mode != CaptureMode.Video) return
+        if (_recording.value || finalizing) {
+            owed = Owed.Rebind
+            return
+        }
+        rebind(flash)
+    }
+
+    private fun fxTurn(): Int = if (_recording.value || finalizing) {
+        recordTurn
+    } else {
+        previewRotationDegrees() / 90
+    }
+
+    private fun ensureFx(): VideoFx = fx ?: VideoFx(
+        sensorRotation = { sensorOrientation },
+        turn = { fxTurn() },
+        // **The processor is the preview's heartbeat now.** Sharing one stream between the
+        // preview and the encoder hands the capture session to CameraX's sharing node, and
+        // whether the preview's session callback still sees every result there is CameraX's
+        // business rather than this app's. A frame arriving at the processor is the preview being
+        // alive, which is exactly what the watchdog is asking.
+        onFrame = { lastResultAt = SystemClock.elapsedRealtime() },
+        onFault = { why, _ -> ContextCompat.getMainExecutor(context).execute { onFxFault(why) } },
+    ).also {
+        it.setLook(videoLook)
+        fx = it
+    }
+
+    private fun onFxFault(why: String) {
+        if (fxOff) return
+        fxOff = true
+        _fxFault.tryEmit(why)
+        if (stopped || mode != CaptureMode.Video) return
+        // The processor has already fallen back to drawing the camera straight through, so a
+        // recording in progress keeps going. The bind without the effect waits for it to finish.
+        if (_recording.value || finalizing) {
+            owed = Owed.Rebind
+            return
+        }
+        rebind(lastFlash)
+    }
 
     /** Set by [shutdown]; nothing posted from here may bind a camera after it. */
     @Volatile
@@ -994,7 +1105,30 @@ class CameraEngine(private val context: Context) {
                 analysis != null -> analysis
                 else -> capture
             }
-            val bound = provider.bindToLifecycle(owner, cameraSelector, preview, second)
+            // **Video with looks binds a group carrying the effect**, so the preview and the
+            // encoder are both drawn by the look processor from one camera stream. If CameraX
+            // refuses that combination on this camera, the looks go off for the session and the
+            // ordinary pair is bound instead — a plain clip beats no clip.
+            val withFx = mode == CaptureMode.Video && fxWanted && !fxOff
+            val bound = if (withFx) {
+                runCatching {
+                    val group = UseCaseGroup.Builder()
+                        .addUseCase(preview)
+                        .addUseCase(video)
+                        .addEffect(ensureFx().effect)
+                        .build()
+                    provider.bindToLifecycle(owner, cameraSelector, group)
+                }.getOrElse { refused ->
+                    Log.e(TAG, "the look processor could not be bound", refused)
+                    fxOff = true
+                    _fxFault.tryEmit("this camera would not take the looks")
+                    provider.unbindAll()
+                    provider.bindToLifecycle(owner, cameraSelector, preview, second)
+                }
+            } else {
+                provider.bindToLifecycle(owner, cameraSelector, preview, second)
+            }
+            _fxLive.value = withFx && !fxOff
             camera = bound
             readCameraLimits(bound)
             // A rebind builds a new session, and session capture options do not survive one. Any
@@ -2079,6 +2213,9 @@ class CameraEngine(private val context: Context) {
         // recording that *was* running, and the button could then neither start nor stop.
         if (activeRecording != null || _recording.value || finalizing) return false
         val startedAt = System.currentTimeMillis()
+        // Frozen before `start()`, because the processor reads it from the first frame the
+        // recorder sees. See [recordTurn].
+        recordTurn = previewRotationDegrees() / 90
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(startedAt))
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")
@@ -2325,6 +2462,9 @@ class CameraEngine(private val context: Context) {
         owed = null
         runCatching { orientation.disable() }
         runCatching { provider?.unbindAll() }
+        // After the unbind, never before: see [fx].
+        fx?.release()
+        fx = null
         captureExecutor.shutdown()
     }
 

@@ -52,6 +52,26 @@ after a failure is not a pass.
 - [ ] Stop and start a recording with the screen off between them (a press of the power button
       during the recording). The clip is whole.
 
+## Video looks
+
+Run the ten cycles above with a look on at least half of them (Film, VHS and Datamosh, say), and
+then these:
+
+- [ ] The looks are on: in Video, click the wheel, pick FILTER, and turn. The band names each
+      look, and the viewfinder changes with it.
+- [ ] Record ten seconds on VHS, turning to Super 8 halfway. The clip on the roll shows both, the
+      cut lands where you turned, and the sound matches the picture at the end.
+- [ ] Record on CCTV with the phone held sideways, the way the band expects. The caption is at
+      the top left of the clip when it plays, and it shows the right date and time.
+- [ ] Record on Slit-scan and on Datamosh for twenty seconds each while panning. The viewfinder
+      keeps up (no held frames) and the clip plays at full speed.
+- [ ] Record on Preset with nothing set. The clip looks the same as it did in the last official
+      release.
+- [ ] The EIS question: run `adb logcat | grep -E "VideoMorphoEISV3Offline|VideoFx"` across one
+      record and stop, and write down whether the Morpho session is still built.
+- [ ] Settings › Look › **Looks in video** off, record one clip, and turn it back on. Both clips
+      play.
+
 ## Afterwards
 
 - [ ] The fault chip is still at zero. Any number here is a fail, whatever it says when tapped:

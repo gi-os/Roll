@@ -177,6 +177,7 @@ fun CameraScreen(
     val recording by engine.recording.collectAsState()
     val saving by engine.saving.collectAsState()
     val recordSeconds by vm.recordSeconds.collectAsState()
+    val videoLook by vm.videoLook.collectAsState()
     val scanned by vm.scan.collectAsState()
     val page by vm.page.collectAsState()
     val pageTurn by vm.pageTurn.collectAsState()
@@ -566,10 +567,15 @@ fun CameraScreen(
                                 // slot is Preset, and "PRESET" sitting in the band says nothing —
                                 // it is the default, and whether anything is set is the Adjust
                                 // chip's job to show. So that case falls back to the mode.
-                                text = if ((mode == CaptureMode.Photo || mode == CaptureMode.Selfie) && !presetOffered) {
-                                    filter.label.uppercase()
-                                } else {
-                                    mode.bandLabel
+                                // Video names its look by the same rule, now that it has one: the
+                                // look is what the wheel changes and the file will wear, and
+                                // "VIDEO" over a VHS picture says less than "VHS" does.
+                                text = when {
+                                    (mode == CaptureMode.Photo || mode == CaptureMode.Selfie) && !presetOffered ->
+                                        filter.label.uppercase()
+                                    mode == CaptureMode.Video && videoLook.id != com.gios.lightcamera.video.VideoLooks.plain.id ->
+                                        videoLook.label.uppercase()
+                                    else -> mode.bandLabel
                                 },
                                 variant = LightTextVariant.Button,
                                 align = TextAlign.Center,

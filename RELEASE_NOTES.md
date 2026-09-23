@@ -1,3 +1,38 @@
+## Nightly: video looks, recorded into the clip
+
+**A nightly, on purpose.** This build changes how Video binds the camera. Nobody has run it on a Light Phone III yet. It becomes official after `docs/RELEASE_CHECKLIST.md` passes on a phone.
+
+**What changed.** In Video, the wheel now picks a look. The look goes into the file. The viewfinder shows the same frames the encoder gets.
+
+Before this build, Video forced every filter off. A photo filter is a `RenderEffect` on the preview view. The recorder reads the camera and never sees that view. A filtered viewfinder over a plain file shows a picture that the clip does not contain.
+
+**How it works.** Video now binds the preview and the recorder as one `UseCaseGroup` with a CameraX `CameraEffect`. The camera draws into a surface that Roll owns. Roll runs the look on the GPU, then draws the result into the preview and into the encoder. Each frame keeps the camera timestamp. This keeps sound and picture in sync.
+
+**The looks.** There are 28 on the Video dial.
+
+- 19 photo filters carry over. Film, Mono, Thermal, X-Ray, Glow, Comic, the two Game Boys, the dithers, Halftone and the distortions all use the photo shader source. `GlslPort` converts each AGSL shader to GLSL ES 3.00 at runtime.
+- Preset uses your photo grade. A clip and a photo shot a minute apart get the same color.
+- **Super 8** holds each frame for 1/18 s and adds gate weave, flicker, grain, dust, a light leak and rounded gate corners.
+- **VHS** blurs color along the line, adds tracking wobble and head-switching noise, and rolls a tracking band down the frame.
+- **Trails** blends each frame with the last one and keeps bright points for about a quarter second.
+- **Stop Motion** changes the picture 8 times a second, with a small shift and exposure change on each new frame.
+- **CCTV** runs at 12 frames a second with a wide-lens bend and a green mono tube. It burns the real date and time into the corner.
+- **Motion** shows only what moves, on black, with a faint outline of the scene.
+- **Slit-scan** takes each row from a different moment. The top row is now. The bottom row is one second old.
+- **Datamosh** runs live. A block search finds where each 16-pixel block came from in the last frame. The look then moves its own last output along those vectors, as a decoder does after a deleted I-frame. Move the phone and the picture smears. Hold still and the picture clears.
+
+Looks with a horizontal line, such as VHS, CCTV and Slit-scan, follow the way you hold the phone. The turn locks when recording starts. Android writes the file rotation at that moment.
+
+**The wheel works while you record.** A look change does not rebind the camera. The next frame uses the new look, so you can cut from Film to VHS inside one clip. The band shows the name of the look.
+
+Purikura stays a photo mode. It needs face positions and a printed frame, and a clip has neither. A photo filter that you take off the photo dial also leaves the Video dial.
+
+**If the looks fail.** A shader that does not compile, or an EGL surface that the driver refuses, turns the looks off for the session. Roll shows a notice. A recording in progress continues without a look. The next bind in Video uses the old two-stream setup. **Looks in video** in Settings (Look tab) turns the processor off.
+
+**One side effect to check on the phone.** With one stream for both outputs, the HAL gets one GPU-texture stream instead of an encoder stream. The encoder stream set is what selected the EIS usecase with the Morpho node that stalls recordings. The new setup can change that selection. Only a device log can show that. Run `adb logcat | grep VideoMorphoEISV3Offline` across a record and a stop.
+
+**Tests.** `VideoShadersTest` sends 62 shaders to the Khronos `glslangValidator`. That covers every video look and every ported photo filter. CI installs `glslang-tools` and fails if the tool is missing. Before this build, no Roll shader got a compile check before it reached a phone. `FxGeometryTest` checks the upright turn corner by corner. It also proves that a wrong sensor rotation cannot turn the clip. `VideoLooksTest` checks the dial. An llvmpipe render found one bug before this push. Datamosh stored a zero motion vector as 128/255, so a still scene blurred a little on every frame.
+
 ## Nightly — a crash no longer costs a frame, and the roll goes to a computer on your terms
 
 **A nightly, on purpose.** Nothing here touches the camera, but `main` still carries the FHD

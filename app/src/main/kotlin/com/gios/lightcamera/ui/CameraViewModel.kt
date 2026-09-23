@@ -65,6 +65,7 @@ import com.gios.light.common.report.Trouble
 import com.gios.lightcamera.roll.FilmRoll
 import com.gios.lightcamera.roll.Roll
 import com.gios.lightcamera.ui.theme.LightHaptics
+import com.gios.lightcamera.video.VideoLooks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -185,7 +186,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     fun channelsAvailable(): List<Channel> {
         val base = Channel.available(
             exposure = engine.exposureMode.value,
-            filters = !prefs.mode.value.isSimple && prefs.mode.value != CaptureMode.Video,
+            // Video has a dial of its own now — the looks — whenever the processor that puts
+            // them on the file is available. Without it there is nothing for the wheel to choose.
+            filters = !prefs.mode.value.isSimple &&
+                (prefs.mode.value != CaptureMode.Video || engine.videoLooksAvailable),
         )
         // **A filter takes nothing off the dial except focus, and only the coarse ones.** An
         // earlier build dropped EV, focus and zoom under every heavy look, reasoning that they
@@ -356,7 +360,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 index = steps.indices.minByOrNull { kotlin.math.abs(steps[it] - engine.ev.value) } ?: 0,
             ) { engine.setEv(steps[it.coerceIn(0, steps.lastIndex)]) }
         }
-        Channel.Filter -> {
+        Channel.Filter -> if (videoMode()) {
+            val track = prefs.videoDial()
+            GaugeSpec(
+                labels = track.map { acronym(it.label) },
+                index = track.indexOfFirst { it.id == videoLook.value.id }.coerceAtLeast(0),
+            ) { i -> setVideoLook(track[i.coerceIn(0, track.lastIndex)].id) }
+        } else {
             val track = filterTrack()
             if (track.isEmpty()) {
                 null
@@ -1437,6 +1447,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     val filter: StateFlow<Filters.Filter> = _filter.asStateFlow()
 
     /**
+     * The look on the Video dial, with the Preset grade resolved into it — the same grade a
+     * photograph wears, so a clip and a still either side of it come out the same colour.
+     *
+     * Declared above `init`, whose collectors write it. See the note there.
+     */
+    private val _videoLook = MutableStateFlow(
+        VideoLooks.forGrade(VideoLooks.byId(prefs.videoLookId.value), prefs.grade.value),
+    )
+    val videoLook: StateFlow<VideoLooks.Look> = _videoLook.asStateFlow()
+
+    /**
      * Which value strip is open over the band, if any.
      *
      * **On the view model rather than in the composable**, which is where the exposure one used
@@ -1554,6 +1575,25 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             prefs.moshMode.collect { _ ->
                 if (filterLocked) return@collect
                 _filter.value = resolveFilter(prefs.filterId.value, prefs.grade.value)
+            }
+        }
+        // The Video dial. Either the look or the grade changing re-resolves it, and the engine
+        // hands it to the processor for the next frame — no rebind, so this is live mid-take.
+        viewModelScope.launch {
+            combine(prefs.videoLookId, prefs.grade) { id, grade ->
+                VideoLooks.forGrade(VideoLooks.byId(id), grade)
+            }.collect { look ->
+                _videoLook.value = look
+                engine.setVideoLook(look)
+            }
+        }
+        viewModelScope.launch {
+            prefs.videoLooks.collect { engine.setVideoLooksWanted(it, prefs.flash.value) }
+        }
+        viewModelScope.launch {
+            engine.fxFault.collect { why ->
+                showNotice("Video looks off: $why")
+                settleChannel()
             }
         }
         viewModelScope.launch {
@@ -1820,7 +1860,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (videoMode()) {
-            showNotice("Filters are photo only")
+            stepVideoLook(by)
             return
         }
         // The wheel is a filter dial and QR has no filters, but it also must not silently walk the
@@ -1867,6 +1907,28 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // **No name flashed on screen.** The viewfinder is already showing you the filter — a
         // label naming what you can plainly see is a label in the way of it. The buzz says the
         // dial moved; the picture says where to.
+    }
+
+    /**
+     * One notch of the wheel in Video: the next look.
+     *
+     * **Open while recording, and that is the point of doing it this way.** The look is a uniform
+     * change on the processor's thread, not a rebind, so turning the wheel mid-take changes the
+     * look mid-take — a cut from Film to VHS in one clip, in camera, with nothing to edit later.
+     */
+    private fun stepVideoLook(by: Int) {
+        if (!engine.videoLooksAvailable) {
+            showNotice(if (prefs.videoLooks.value) "Video looks are off for now" else "Video looks are off in settings")
+            return
+        }
+        LightHaptics.advance(getApplication<Application>())
+        val next = VideoLooks.step(VideoLooks.byId(prefs.videoLookId.value), by, prefs.videoDial())
+        prefs.setVideoLook(next.id)
+    }
+
+    fun setVideoLook(id: String) {
+        touchLadder()
+        prefs.setVideoLook(id)
     }
 
     fun setFilter(id: String) {
@@ -2219,7 +2281,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         // The grade is deliberately untouched. It is persisted on purpose: which adjustments you
         // shoot with is a property of your camera, not of this frame, and clearing it here would
         // throw away a setting on a gesture nobody thinks of as destructive.
-        if (changed && !keepFilter) prefs.setFilter(Filters.none.id)
+        if (changed && !keepFilter) {
+            prefs.setFilter(Filters.none.id)
+            prefs.setVideoLook(VideoLooks.plain.id)
+        }
         showNotice(next.bandLabel)
     }
 
