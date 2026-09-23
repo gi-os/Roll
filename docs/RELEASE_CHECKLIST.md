@@ -63,6 +63,14 @@ then these:
       cut lands where you turned, and the sound matches the picture at the end.
 - [ ] Record on CCTV with the phone held sideways, the way the band expects. The caption is at
       the top left of the clip when it plays, and it shows the right date and time.
+- [ ] The same CCTV clip on the front lens, held sideways both ways. The caption is at the top
+      left each time. The front lens turns the other way to the back, which is the case the
+      first build got wrong.
+- [ ] `adb logcat -s VideoFx` shows one `input ... rotation=` line per bind. Write down the
+      rotation and the sensor value beside it. The looks assume the input is in the sensor's
+      orientation.
+- [ ] Datamosh: hold still for two seconds (clean picture), pan, then stop. The pan smears the
+      old picture, and it clears a block at a time about 1.5 s after you stop.
 - [ ] Record on Slit-scan and on Datamosh for twenty seconds each while panning. The viewfinder
       keeps up (no held frames) and the clip plays at full speed.
 - [ ] Record on Preset with nothing set. The clip looks the same as it did in the last official

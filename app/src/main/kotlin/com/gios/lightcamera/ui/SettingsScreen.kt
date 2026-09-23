@@ -506,7 +506,7 @@ private fun LookTab(vm: CameraViewModel, context: android.content.Context, onOpe
     val videoLooks by vm.prefs.videoLooks.collectAsState()
     Section("Video") {
         Note(
-            "In Video the wheel walks looks instead of filters, and they are recorded into the clip, not laid over the viewfinder. What you see while filming is the file. Most photo filters are here, plus looks that only make sense in motion. Super 8 and Stop Motion change the picture fewer times a second. Trails and Motion remember the last frames. Slit-scan makes each row a different moment. Datamosh drags the old picture along the new one's movement, and clears when you hold still. You can turn the wheel while recording, and the look changes mid-clip.\n\nA photo filter taken off the wheel above is off this one too. Off here, Video records exactly as it did before looks existed.",
+            "In Video the wheel walks looks instead of filters, and they are recorded into the clip, not laid over the viewfinder. What you see while filming is the file. Game Boy and GB Color come over from the photo filters. The rest are looks that only make sense in motion. Super 8 and Stop Motion change the picture fewer times a second. Trails and Motion remember the last frames. Slit-scan makes each row a different moment. Datamosh drags the old picture along the new one's movement, and clears when you hold still. You can turn the wheel while recording, and the look changes mid-clip.\n\nTaking Game Boy or GB Color off the wheel above takes it off this one too. Off here, Video records exactly as it did before looks existed.",
         )
     }
     Setting("Looks in video", if (videoLooks) "On" else "Off") {

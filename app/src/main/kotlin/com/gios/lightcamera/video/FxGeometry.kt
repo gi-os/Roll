@@ -104,6 +104,27 @@ object FxGeometry {
         return even(w * scale) to even(h * scale)
     }
 
+    /**
+     * Quarter turns clockwise from the look's frame to the **world's** upright, for a clip shot
+     * with the device at [deviceRotationDegrees] (`Surface.ROTATION_*` as degrees) on the front
+     * or back lens.
+     *
+     * Derived rather than borrowed. The look's frame is the buffer turned clockwise by
+     * `SENSOR_ORIENTATION`. The clip plays the buffer turned clockwise by CameraX's relative
+     * rotation, which is `sensor − device` on the back lens and `sensor + device` on the front,
+     * because a front camera faces the other way. The sensor angle cancels, leaving `−device` or
+     * `+device`.
+     *
+     * **The front lens is why this exists.** The first build reused the photo filters' turn,
+     * `previewRotationDegrees() / 90`, which is the back-lens answer. On the front lens held
+     * sideways it is half a turn out, so a CCTV caption would have landed upside down in the
+     * bottom-right corner of the clip. `FxGeometryTest` walks every device angle on both lenses.
+     */
+    fun worldTurn(deviceRotationDegrees: Int, front: Boolean): Int {
+        val q = (((deviceRotationDegrees / 90) % 4) + 4) % 4
+        return if (front) q else (4 - q) % 4
+    }
+
     /** The history ring's size for a frame of [w]×[h], its long edge held to [edge]. */
     fun historySize(w: Int, h: Int, edge: Int): Pair<Int, Int> {
         val scale = minOf(1f, edge.toFloat() / max(1, max(w, h)))

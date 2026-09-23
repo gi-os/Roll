@@ -201,6 +201,11 @@ class VideoFx(
             inputSize = request.resolution
             fresh = true
             st.setOnFrameAvailableListener(this, handler)
+            // One line per bind, for the checklist: the looks assume the input arrives in the
+            // sensor's orientation, which CameraX's own transform for this request says outright.
+            request.setTransformationInfoListener(executor) { info ->
+                Log.i(TAG, "input ${request.resolution} rotation=${info.rotationDegrees} sensor=${sensorRotation()} crop=${info.cropRect}")
+            }
             request.provideSurface(surface, executor) {
                 st.setOnFrameAvailableListener(null)
                 st.release()

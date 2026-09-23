@@ -50,9 +50,9 @@ class VideoLooksTest {
 
     @Test
     fun `switching a photo filter off takes its port off the video dial, never a native look`() {
-        val off = setOf("film", "gameboy", "none")
+        val off = setOf("gbcolor", "gameboy", "none")
         val dial = VideoLooks.dial(off)
-        assertFalse(dial.any { it.id == "film" })
+        assertFalse(dial.any { it.id == "gbcolor" })
         assertFalse(dial.any { it.id == "gameboy" })
         assertTrue(dial.first().id == VideoLooks.plain.id)
         assertTrue(dial.any { it.id == "vhs" })
@@ -69,10 +69,10 @@ class VideoLooksTest {
 
     @Test
     fun `a look not on the dial steps onto its end`() {
-        val dial = VideoLooks.dial(setOf("film"))
-        val film = VideoLooks.byId("film")
-        assertSame(dial.first(), VideoLooks.step(film, 1, dial))
-        assertSame(dial.last(), VideoLooks.step(film, -1, dial))
+        val dial = VideoLooks.dial(setOf("gameboy"))
+        val gb = VideoLooks.byId("gameboy")
+        assertSame(dial.first(), VideoLooks.step(gb, 1, dial))
+        assertSame(dial.last(), VideoLooks.step(gb, -1, dial))
     }
 
     @Test
@@ -89,9 +89,15 @@ class VideoLooksTest {
 
     @Test
     fun `a ported look is the photo filter's own shader`() {
-        val film = VideoLooks.byId("film")
-        assertEquals("film", film.photoId)
-        assertEquals(GlslPort.port(Filters.byId("film").source!!), film.glsl)
+        val gb = VideoLooks.byId("gameboy")
+        assertEquals("gameboy", gb.photoId)
+        assertEquals(GlslPort.port(Filters.byId("gameboy").source!!), gb.glsl)
+    }
+
+    @Test
+    fun `the only photo filters on the video dial are the two Game Boys`() {
+        val ported = VideoLooks.all.mapNotNull { it.photoId }.toSet()
+        assertEquals(setOf("gameboy", "gbcolor"), ported)
     }
 
     @Test

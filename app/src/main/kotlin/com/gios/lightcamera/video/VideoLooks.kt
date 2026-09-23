@@ -407,18 +407,21 @@ vec3 look(vec2 xy) {
     /**
      * The motion search behind Datamosh, drawn at one sixteenth of the frame.
      *
-     * One texel per macroblock. For each, it asks where in the **last** frame this block came
-     * from: a coarse 5×5 search at 6-pixel steps (±12), then a 3×3 refinement at 2-pixel steps
-     * around the winner, scoring each candidate by the absolute difference over a 4×4 grid of taps.
-     * That is the same question an H.264 encoder asks, answered crudely — which is fine, because the
-     * look *is* the answer being applied to the wrong picture.
+     * One texel per 16-pixel macroblock. For each, it asks where in the **last** camera frame the
+     * block came from, the question an H.264 encoder asks. A coarse 5×5 grid at 8-pixel steps
+     * (±16), then three 3×3 refinements at 4, 2 and 1 pixel, reaching ±23. Each candidate is scored
+     * by the absolute luma difference over a 4×4 grid of taps, plus a small cost per pixel of
+     * vector, so a tie goes to the shorter move the way a rate-distortion encoder breaks it.
      *
-     * The vector is written into red and green as eighths of a pixel offset by 128, so an ordinary
-     * RGBA8 texture carries ±16 pixels and this needs no float render target from the GPU. **Zero
-     * has to be exactly representable.** The first version stored `v / 32 + 0.5`, and 0.5 is not a
-     * byte: 128/255 decodes as a sixteenth of a pixel, so every block of a perfectly still scene
-     * was resampled a sixteenth of a pixel sideways every frame, and a static shot faded to a blur
-     * in a couple of seconds. Found in the llvmpipe harness before it reached a phone.
+     * **Flat blocks get no vector.** A patch of sky matches itself at every offset, and the first
+     * build let those blocks wander with the noise, so a still sky crawled. A block whose taps span
+     * less than 3% of the luma range is declared still, which is also what an encoder does with a
+     * block it can code as a skip.
+     *
+     * The vector goes into red and green as quarter pixels offset by 128: ±32 pixels in an ordinary
+     * RGBA8 texture, and zero exactly representable (the first build's `v / 32 + 0.5` was not, and a
+     * still scene blurred a sixteenth of a pixel every frame). Blue carries the best match's error,
+     * alpha the error of not moving at all, so the look can tell new content from moved content.
      */
     private val MOSH_SEARCH = GlslPort.VERSION + """
 uniform sampler2D uSrc;
@@ -430,15 +433,17 @@ out vec4 fragColor;
 vec2 uvOf(vec2 p) { return vec2(p.x, size.y - p.y) / size; }
 float lumAt(sampler2D s, vec2 p) { return dot(texture(s, uvOf(p)).rgb, vec3(0.299, 0.587, 0.114)); }
 
+float cur[16];
+
 float sad(vec2 centre, vec2 off, float cell) {
     float e = 0.0;
     for (int j = 0; j < 4; j++) {
         for (int i = 0; i < 4; i++) {
             vec2 p = centre + (vec2(float(i), float(j)) - 1.5) * cell;
-            e += abs(lumAt(uSrc, p) - lumAt(uLast, p + off));
+            e += abs(cur[j * 4 + i] - lumAt(uLast, p + off));
         }
     }
-    return e;
+    return e / 16.0 + length(off) * 0.0006;
 }
 
 void main() {
@@ -446,63 +451,100 @@ void main() {
     vec2 cellIndex = vec2(gl_FragCoord.x, auxSize.y - gl_FragCoord.y) - 0.5;
     vec2 centre = (cellIndex + 0.5) * block;
     float cell = block.x / 4.0;
+    float lo = 1.0;
+    float hi = 0.0;
+    for (int j = 0; j < 4; j++) {
+        for (int i = 0; i < 4; i++) {
+            float v = lumAt(uSrc, centre + (vec2(float(i), float(j)) - 1.5) * cell);
+            cur[j * 4 + i] = v;
+            lo = min(lo, v);
+            hi = max(hi, v);
+        }
+    }
+    float still = sad(centre, vec2(0.0), cell);
     vec2 best = vec2(0.0);
-    float bestE = sad(centre, best, cell) - 0.02;
-    for (int j = -2; j <= 2; j++) {
-        for (int i = -2; i <= 2; i++) {
-            vec2 off = vec2(float(i), float(j)) * 6.0;
-            float e = sad(centre, off, cell);
-            if (e < bestE) { bestE = e; best = off; }
+    float bestE = still - 0.004;
+    if (hi - lo > 0.03) {
+        for (int j = -2; j <= 2; j++) {
+            for (int i = -2; i <= 2; i++) {
+                vec2 off = vec2(float(i), float(j)) * 8.0;
+                float e = sad(centre, off, cell);
+                if (e < bestE) { bestE = e; best = off; }
+            }
+        }
+        for (int k = 0; k < 3; k++) {
+            float stride = k == 0 ? 4.0 : (k == 1 ? 2.0 : 1.0);
+            vec2 around = best;
+            for (int j = -1; j <= 1; j++) {
+                for (int i = -1; i <= 1; i++) {
+                    if (i == 0 && j == 0) continue;
+                    vec2 off = around + vec2(float(i), float(j)) * stride;
+                    float e = sad(centre, off, cell);
+                    if (e < bestE) { bestE = e; best = off; }
+                }
+            }
         }
     }
-    vec2 coarse = best;
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            vec2 off = coarse + vec2(float(i), float(j)) * 2.0;
-            float e = sad(centre, off, cell);
-            if (e < bestE) { bestE = e; best = off; }
-        }
-    }
-    fragColor = vec4(clamp((best * 8.0 + 128.0) / 255.0, 0.0, 1.0), clamp(bestE / 4.0, 0.0, 1.0), 1.0);
+    fragColor = vec4(
+        clamp((best * 4.0 + 128.0) / 255.0, 0.0, 1.0),
+        clamp(bestE * 4.0, 0.0, 1.0),
+        clamp(still * 4.0, 0.0, 1.0));
 }
 """
 
     /**
      * **Datamosh, the real one** — the thing the photo filter could only imitate.
      *
-     * A P-frame is decoded as *reference moved by the motion vectors, plus a correction*. Datamosh
-     * is that sum computed against the wrong reference: the I-frame that would have reset the
-     * picture has been deleted, so the motion of the new scene drags the pixels of the old one.
-     * This does exactly that, live. The reference is this look's own last output (`uPrev`) instead
-     * of the last camera frame; the vectors come from [MOSH_SEARCH], applied block by block
-     * (`texelFetch`, no smoothing, so the damage has the macroblock edges real damage has); and only
-     * a fraction of the correction is added back, so the new picture seeps in rather than
-     * replacing the old one.
+     * A P-frame decodes as *the reference, moved by the motion vectors, plus a small correction*.
+     * Datamosh is that sum against the wrong reference: the I-frame that would have reset the
+     * picture is gone, so the motion of the new scene drags the pixels of the old one. Here the
+     * reference is this look's own last output (`uPrev`), not the last camera frame, and the
+     * vectors come from [MOSH_SEARCH], applied block by block (`texelFetch`, no smoothing, so the
+     * damage has macroblock edges).
      *
-     * Left alone that would melt into mud for ever, so each block also refreshes itself now and
-     * then, at random — the way encoders spread intra-refresh through a stream — and the picture
-     * heals slowly between moves. Move the phone and it blooms; hold still and it clears.
+     * **What the first version got wrong.** It added 15% of the correction back every frame, and
+     * with good vectors the correction is the whole picture: the output converged on plain video,
+     * and the look only showed at the edges of a fast move. A datamosh keeps the old picture. So now:
+     *
+     *  - **Moving blocks drag.** Luma follows the vector, and colour follows it half again as far —
+     *    chroma is the part of a real stream that smears worst, because it is coded at a quarter of
+     *    the resolution. Only where a block holds content the old picture never had (its best match
+     *    is still bad) does a trace of the new picture seep in, the way a P-frame's residual draws
+     *    the outline of a subject into the smear.
+     *  - **Still blocks hold.** A block that is not moving keeps what it had, so the ghost of the
+     *    old scene stays exactly where it was.
+     *  - **A block that has been still for a second and a half heals**, dissolving back to the camera
+     *    over about a third of a second, the way a keyframe would. The time a block has been still
+     *    is kept per pixel in the output's alpha, which nothing downstream reads.
+     *
+     * So: pan and the whole picture slides and streaks; a person walks through and drags the room
+     * with them; hold still and it clears, a block at a time.
      */
-    private val MOSH = native(
-        """
-vec3 look(vec2 xy) {
+    private val MOSH = NATIVE_PRELUDE + """
+void main() {
+    vec2 xy = vec2(gl_FragCoord.x, size.y - gl_FragCoord.y);
     vec3 c = tap(xy);
-    if (fresh > 0.5) return c;
+    if (fresh > 0.5) { fragColor = vec4(c, 0.0); return; }
     vec2 auxSize = vec2(textureSize(uAux, 0));
     vec2 block = size / auxSize;
     ivec2 bi = ivec2(clamp(floor(xy / block), vec2(0.0), auxSize - 1.0));
-    ivec2 texel = ivec2(bi.x, int(auxSize.y) - 1 - bi.y);
-    vec4 a = texelFetch(uAux, texel, 0);
-    vec2 mv = (floor(a.rg * 255.0 + 0.5) - 128.0) / 8.0;
-    vec3 ref = prev(xy + mv);
-    vec3 residual = c - last(xy + mv);
-    vec3 m = ref + residual * 0.15;
-    float moving = smoothstep(0.5, 2.5, length(mv));
-    float refresh = step(0.998 - (1.0 - moving) * 0.02, hash1(float(bi.x) * 13.1 + float(bi.y) * 71.7 + floor(time * 30.0) * 0.618));
-    return mix(m, c, refresh);
+    vec4 a = texelFetch(uAux, ivec2(bi.x, int(auxSize.y) - 1 - bi.y), 0);
+    vec2 mv = (floor(a.rg * 255.0 + 0.5) - 128.0) / 4.0;
+    float moving = smoothstep(1.0, 2.5, length(mv));
+    float held = texture(uPrev, uvOf(xy)).a;
+    held = moving > 0.5 ? 0.0 : min(1.0, held + dt / 1.5);
+
+    vec3 luma = prev(xy + mv);
+    vec3 chroma = prev(xy + mv * 1.5);
+    vec3 ref = vec3(lum(luma)) + (chroma - vec3(lum(chroma)));
+    float novel = smoothstep(0.03, 0.12, a.b) * moving;
+    vec3 m = ref + (c - last(xy + mv)) * 0.35 * novel;
+
+    float heal = held >= 1.0 ? 0.2 : 0.0;
+    float intra = step(0.9995, hash1(float(bi.x) * 13.1 + float(bi.y) * 71.7 + floor(time * 30.0) * 0.618));
+    fragColor = vec4(clamp(mix(m, c, max(heal, intra)), 0.0, 1.0), held);
 }
-""",
-    )
+"""
 
     /* ------------------------------------------------------------------ */
     /*  The dial                                                           */
@@ -535,7 +577,10 @@ vec3 look(vec2 xy) {
     /**
      * The order the wheel walks.
      *
-     * The video-only looks first, because they are the reason the dial is here. **Datamosh is
+     * Video-only looks, plus the two Game Boys: the one pair of photo filters that reads as
+     * footage — a Game Boy Camera clip is a thing people remember — rather than as a still effect
+     * applied to moving pictures. The rest of the photo dial ported cleanly and still does (see
+     * `VideoShadersTest`), and was taken off here by choice. **Datamosh is
      * the photo dial's lesson applied again:** it is the look that deliberately wrecks the picture,
      * so it sits as far from Preset as the dial allows rather than one notch backwards from it,
      * where an overshoot reaching for the plain picture would land on it (light-reports#27).
@@ -546,33 +591,16 @@ vec3 look(vec2 xy) {
      */
     val all: List<Look> = buildList {
         add(plain)
-        ported("film")?.let(::add)
         add(Look("super8", "Super 8", SUPER8))
         add(Look("vhs", "VHS", VHS))
-        add(Look("trails", "Trails", TRAILS))
-        add(Look("stopmotion", "Stop Motion", STOP_MOTION))
-        ported("mono")?.let(::add)
-        add(Look("cctv", "CCTV", CCTV))
-        add(Look("motion", "Motion", MOTION))
-        ported("thermal")?.let(::add)
-        ported("xray")?.let(::add)
-        ported("glow")?.let(::add)
-        ported("comic")?.let(::add)
-        add(Look("slitscan", "Slit-scan", SLITSCAN, history = 30, historyEdge = 640))
-        add(datamosh)
         ported("gameboy")?.let(::add)
         ported("gbcolor")?.let(::add)
-        ported("dither16")?.let(::add)
-        ported("dither32")?.let(::add)
-        ported("dithergrey")?.let(::add)
-        ported("onebit")?.let(::add)
-        ported("halftone")?.let(::add)
-        ported("mirror")?.let(::add)
-        ported("kaleido")?.let(::add)
-        ported("twirl")?.let(::add)
-        ported("bulge")?.let(::add)
-        ported("fisheye")?.let(::add)
-        ported("tunnel")?.let(::add)
+        add(datamosh)
+        add(Look("trails", "Trails", TRAILS))
+        add(Look("stopmotion", "Stop Motion", STOP_MOTION))
+        add(Look("motion", "Motion", MOTION))
+        add(Look("slitscan", "Slit-scan", SLITSCAN, history = 30, historyEdge = 640))
+        add(Look("cctv", "CCTV", CCTV))
     }
 
     fun byId(id: String?): Look = all.firstOrNull { it.id == id } ?: plain

@@ -303,8 +303,19 @@ class CameraEngine(private val context: Context) {
     private fun fxTurn(): Int = if (_recording.value || finalizing) {
         recordTurn
     } else {
-        previewRotationDegrees() / 90
+        liveTurn()
     }
+
+    /** See [com.gios.lightcamera.video.FxGeometry.worldTurn]. Not the photo turn: the front lens differs. */
+    private fun liveTurn(): Int = com.gios.lightcamera.video.FxGeometry.worldTurn(
+        deviceRotationDegrees = when (lastRotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        },
+        front = _lensFacing.value == CameraSelector.LENS_FACING_FRONT,
+    )
 
     private fun ensureFx(): VideoFx = fx ?: VideoFx(
         sensorRotation = { sensorOrientation },
@@ -2215,7 +2226,7 @@ class CameraEngine(private val context: Context) {
         val startedAt = System.currentTimeMillis()
         // Frozen before `start()`, because the processor reads it from the first frame the
         // recorder sees. See [recordTurn].
-        recordTurn = previewRotationDegrees() / 90
+        recordTurn = liveTurn()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(startedAt))
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "ROLL_$stamp.mp4")

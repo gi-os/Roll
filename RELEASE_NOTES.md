@@ -1,3 +1,22 @@
+## Nightly: video looks, second pass
+
+**A nightly.** The first video-looks build has not run on a phone yet. This one changes three things on top of it.
+
+**The dial is shorter.** The Video dial has 11 looks. It keeps Preset, Game Boy, GB Color and the 8 video-only looks. The other 17 photo filters are off it, because on moving pictures they read as a still effect. They still port and pass the compiler check in CI, so any of them can come back with one line.
+
+**Looks follow the phone on the front lens too.** VHS, CCTV and Slit-scan draw a horizontal in the world, so they must know the way you hold the phone. The first build reused the photo turn, which is correct on the back lens only. The front lens faces the other way, so a sideways selfie clip got half a turn wrong. A CCTV caption landed upside down in the bottom-right corner. `FxGeometry.worldTurn` now works the turn out from the sensor side. A new test builds a scene from the sensor and plays it back the way CameraX rotates a clip. A mark at the world's top left must stay there. The test covers every device angle on both lenses and fails on the old formula. The processor also logs the rotation CameraX reports for its input, one line per bind, so a phone run can confirm the rest of the chain.
+
+**Datamosh looks like datamosh.** The first version added 15% of the new frame back every frame. With accurate motion vectors, that sum is the plain video. The look showed only at the edge of a fast move. Now:
+
+- A moving block drags the old picture along its vector. Color drags half again as far. A real stream codes color at a quarter of the resolution.
+- A still block keeps the old picture.
+- New content, where the best match is still poor, seeps in at 35%. This draws the subject's outline into the smear.
+- A block that stays still for 1.5 s heals back to the camera in about a third of a second. The shader keeps that timer in the alpha channel of its own output.
+
+The motion search is better too. It reaches ±23 pixels in four steps and prefers the shorter vector on a tie. Flat blocks get no vector, so a still sky no longer crawls. The texture stores vectors in quarter pixels.
+
+Pan and the picture slides and streaks. Walk through the frame and you drag the room with you. Hold still and it clears.
+
 ## Nightly: video looks, recorded into the clip
 
 **A nightly, on purpose.** This build changes how Video binds the camera. Nobody has run it on a Light Phone III yet. It becomes official after `docs/RELEASE_CHECKLIST.md` passes on a phone.

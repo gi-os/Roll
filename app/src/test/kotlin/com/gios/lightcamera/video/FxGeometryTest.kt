@@ -120,4 +120,61 @@ class FxGeometryTest {
         assertEquals(-1 to 0, FxGeometry.pushHistory(5, 5, 0))
         assertEquals(480 to 640, FxGeometry.historySize(1080, 1440, 640))
     }
+
+    /** The shader's own `toUp`, in pixels, exactly as the GLSL prelude writes it. */
+    private fun toUp(p: Pair<Float, Float>, size: Pair<Float, Float>, turn: Int): Pair<Float, Float> = when (turn % 4) {
+        1 -> (size.second - p.second) to p.first
+        2 -> (size.first - p.first) to (size.second - p.second)
+        3 -> p.second to (size.first - p.first)
+        else -> p
+    }
+
+    /** A clockwise quarter turn of a point in a w×h image, y down, into the turned h×w image. */
+    private fun cw(p: Pair<Float, Float>, h: Float): Pair<Float, Float> = (h - p.second) to p.first
+
+    @Test
+    fun `a mark at the world's top left lands there in the clip, every way up, on both lenses`() {
+        // Independent of worldTurn: the scene is built from the sensor side and played back the
+        // way CameraX rotates a clip, and the shader's own toUp is asked where the mark is.
+        for (front in listOf(false, true)) for (sensor in listOf(90, 270)) for (device in listOf(0, 90, 180, 270)) {
+            val playback = if (front) (sensor + device) % 360 else (sensor - device + 360) % 360
+            // A sensor buffer 400x300. Find the buffer pixel that plays back at world (0.1, 0.2).
+            val bw = 400f; val bh = 300f
+            val candidates = (0 until 400 step 4).flatMap { x -> (0 until 300 step 4).map { y -> x.toFloat() to y.toFloat() } }
+            fun turned(p: Pair<Float, Float>, quarters: Int): Pair<Pair<Float, Float>, Pair<Float, Float>> {
+                var q = p; var w = bw; var h = bh
+                repeat(quarters) { q = cw(q, h); val t = w; w = h; h = t }
+                return q to (w to h)
+            }
+            val target = candidates.minByOrNull { b ->
+                val (q, sz) = turned(b, playback / 90)
+                val dx = q.first / sz.first - 0.1f; val dy = q.second / sz.second - 0.2f
+                dx * dx + dy * dy
+            }!!
+            // The same pixel in the look's frame, which is the buffer turned by the sensor angle.
+            val (s, sSize) = turned(target, sensor / 90)
+            val turn = FxGeometry.worldTurn(device, front)
+            val up = toUp(s, sSize, turn)
+            val upSize = if (turn % 2 == 1) sSize.second to sSize.first else sSize
+            val where = "front=$front sensor=$sensor device=$device turn=$turn"
+            assertEquals(where, 0.1f, up.first / upSize.first, 0.02f)
+            assertEquals(where, 0.2f, up.second / upSize.second, 0.02f)
+        }
+    }
+
+    @Test
+    fun `on the back lens the world turn is the photo filters' turn`() {
+        // previewRotationDegrees(): ROTATION_90 -> 270, ROTATION_180 -> 180, ROTATION_270 -> 90.
+        assertEquals(0, FxGeometry.worldTurn(0, front = false))
+        assertEquals(3, FxGeometry.worldTurn(90, front = false))
+        assertEquals(2, FxGeometry.worldTurn(180, front = false))
+        assertEquals(1, FxGeometry.worldTurn(270, front = false))
+    }
+
+    @Test
+    fun `on the front lens a sideways phone turns the other way`() {
+        assertEquals(1, FxGeometry.worldTurn(90, front = true))
+        assertEquals(3, FxGeometry.worldTurn(270, front = true))
+        assertEquals(2, FxGeometry.worldTurn(180, front = true))
+    }
 }

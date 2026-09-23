@@ -60,7 +60,7 @@ Uninstall it and the stock camera is exactly as it was.
 | **Zone focus, like a GR** | Lock the wheel's pick onto FOCUS and the app switches to manual focus: distances on the dial with detents at 0.5/1/2 m, the hyperfocal and ∞, a live depth-of-field readout, and focus peaking marking what is sharp. AF/MF fits on a band slot for one-tap street work. |
 | **A map of your roll** | A scope beside the camera roll: photographs placed where they were taken, clustered by street as you zoom. Tagging uses the phone's last known fix, so it costs the shutter nothing. |
 | **18 live filters** | Real fragment shaders, on the viewfinder *and* on the saved file. Film, Dither BW, Dither 16, Dither 32, Halftone, Game Boy, Thermal, Purikura, and the Photo Booth distortions. Turn the wheel to change filter. |
-| **Video looks, in the file** | 28 looks on the Video dial, recorded into the clip rather than laid over the viewfinder. Most photo filters carry over, plus looks that only work in motion: Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan and a live Datamosh. Turn the wheel mid-take to change look inside one clip. |
+| **Video looks, in the file** | Eleven looks on the Video dial, recorded into the clip rather than laid over the viewfinder. Preset, the two Game Boys, and looks that only work in motion: Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan and a live Datamosh. Turn the wheel mid-take to change look inside one clip. |
 | **The wheel does things** | A bare turn steps filters; held and turned, exposure; a click, the torch. Or bind the click to *Wheel channel* and the wheel becomes a real dial: click to pick — filter, EV, shutter, ISO, focus, zoom — turn to choose, click to lock, turn to adjust. Video hands the wheel to zoom by itself. No service, no permission. |
 | **A two-stage shutter** | The half press locks focus. The full press shoots. LightOS itself uses only the second detent. |
 | **Face detection** | From the camera's own hardware detector, not a bundled model. Focus follows the face the lens works on. |
@@ -402,7 +402,9 @@ Each frame goes through these steps on one GL thread:
 The photo filters carry over by translation, not by a second copy. AGSL is GLSL ES with other
 type names, so `GlslPort` maps the types with macros and makes three edits. It turns
 `uniform shader src` into a texture, `src.eval` into a sampler call, and `main(float2)` into a
-real `main()`. Film in Video and Film in Pro compile from one source.
+real `main()`. Game Boy in Video and Game Boy in Pro compile from one source. Every photo filter
+ports and passes the compiler check, but only the two Game Boys are on the Video dial. The rest
+read as a still effect on moving pictures.
 
 The video-only looks are about time:
 
@@ -412,17 +414,21 @@ The video-only looks are about time:
 - **CCTV** burns the real date and time into the corner, in a 3×5 font packed into integers.
 - **Slit-scan** keeps 30 past frames on the GPU and takes each row from a different one.
 - **Datamosh** searches for block motion at 1/16 size, then moves its own last output along
-  those vectors. That is the sum a decoder computes after a deleted I-frame.
+  those vectors. That is the sum a decoder computes after a deleted I-frame. Moving blocks drag
+  the old picture, and color drags half again as far. Still blocks hold the old picture. A block
+  that stays still for 1.5 s heals back to the camera.
 
 The wheel changes look while you record. A look is a program swap on the GL thread, not a
 rebind. Looks with a horizontal line follow the way you hold the phone, and that turn locks when
-the clip starts.
+the clip starts. `FxGeometry.worldTurn` works the turn out from the sensor side for both lenses.
+The front lens turns the opposite way to the back, and a test places a mark at the world's top
+left for every device angle on both.
 
 A shader can fail to compile, or the driver can refuse a surface. Then the looks turn off for
 the session, and Roll shows a notice. A clip in progress keeps recording, without a look. **Looks in video**
 in Settings switches the processor off, which restores the two-stream bind.
 
-Every video shader, 62 in all, goes through Khronos's `glslangValidator` in CI
+Every video shader, and every photo filter ported, 45 in all, goes through Khronos's `glslangValidator` in CI
 (`VideoShadersTest`). No AGSL shader in the app has that check.
 
 ## QR is a mode, not an app
@@ -711,7 +717,7 @@ change.
 
 | Version | Date | Notes |
 |---|---|---|
-| `v3.15.x` | this commit | **Video looks, recorded into the clip.** Video binds the preview and the recorder through a CameraX `CameraEffect`, and a GL processor draws the look into both, so the viewfinder and the file agree. 28 looks: 19 photo filters ported from their AGSL by `GlslPort`, Preset with the photo grade, and eight that only work in motion (Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan, live Datamosh). The wheel changes look mid-take. A fault turns the looks off for the session and the clip keeps recording. Every video shader passes `glslangValidator` in CI. Nightly until `docs/RELEASE_CHECKLIST.md` passes. |
+| `v3.15.x` | this commit | **Video looks, recorded into the clip.** Video binds the preview and the recorder through a CameraX `CameraEffect`, and a GL processor draws the look into both, so the viewfinder and the file agree. Eleven looks: Preset with the photo grade, Game Boy and GB Color ported from their AGSL by `GlslPort`, and eight that only work in motion (Super 8, VHS, Trails, Stop Motion, CCTV, Motion, Slit-scan, live Datamosh). The wheel changes look mid-take. Looks with a horizontal line follow the phone on both lenses (the front lens turns the other way). A fault turns the looks off for the session and the clip keeps recording. Every video shader passes `glslangValidator` in CI. Nightly until `docs/RELEASE_CHECKLIST.md` passes. |
 | `v3.14.x` | a671078 | **Recovery adopts, develop stages, and the roll is sent on your terms.** Film-roll recovery used to delete any frame its index did not know about — a crash between the frame and the index line lost the photograph; it adopts the frame now, and removes only a zero-byte or non-image file (`RollIndex`, tested). A develop truncated the MediaStore row before writing the filtered JPEG, so a failure mid-write left half a photograph; `Replacement` stages the new bytes whole, keeps a copy of the original, and restores it on failure. "Simple" is **Instant — smaller photos**, and the panel queue only shrinks a burst when **Bursts may shrink** is on (default off). "Start web server" is **Send to computer**, which asks for the selected photographs or the entire roll before it opens the socket. `docs/RELEASE_CHECKLIST.md` gates camera changes on hardware. Nightly until that checklist passes on the FHD probe already on main. |
 | `v3.13.x` | 3f9099c | **v3.12's camera recovery is withdrawn.** It rebooted a phone. A rebind is an `unbindAll` and a `bindToLifecycle` in the same tick; a 1.2-second deadline plus a failed rebind plus a retry is that pair on a loop, and against a HAL still tearing down a recording session it takes cameraserver down rather than recovering the camera. The watchdog is what it was in v3.11. The fault it was aiming at — a recording that hands back a black viewfinder nothing restarts — is still open, and the next attempt needs a device log rather than more reasoning from the source. |
 | `v3.12.x` | (see log) | **The camera always comes back.** Three states the watchdog could not recover from, and a recording tended to produce all three. A bind that never delivers a first frame: `rebind` zeroes the heartbeat on purpose and the watchdog read zero as "no data yet" with no deadline on *yet*, so a session that came up dead — which is what the camera looks like after the recorder has had it — sat at zero for the life of the process. There is a first-frame deadline now, 4 s cold and 1.2 s straight after a recording. A bind that failed: a check on `_ready` was the watchdog's first line, so the one state the app could not leave by itself was the one it refused to look at. And a finalize that handed back a dead camera: v3.1 stamped the heartbeat to now to stop a false death verdict, which also hid the true one. CameraX's own `cameraState` is observed as well, so an error the HAL reports arrives in milliseconds rather than after a stale limit, and three restarts in a minute now backs off to once a minute instead of standing down for good. |
