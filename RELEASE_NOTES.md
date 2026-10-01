@@ -1,3 +1,40 @@
+## Roll v3.15: video looks
+
+**The headline.** In Video, the wheel picks a look, and the look goes into the clip. The viewfinder shows the same frames the encoder gets. Before 3.15, Video forced every filter off. A photo filter changes the preview view only, and the recorder never reads that view.
+
+**How it works.** Video binds the preview and the recorder as one CameraX `UseCaseGroup` with a `CameraEffect`. The camera draws into a surface that Roll owns. Roll runs the look on the GPU and draws the result into the preview and into the encoder. Each frame keeps the camera timestamp, so sound and picture stay in sync.
+
+**The 11 looks.** Preset (with your photo adjustments), Game Boy and GB Color, and eight looks that only work in motion:
+
+- **Super 8**: 18 frames a second, gate weave, flicker, grain, dust and a light leak.
+- **VHS**: color bleeds along the line, the tracking wobbles, and a tracking band rolls down the frame.
+- **Datamosh**: moving blocks drag the old picture along their motion. Hold still for 1.5 s and it heals.
+- **Trails**: light hangs in the air for about a quarter second.
+- **Stop Motion**: the picture changes 8 times a second.
+- **Motion**: only what moves, on black.
+- **Slit-scan**: each row of the picture is a different moment across one second.
+- **CCTV**: 12 frames a second, a wide-lens bend, and the real date and time in the corner.
+
+Turn the wheel while you record and the look changes inside the same clip. Looks with a horizontal line follow the way you hold the phone, on both lenses.
+
+**If something fails, the clip does not.** A shader the driver refuses, an EGL surface it will not make, a surface that stops taking frames, or a bind that never draws a frame each turns the looks off for the session. Roll then records plain, shows a notice, and puts the fault on the chip with the reason. **Settings › Look › Looks in video** turns the processor off.
+
+**What the break pass found and fixed.** Before this release, a review set out to break the feature on purpose. It found these, and 3.15 fixes all of them:
+
+- The watchdog heartbeat came from frames arriving, not frames drawn. A processor that received frames but drew none showed a black viewfinder, and the watchdog thought the camera was fine. The heartbeat now comes from a successful draw to the preview.
+- Frames still in flight after a release stamped the heartbeat. Four seconds later the watchdog rebound the camera behind the roll. A released camera now has no heartbeat to check.
+- A bind with the effect that never drew a frame stayed black for ever. After 6 s with no frame, the looks turn off and the plain pair binds once.
+- A failed EGL surface or a run of failed swaps only wrote a log line. Both are faults now.
+- A look fault or the settings switch could overwrite an owed release. The camera then rebound behind the roll. A settings change in Settings also rebound the camera behind the screen.
+- The band could name a look after a fault or with the setting off. It now shows a look only while the processor is bound.
+- The first frame of each look compiled its shader mid-take, which can stall a recording. The dial now compiles while Video opens.
+- The pass-through shaders used `mediump`, which is fp16 on this GPU. Every frame lost about one pixel of sampling accuracy. They use `highp` now.
+- The video-only looks used the sine hash. On a phone GPU that hash degrades after a few minutes of recording. They use an integer hash now.
+
+**Tests.** `VideoShadersTest` sends 50 shaders to the Khronos `glslangValidator` in CI. These are every look, every ported photo filter and the processor's own shaders. `FxGeometryTest` checks the turn for every phone angle on both lenses. A torture run renders every look on llvmpipe at 2×2, 17×31, 811×1441 and 1440×810, on black, white, noise and a moving scene, at 10 hours of elapsed time and at frame gaps from 1 ms to 250 ms. No look returned a broken frame.
+
+**Not yet verified on a phone.** No test here runs the camera HAL. Run `docs/RELEASE_CHECKLIST.md` (Video looks section) on the first install.
+
 ## Nightly: video looks, second pass
 
 **A nightly.** The first video-looks build has not run on a phone yet. This one changes three things on top of it.

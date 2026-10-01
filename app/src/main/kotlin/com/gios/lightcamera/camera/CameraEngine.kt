@@ -293,12 +293,45 @@ class CameraEngine(private val context: Context) {
         if (wanted == fxWanted) return
         fxWanted = wanted
         if (mode != CaptureMode.Video) return
+        // Released (the switch lives in Settings, which is not the viewfinder): only remember.
+        // `resume` binds with the new answer; rebinding here would open the sensor behind
+        // Settings and then bind a second time on the way back.
+        if (unbound) return
         if (_recording.value || finalizing) {
-            owed = Owed.Rebind
+            oweRebind()
             return
         }
         rebind(flash)
     }
+
+    /**
+     * Owe a rebind without overriding an owed release.
+     *
+     * Stop a take, swipe to the roll during the flush, and `owed` is Release. A look fault or the
+     * settings switch landing in that window used to write Rebind over it, and the finalize then
+     * rebound the camera behind the roll. The rebind is not lost by keeping Release: `resume`
+     * binds afresh, and reads the new answer when it does.
+     */
+    private fun oweRebind() {
+        if (owed != Owed.Release) owed = Owed.Rebind
+    }
+
+    /**
+     * True between a [release] that really unbound and the next bind.
+     *
+     * The watchdog's heartbeat is ignored while it is set. `unbindAll` closes the session
+     * asynchronously, so frames already in flight kept stamping the heartbeat after the release,
+     * and four seconds later the watchdog saw silence from a camera it believed bound and rebound
+     * it behind the roll. `_ready` cannot answer this. It means "a bind succeeded" and stays true
+     * across a release.
+     */
+    @Volatile private var unbound = false
+
+    /** When the current bind with the effect started, or 0. See [recoverIfDead]. */
+    @Volatile private var fxBoundAt = 0L
+
+    /** Whether the look processor has put a frame on the preview since [fxBoundAt]. */
+    @Volatile private var fxSawFrame = false
 
     private fun fxTurn(): Int = if (_recording.value || finalizing) {
         recordTurn
@@ -325,11 +358,24 @@ class CameraEngine(private val context: Context) {
         // whether the preview's session callback still sees every result there is CameraX's
         // business rather than this app's. A frame arriving at the processor is the preview being
         // alive, which is exactly what the watchdog is asking.
-        onFrame = { lastResultAt = SystemClock.elapsedRealtime() },
+        onFrame = {
+            if (!unbound) {
+                lastResultAt = SystemClock.elapsedRealtime()
+                fxSawFrame = true
+            }
+        },
         onFault = { why, _ -> ContextCompat.getMainExecutor(context).execute { onFxFault(why) } },
     ).also {
         it.setLook(videoLook)
         fx = it
+    }
+
+    /** Turn the looks off for the session without binding anything; the caller rebinds. */
+    private fun blameFx(why: String) {
+        if (fxOff) return
+        Log.w(TAG, "video looks off: $why")
+        fxOff = true
+        _fxFault.tryEmit(why)
     }
 
     private fun onFxFault(why: String) {
@@ -337,10 +383,12 @@ class CameraEngine(private val context: Context) {
         fxOff = true
         _fxFault.tryEmit(why)
         if (stopped || mode != CaptureMode.Video) return
+        // Released: `resume` will bind, and `fxOff` makes it the plain pair.
+        if (unbound) return
         // The processor has already fallen back to drawing the camera straight through, so a
         // recording in progress keeps going. The bind without the effect waits for it to finish.
         if (_recording.value || finalizing) {
-            owed = Owed.Rebind
+            oweRebind()
             return
         }
         rebind(lastFlash)
@@ -533,6 +581,8 @@ class CameraEngine(private val context: Context) {
         }
         owed = null
         runCatching { orientation.disable() }
+        unbound = true
+        fxBoundAt = 0L
         runCatching { provider?.unbindAll() }
         // The analyser holds a reference to the view model through its callback and would otherwise
         // keep decoding frames from a stream nobody is watching.
@@ -723,6 +773,7 @@ class CameraEngine(private val context: Context) {
         val provider = provider ?: return
         val owner = owner ?: return
         val view = previewView ?: return
+        unbound = false
 
         val hw = readHardware(_lensFacing.value)
         sensorOrientation = hw.sensorOrientation
@@ -1140,6 +1191,8 @@ class CameraEngine(private val context: Context) {
                 provider.bindToLifecycle(owner, cameraSelector, preview, second)
             }
             _fxLive.value = withFx && !fxOff
+            fxSawFrame = false
+            fxBoundAt = if (_fxLive.value) SystemClock.elapsedRealtime() else 0L
             camera = bound
             readCameraLimits(bound)
             // A rebind builds a new session, and session capture options do not survive one. Any
@@ -1151,6 +1204,9 @@ class CameraEngine(private val context: Context) {
         }.onFailure {
             Log.e(TAG, "bind failed", it)
             _ready.value = false
+            // Nothing is bound, so nothing is bound through the processor either.
+            _fxLive.value = false
+            fxBoundAt = 0L
         }
     }
 
@@ -1280,7 +1336,10 @@ class CameraEngine(private val context: Context) {
             request: CaptureRequest,
             result: TotalCaptureResult,
         ) {
-            lastResultAt = SystemClock.elapsedRealtime()
+            // With the look processor bound, the processor is the heartbeat: it stamps only when a
+            // frame reaches the preview, which is what the watchdog is asking. Capture results can
+            // keep arriving while the processor draws nothing, and stamping on them would blind it.
+            if (!unbound && !_fxLive.value) lastResultAt = SystemClock.elapsedRealtime()
             readAf(result)
             readFaces(result)
             readMeter(result)
@@ -2161,10 +2220,37 @@ class CameraEngine(private val context: Context) {
                 manualAe = _exposureMode.value.manualAe,
                 finalizeStuckForMs = SystemClock.elapsedRealtime() - finalizingSince,
             )
+            // A recorder that never finalized under the look processor is the processor's fault
+            // until shown otherwise: the rebind that follows is the plain pair.
+            if (_fxLive.value) blameFx("a recording never finished saving with a look on")
             abandonFinalize("no Finalize in ${FINALIZE_TIMEOUT_MS}ms")
             return true
         }
+        // Released: nothing is bound, so silence is expected and is not a death.
+        if (unbound) return false
         if (!_ready.value) return false
+        // **A bind with the effect that never drew a frame.** CameraX reports a stream-sharing
+        // configuration it cannot open through the camera's state, not by throwing from the bind,
+        // so the bind "succeeds" and the processor simply never hears from the camera. The
+        // heartbeat is then zero, which the watchdog reads as "no data yet" for ever: a black
+        // viewfinder nothing recovers. Only for the effect, and only once — `fxOff` makes the
+        // next bind the plain pair, so this can never become a rebind loop.
+        val boundAt = fxBoundAt
+        if (_fxLive.value && !fxSawFrame && boundAt != 0L && !_recording.value && !finalizing &&
+            SystemClock.elapsedRealtime() - boundAt > FX_FIRST_FRAME_MS
+        ) {
+            lastDeath = PreviewDeath(
+                silentForMs = SystemClock.elapsedRealtime() - boundAt,
+                limitMs = FX_FIRST_FRAME_MS,
+                zslWasAllowed = zslAllowed,
+                zslWanted = zslWanted,
+                flash = lastFlash.name,
+                manualAe = _exposureMode.value.manualAe,
+            )
+            blameFx("the look processor never drew a frame")
+            rebind(lastFlash)
+            return true
+        }
         if (_recording.value || finalizing) return false
         val last = lastResultAt
         if (last == 0L) return false
@@ -2197,6 +2283,7 @@ class CameraEngine(private val context: Context) {
             Log.w(TAG, "preview died under ZSL; quarantining it for this session")
             zslAllowed = false
         }
+        if (_fxLive.value) blameFx("the preview went dark with a look on")
         Log.w(TAG, "no capture results for ${staleLimitMs()}ms; rebinding the camera")
         rebind(lastFlash)
         return true
@@ -2499,6 +2586,14 @@ class CameraEngine(private val context: Context) {
          * actually arrives.
          */
         const val FINALIZE_TIMEOUT_MS = 30_000L
+
+        /**
+         * How long a bind with the look processor gets to put its first frame on the preview.
+         *
+         * Generous: a cold bind here is about a second, and the dial's shaders compile on the
+         * same thread while Video opens. Past this the processor is not slow, it is not running.
+         */
+        const val FX_FIRST_FRAME_MS = 6_000L
 
         const val TAG = "CameraEngine"
 

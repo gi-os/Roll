@@ -744,6 +744,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
             append("mode ").append(prefs.mode.value.name)
             append(", filter ").append(_filter.value.id)
+            if (prefs.mode.value == CaptureMode.Video) {
+                append(", video look ").append(_videoLook.value.id)
+                    .append(if (engine.fxLive.value) " (processor bound)" else " (plain bind)")
+            }
             append(", zone focus ").append(prefs.zoneFocus.value).append('\n')
             append("captures in flight ").append(_inFlight.value)
                 .append(", shooting ").append(_shooting.value)
@@ -1588,11 +1592,20 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            prefs.videoLooks.collect { engine.setVideoLooksWanted(it, prefs.flash.value) }
+            prefs.videoLooks.collect {
+                // Off means plain, on the band as well as in the file: a dial left on VHS would
+                // otherwise go on naming a look the clip is not wearing.
+                if (!it) prefs.setVideoLook(VideoLooks.plain.id)
+                engine.setVideoLooksWanted(it, prefs.flash.value)
+            }
         }
         viewModelScope.launch {
             engine.fxFault.collect { why ->
-                showNotice("Video looks off: $why")
+                // The same rule after a fault, and the fault is a real one: it goes on the chip
+                // and into a report, with the reason, rather than only flashing past as a notice.
+                prefs.setVideoLook(VideoLooks.plain.id)
+                recordFault("Video looks turned off", why)
+                showNotice("Video looks off. Recording plain")
                 settleChannel()
             }
         }

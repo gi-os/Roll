@@ -178,6 +178,7 @@ fun CameraScreen(
     val saving by engine.saving.collectAsState()
     val recordSeconds by vm.recordSeconds.collectAsState()
     val videoLook by vm.videoLook.collectAsState()
+    val fxLive by engine.fxLive.collectAsState()
     val scanned by vm.scan.collectAsState()
     val page by vm.page.collectAsState()
     val pageTurn by vm.pageTurn.collectAsState()
@@ -573,7 +574,7 @@ fun CameraScreen(
                                 text = when {
                                     (mode == CaptureMode.Photo || mode == CaptureMode.Selfie) && !presetOffered ->
                                         filter.label.uppercase()
-                                    mode == CaptureMode.Video && videoLook.id != com.gios.lightcamera.video.VideoLooks.plain.id ->
+                                    mode == CaptureMode.Video && fxLive && videoLook.id != com.gios.lightcamera.video.VideoLooks.plain.id ->
                                         videoLook.label.uppercase()
                                     else -> mode.bandLabel
                                 },
