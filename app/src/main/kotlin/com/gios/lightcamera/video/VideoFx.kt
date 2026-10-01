@@ -75,7 +75,12 @@ class VideoFx(
     private val sensorRotation: () -> Int,
     /** Quarter turns from the panel to the world, frozen by the caller while a clip records. */
     private val turn: () -> Int,
-    /** Called on every camera frame — the preview's heartbeat, for the watchdog. */
+    /**
+     * Called each time a frame **reaches the preview** — a swap into the preview's surface that
+     * succeeded. The watchdog's heartbeat. Not on frame arrival: a processor that receives frames
+     * and fails to draw them is a black viewfinder, and stamping on arrival told the watchdog the
+     * opposite (found in the pre-release break pass).
+     */
     private val onFrame: () -> Unit,
     /** Called once, on the GL thread, when this processor gives up on the looks. */
     private val onFault: (String, Throwable?) -> Unit,
@@ -119,7 +124,10 @@ class VideoFx(
 
     /* ------------------------------------------------------------------ */
 
-    private class Out(val surface: EGLSurface, val size: Size)
+    private class Out(val surface: EGLSurface, val size: Size, val preview: Boolean) {
+        /** Swaps that failed in a row. A surface that keeps refusing is a fault, not a hiccup. */
+        var failures = 0
+    }
 
     private class Program(val id: Int, private val locations: HashMap<String, Int> = HashMap()) {
         fun loc(name: String): Int = locations.getOrPut(name) { GLES30.glGetUniformLocation(id, name) }
@@ -168,6 +176,9 @@ class VideoFx(
         /** Once true, only the straight-through draw runs. Never lowered. */
         private var broken = false
         private var faultReported = false
+
+        /** The outputs this frame has been presented to, so the error path never presents twice. */
+        private val presented = HashSet<Out>()
 
         private val stMatrix = FloatArray(16)
         private val outMatrix = FloatArray(16)
@@ -236,11 +247,17 @@ class VideoFx(
                 EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
             }.getOrNull()
             if (egl == null || egl == EGL14.EGL_NO_SURFACE) {
-                Log.e(TAG, "could not make an EGL surface for ${output.size}: 0x${Integer.toHexString(EGL14.eglGetError())}")
+                // **Loud, because quiet here is a black viewfinder or an empty clip.** The first
+                // build logged and closed the output, and nothing else ever heard about it: the
+                // preview stayed black with the camera running, or the encoder got no frames and
+                // every take came out empty. The fault turns the looks off and the engine rebinds
+                // the plain pair, which needs no EGL surface of ours at all.
+                val code = EGL14.eglGetError()
                 output.close()
+                fail("no EGL surface for the ${if (output.targets and CameraEffect.PREVIEW != 0) "preview" else "recorder"} (0x${Integer.toHexString(code)})", null)
                 return
             }
-            outputs[output] = Out(egl, output.size)
+            outputs[output] = Out(egl, output.size, output.targets and CameraEffect.PREVIEW != 0)
         }
 
         /* ---------------- frames ---------------- */
@@ -255,21 +272,29 @@ class VideoFx(
                 return
             }
             if (st !== input) return
-            onFrame()
             if (outputs.isEmpty()) return
             st.getTransformMatrix(stMatrix)
             val ts = st.timestamp
+            presented.clear()
             try {
                 val next = wanted
                 if (!broken && !next.plain) {
                     if (next !== look) switchTo(next, ts)
                     drawLook(ts)
                 } else {
+                    if (!look.plain) {
+                        // Leaving a look for the straight draw: its memory goes with it. The
+                        // Slit-scan ring alone is about 28 MB of GPU memory held for nothing.
+                        freeHistory()
+                        freeAux()
+                    }
                     look = VideoLooks.plain
                     drawStraight(ts)
                 }
             } catch (t: Throwable) {
-                fail("render: ${t.message}", t)
+                fail("render: ${t.javaClass.simpleName} ${t.message.orEmpty()}", t)
+                // Only the outputs this frame has not reached yet. Presenting one twice with the
+                // same timestamp hands the encoder a duplicate, which some muxers drop or refuse.
                 runCatching { drawStraight(ts) }
             }
         }
@@ -286,6 +311,7 @@ class VideoFx(
         private fun drawStraight(ts: Long) {
             val prog = oesProgram ?: return
             for ((output, out) in outputs.entries.toList()) {
+                if (out in presented) continue
                 if (!makeCurrent(out.surface)) continue
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
                 GLES30.glViewport(0, 0, out.size.width, out.size.height)
@@ -413,23 +439,49 @@ class VideoFx(
         }
 
         private fun present(out: Out, ts: Long) {
+            presented += out
             // The camera's own clock, not the time of the swap: the encoder lines the audio up
             // against these, and a GPU that is a frame late would otherwise be a mouth out of sync.
             EGLExt.eglPresentationTimeANDROID(display, out.surface, ts)
-            if (!EGL14.eglSwapBuffers(display, out.surface)) {
-                Log.w(TAG, "swap failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            if (EGL14.eglSwapBuffers(display, out.surface)) {
+                out.failures = 0
+                if (out.preview) {
+                    onFrame()
+                    if (!warmStarted) {
+                        warmStarted = true
+                        warmUp()
+                    }
+                }
+                return
+            }
+            val code = EGL14.eglGetError()
+            out.failures += 1
+            if (out.failures == 1 || out.failures % SWAP_FAILURES_TO_FAULT == 0) {
+                Log.w(TAG, "swap failed: 0x${Integer.toHexString(code)} (${out.failures} in a row, ${if (out.preview) "preview" else "recorder"})")
+            }
+            // A lost context never comes back. A preview that refuses a second of frames is a
+            // black viewfinder. Both used to be a log line per frame, for ever.
+            //
+            // **The recorder's surface is allowed to refuse.** When a take stops, the codec can
+            // abandon its input surface before CameraX sends the close for it, and the flush on
+            // this phone takes seconds — so failed swaps into it are the ordinary end of every
+            // clip, and faulting on them would have turned the looks off after each recording.
+            if (code == EGL_CONTEXT_LOST || (out.preview && out.failures >= SWAP_FAILURES_TO_FAULT)) {
+                fail("the preview stopped taking frames (0x${Integer.toHexString(code)})", null)
             }
         }
 
         /* ---------------- targets ---------------- */
 
         private fun allocateWork(w: Int, h: Int) {
+            drainGl()
             deleteTextures(srcTex)
             deleteTextures(fxTex)
             for (i in 0..1) {
                 srcTex[i] = texture2d(w, h, GLES30.GL_LINEAR)
                 fxTex[i] = texture2d(w, h, GLES30.GL_LINEAR)
             }
+            (srcTex + fxTex).forEach { checkTarget(it, 0) }
             workW = w
             workH = h
             fresh = true
@@ -440,7 +492,9 @@ class VideoFx(
 
         private fun allocateAux(w: Int, h: Int) {
             freeAux()
+            drainGl()
             auxTex = texture2d(w, h, GLES30.GL_NEAREST)
+            checkTarget(auxTex, 0)
             auxW = w
             auxH = h
         }
@@ -457,6 +511,7 @@ class VideoFx(
             val (hw, hh) = FxGeometry.historySize(w, h, look.historyEdge)
             if (histTex == 0 || histLayers != layers || histW != hw || histH != hh) {
                 freeHistory()
+                drainGl()
                 val t = IntArray(1)
                 GLES30.glGenTextures(1, t, 0)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, t[0])
@@ -466,6 +521,7 @@ class VideoFx(
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D_ARRAY, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
                 histTex = t[0]
+                checkGl("the history ring (${hw}x$hh x $layers)")
                 histLayers = layers
                 histW = hw
                 histH = hh
@@ -490,6 +546,35 @@ class VideoFx(
             histLayers = 0
             histHead = -1
             histLen = 0
+        }
+
+        /**
+         * Throw if a texture cannot be drawn into. Checked once, when it is made, not per frame.
+         *
+         * An allocation the driver refused, or an incomplete framebuffer, otherwise renders
+         * nothing without complaint — a black or frozen clip with the looks still claiming to be
+         * on. A throw here lands in the frame's catch, which turns the looks off out loud.
+         */
+        private fun checkTarget(tex: Int, level: Int) {
+            checkGl("a render target")
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, tex, level)
+            val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+            check(status == GLES30.GL_FRAMEBUFFER_COMPLETE) { "framebuffer incomplete: 0x${Integer.toHexString(status)}" }
+        }
+
+        /**
+         * Clear errors left by earlier, harmless calls, so [checkGl] blames only the allocation.
+         * A uniform write the driver dislikes sets an error that sits there until someone reads it.
+         */
+        private fun drainGl() {
+            var guard = 0
+            while (GLES30.glGetError() != GLES30.GL_NO_ERROR && guard++ < 16) Unit
+        }
+
+        private fun checkGl(what: String) {
+            val e = GLES30.glGetError()
+            check(e == GLES30.GL_NO_ERROR) { "GL error 0x${Integer.toHexString(e)} making $what" }
         }
 
         private fun renderInto(tex: Int, w: Int, h: Int) {
@@ -541,9 +626,48 @@ class VideoFx(
             if (aUv >= 0) GLES30.glDisableVertexAttribArray(aUv)
         }
 
-        /** Compiled on first use and kept; a failure is kept too, as null, so it is not retried every frame. */
-        private fun program(fragment: String): Program? =
-            programs.getOrPut(fragment) { link(VERTEX, fragment) }
+        /**
+         * Compiled once and kept; a failure is kept too, as null, so it is not retried every frame.
+         *
+         * `containsKey` rather than `getOrPut`, which treats a stored null as missing and would
+         * have relinked a broken shader on every frame.
+         */
+        private fun program(fragment: String): Program? {
+            if (programs.containsKey(fragment)) return programs[fragment]
+            return link(VERTEX, fragment).also { programs[fragment] = it }
+        }
+
+        /**
+         * Compile every look on the dial ahead of the wheel, one per posted task.
+         *
+         * Linking a shader on Adreno can take a few hundred milliseconds, and it happens on the
+         * GL thread. Compiled on first use, that pause landed inside the first frame of the new
+         * look — mid-take, as a visible hitch in the clip. Posted one at a time instead, so camera
+         * frames interleave with the compiles while Video is opening rather than during a recording.
+         */
+        private fun warmUp() {
+            val queue = ArrayDeque<String>()
+            VideoLooks.all.filterNot { it.plain }.forEach { look ->
+                queue += look.glsl
+                look.prePass?.let { queue += it }
+            }
+            // **Chained, not posted all at once.** The handler is first in, first out: eleven
+            // compiles posted together run back to back, ahead of every camera frame behind them,
+            // and the viewfinder waited for the lot. Each compile posts the next when it is done,
+            // so a frame that arrives in between is drawn in between. And it starts only after
+            // the first frame has reached the preview, so it can never delay that frame.
+            fun next() {
+                val source = queue.removeFirstOrNull() ?: return
+                handler.post {
+                    if (released.get() || display == EGL14.EGL_NO_DISPLAY) return@post
+                    program(source)
+                    next()
+                }
+            }
+            next()
+        }
+
+        private var warmStarted = false
 
         private fun link(vertex: String, fragment: String): Program? {
             val vs = compile(GLES30.GL_VERTEX_SHADER, vertex) ?: return null
@@ -675,7 +799,15 @@ class VideoFx(
             outputs.values.forEach { EGL14.eglDestroySurface(display, it.surface) }
             outputs.keys.forEach { runCatching { it.close() } }
             outputs.clear()
-            input?.setOnFrameAvailableListener(null)
+            input?.let {
+                // The input surface too: CameraX's result callback for it is posted to a thread
+                // that is about to quit, so this is the last chance to let it go.
+                it.setOnFrameAvailableListener(null)
+                it.release()
+            }
+            input = null
+            if (inputTex != 0) GLES30.glDeleteTextures(1, intArrayOf(inputTex), 0)
+            inputTex = 0
             deleteTextures(srcTex)
             deleteTextures(fxTex)
             freeAux()
@@ -700,6 +832,11 @@ class VideoFx(
         /** Not in `EGLExt` on every API level's stubs; the value is fixed by the extension. */
         const val EGL_RECORDABLE_ANDROID = 0x3142
 
+        const val EGL_CONTEXT_LOST = 0x300E
+
+        /** About a second of refused frames at 30 fps. */
+        const val SWAP_FAILURES_TO_FAULT = 30
+
         /** A strip of two triangles over the whole target: position xy, then texture uv. */
         val QUAD = floatArrayOf(
             -1f, -1f, 0f, 0f,
@@ -712,7 +849,7 @@ class VideoFx(
 in vec4 aPos;
 in vec2 aUv;
 uniform mat4 uMatrix;
-out vec2 vUv;
+out highp vec2 vUv;
 void main() {
     gl_Position = aPos;
     vUv = (uMatrix * vec4(aUv, 0.0, 1.0)).xy;
@@ -721,7 +858,7 @@ void main() {
 
         const val OES_FRAGMENT = """#version 300 es
 #extension GL_OES_EGL_image_external_essl3 : require
-precision mediump float;
+precision highp float;
 uniform samplerExternalOES uTex;
 in vec2 vUv;
 out vec4 fragColor;
@@ -741,14 +878,18 @@ void main() {
 
         const val OES_FRAGMENT_100 = """
 #extension GL_OES_EGL_image_external : require
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 uniform samplerExternalOES uTex;
 varying vec2 vUv;
 void main() { gl_FragColor = vec4(texture2D(uTex, vUv).rgb, 1.0); }
 """
 
         const val COPY_FRAGMENT = """#version 300 es
-precision mediump float;
+precision highp float;
 uniform sampler2D uTex;
 in vec2 vUv;
 out vec4 fragColor;
