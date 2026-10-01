@@ -744,6 +744,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
             append("mode ").append(prefs.mode.value.name)
             append(", filter ").append(_filter.value.id)
+            if (prefs.mode.value == CaptureMode.Video) {
+                append(", video look ").append(_videoLook.value.id)
+                    .append(if (engine.fxLive.value) " (processor bound)" else " (plain bind)")
+            }
             append(", zone focus ").append(prefs.zoneFocus.value).append('\n')
             append("captures in flight ").append(_inFlight.value)
                 .append(", shooting ").append(_shooting.value)
@@ -1588,11 +1592,19 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            prefs.videoLooks.collect { engine.setVideoLooksWanted(it, prefs.flash.value) }
+            prefs.videoLooks.collect {
+                // The chosen look is kept: the band names a look only while the processor is
+                // bound, so turning the switch off and on again gives the dial back as it was.
+                engine.setVideoLooksWanted(it, prefs.flash.value)
+            }
         }
         viewModelScope.launch {
             engine.fxFault.collect { why ->
-                showNotice("Video looks off: $why")
+                // A real fault: it goes on the chip and into a report, with the reason, rather
+                // than only flashing past as a notice. The chosen look is not cleared — the band
+                // stops naming it on its own, because it follows `fxLive`.
+                recordFault("Video looks turned off", why)
+                showNotice("Video looks off. Recording plain")
                 settleChannel()
             }
         }

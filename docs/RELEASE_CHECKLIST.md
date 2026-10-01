@@ -77,6 +77,10 @@ then these:
       release.
 - [ ] The EIS question: run `adb logcat | grep -E "VideoMorphoEISV3Offline|VideoFx"` across one
       record and stop, and write down whether the Morpho session is still built.
+- [ ] In Video with a look on, half press or tap to focus. The bracket closes and beeps. This
+      checks that the camera's capture results still arrive when one stream feeds both outputs.
+- [ ] In Video with a look on, open the roll, wait ten seconds, and come back. No "Camera
+      restarted" notice, and the fault chip stays at zero.
 - [ ] Settings › Look › **Looks in video** off, record one clip, and turn it back on. Both clips
       play.
 

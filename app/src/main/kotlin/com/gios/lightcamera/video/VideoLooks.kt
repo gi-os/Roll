@@ -95,8 +95,22 @@ vec3 prev(vec2 p) { return texture(uPrev, uvOf(p)).rgb; }
 
 float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float unitPx() { return max(1.0, size.y / 640.0); }
-float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + seed) * 43758.5453); }
-float hash1(float x) { return fract(sin(x * 91.3458 + 17.17) * 47453.5453); }
+// Integer hashes, not the sine trick the photo filters use. `fract(sin(x) * 43758.5)` needs
+// sin of a large argument to be accurate to its last bits, which GLSL ES does not promise and a
+// phone GPU does not deliver: a clip a few minutes long feeds it tens of millions, and the
+// noise turns into stripes or freezes. These read the float's bits, so they are exact at any
+// size. Found in the pre-release break pass.
+uint mixBits(uint h) {
+    h ^= h >> 16u; h *= 0x7feb352du;
+    h ^= h >> 15u; h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    return h;
+}
+float hash1(float x) { return float(mixBits(floatBitsToUint(x)) >> 8u) / 16777216.0; }
+float hash(vec2 p) {
+    uint h = mixBits(floatBitsToUint(p.x) ^ mixBits(floatBitsToUint(p.y) ^ mixBits(floatBitsToUint(seed))));
+    return float(h >> 8u) / 16777216.0;
+}
 
 vec2 upSize() { return (mod(turn, 2.0) == 1.0) ? vec2(size.y, size.x) : size; }
 vec2 toUp(vec2 p) {
