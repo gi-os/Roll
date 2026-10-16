@@ -1239,11 +1239,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             android.app.ApplicationExitInfo.REASON_SIGNALED -> "a signal"
             else -> "a crash"
         }
-        recordFault("Killed last run by $name")
-        // The description is the kernel's own line — the signal number, the ANR subject, the
-        // memory pressure — and it rides the report as detail, which is the whole point: the
-        // deaths that leave no stack now leave *something*.
-        Trouble.record("the app was killed by $name", death.description)
+        // The description is the kernel's own line (the signal number, the ANR subject, the
+        // memory pressure), and it rides the report as the fault's detail through recordFault.
+        // Trouble keeps the first failure it is given, so a second record for the same death
+        // would be dropped. That detail is the whole point: the deaths that leave no stack now
+        // leave *something*.
+        recordFault("Killed last run by $name", death.description)
     }
 
     /** Re-read the roll's coordinates — called when a permission has just been granted. */
